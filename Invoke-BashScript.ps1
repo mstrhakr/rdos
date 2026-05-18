@@ -39,3 +39,9 @@ if ($exitCode -ne 0) {
     Write-Error "$ScriptName failed with exit code $exitCode"
     exit $exitCode
 }
+
+$fixPermsPath = Join-Path $scriptDir "fixPerms.cmd"
+if (Test-Path -LiteralPath $fixPermsPath -PathType Leaf) {
+    Write-Host "Applying Windows file permissions via fixPerms.cmd"
+    & cmd.exe /c "`"$fixPermsPath`""
+}
