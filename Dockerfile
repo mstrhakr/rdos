@@ -41,7 +41,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     echo 'deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' > /etc/apt/sources.list.d/xanmod-release.list && \
     apt-get update && \
     INITRD=No DEBIAN_FRONTEND=noninteractive apt-get install -y linux-xanmod-lts-x64v1 || \
-        echo 'Warning: linux-xanmod-lts-x64v1 not available; d2vm will install a default kernel.'
+        echo 'Warning: linux-xanmod-lts-x64v1 not available; d2vm will install a default kernel.' && \
+    rm -f /etc/apt/sources.list.d/xanmod-release.list
 
 # Optional: Citrix ICA client — drop icaclient.deb next to the Dockerfile to include it.
 COPY icaclient.deb* /tmp/
