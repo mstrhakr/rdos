@@ -66,12 +66,14 @@ run_with_gauge() {
 }
 
 choose_post_action() {
+  local target_disk="${1:-}"
+
   if [[ "$UI_AVAILABLE" != "1" ]] || ! declare -F ui_post_action_menu >/dev/null 2>&1; then
     echo "poweroff"
     return
   fi
 
-  ui_post_action_menu
+  ui_post_action_menu "$target_disk"
 }
 
 IMAGE_ZST="/run/live/medium/uftc/uftc.img.zst"
@@ -190,7 +192,7 @@ if [[ "$MODE" == "auto" ]]; then
   poweroff -f
 fi
 
-post_action="$(choose_post_action || echo poweroff)"
+post_action="$(choose_post_action "$TARGET_DISK" || echo poweroff)"
 case "$post_action" in
   reboot)
     echo "Install complete. Rebooting."

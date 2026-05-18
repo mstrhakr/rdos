@@ -147,13 +147,15 @@ ui_disk_menu() {
   local selected_index=0
   
   while true; do
-    ui_clear
-    ui_print_header
-    printf "\n"
-    ui_section_header "SELECT INSTALL TARGET DISK"
-    printf "\n"
-    ui_warning_message "All data on the selected disk will be permanently erased"
-    printf "\n"
+    {
+      ui_clear
+      ui_print_header
+      printf "\n"
+      ui_section_header "SELECT INSTALL TARGET DISK"
+      printf "\n"
+      ui_warning_message "All data on the selected disk will be permanently erased"
+      printf "\n"
+    } >&2
     
     local idx=0
     for ((i = 0; i < ${#disk_array[@]}; i += 2)); do
@@ -161,14 +163,14 @@ ui_disk_menu() {
       local desc="${disk_array[$((i+1))]}"
       
       if [[ $i -eq $((selected_index * 2)) ]]; then
-        printf "${COLOR_BRIGHT_WHITE}${BG_BLUE} ▶ /dev/${disk}  │  $desc ${COLOR_RESET}\n"
+        printf "${COLOR_BRIGHT_WHITE}${BG_BLUE} ▶ /dev/${disk}  │  $desc ${COLOR_RESET}\n" >&2
       else
-        printf "${COLOR_DIM}   /dev/${disk}  │  $desc${COLOR_RESET}\n"
+        printf "${COLOR_DIM}   /dev/${disk}  │  $desc${COLOR_RESET}\n" >&2
       fi
     done
     
-    printf "\n${COLOR_DIM}Use ↑/↓ to select, Enter to confirm${COLOR_RESET}\n"
-    printf "\nSelection: "
+    printf "\n${COLOR_DIM}Use ↑/↓ to select, Enter to confirm${COLOR_RESET}\n" >&2
+    printf "\nSelection: " >&2
     
     # Simple keyboard navigation (can be enhanced if needed)
     read -r -s -n1 key
@@ -202,23 +204,25 @@ ui_disk_menu() {
 ui_simple_disk_menu() {
   local -n disk_array=$1
   
-  ui_clear
-  ui_print_header
-  printf "\n"
-  ui_section_header "SELECT INSTALL TARGET DISK"
-  printf "\n"
-  ui_warning_message "All data on the selected disk will be permanently erased"
-  printf "\n"
+  {
+    ui_clear
+    ui_print_header
+    printf "\n"
+    ui_section_header "SELECT INSTALL TARGET DISK"
+    printf "\n"
+    ui_warning_message "All data on the selected disk will be permanently erased"
+    printf "\n"
+  } >&2
   
   local idx=1
   for ((i = 0; i < ${#disk_array[@]}; i += 2)); do
     local disk="${disk_array[$i]}"
     local desc="${disk_array[$((i+1))]}"
-    printf "  ${COLOR_BRIGHT_WHITE}[$idx]${COLOR_RESET}  /dev/${disk}  │  $desc\n"
+    printf "  ${COLOR_BRIGHT_WHITE}[$idx]${COLOR_RESET}  /dev/${disk}  │  $desc\n" >&2
     ((idx++))
   done
   
-  printf "\n${COLOR_BRIGHT_WHITE}Enter disk number [1-$((${#disk_array[@]} / 2))]: ${COLOR_RESET}"
+  printf "\n${COLOR_BRIGHT_WHITE}Enter disk number [1-$((${#disk_array[@]} / 2))]: ${COLOR_RESET}" >&2
   read -r choice
   
   if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#disk_array[@]} / 2 )); then
@@ -234,6 +238,7 @@ ui_simple_disk_menu() {
 ui_progress_gauge() {
   local target_disk="$1"
   local image_path="$2"
+  local log_file="${LOG_FILE:-/var/log/uftc-installer.log}"
   
   ui_clear
   ui_print_header
@@ -243,26 +248,19 @@ ui_progress_gauge() {
   ui_info_message "Writing image to /dev/$target_disk"
   printf "\n"
   
-  # Create named pipe for progress
-  local progress_pipe="/tmp/uftc_progress_$$"
-  mkfifo "$progress_pipe" 2>/dev/null || true
-  
-  # Start the dd command in background
+  # Start the write operation in background.
   (
-    zstd -d -c "$image_path" | dd of="/dev/$target_disk" bs=16M conv=fsync 2>&1 &
+    zstd -d -c "$image_path" 2>>"$log_file" | dd of="/dev/$target_disk" bs=16M conv=fsync status=none 2>>"$log_file" &
     local dd_pid=$!
-    
-    # Wait for completion
+
     wait $dd_pid
-    echo "100" > "$progress_pipe"
   ) &
   
   local bg_pid=$!
   
-  # Progress display loop
+  # Keep animating until write process exits.
   local pct=5
-  local dots=""
-  while (( pct < 100 )); do
+  while kill -0 "$bg_pid" 2>/dev/null; do
     printf "\r  "
     printf "${COLOR_BRIGHT_GREEN}"
     for ((i = 0; i < pct / 5; i++)); do
@@ -281,7 +279,11 @@ ui_progress_gauge() {
     fi
   done
   
-  wait $bg_pid 2>/dev/null || true
+  if ! wait "$bg_pid"; then
+    printf "\n\n"
+    ui_error_message "Install failed while writing image. See $log_file"
+    return 1
+  fi
   
   printf "\r  "
   printf "${COLOR_BRIGHT_GREEN}"
@@ -289,8 +291,6 @@ ui_progress_gauge() {
     printf "█"
   done
   printf "${COLOR_RESET}  100%%\n"
-  
-  rm -f "$progress_pipe" 2>/dev/null || true
   
   printf "\n"
   ui_success_message "Image written successfully"
@@ -301,20 +301,24 @@ ui_progress_gauge() {
 
 # Menu for post-install action
 ui_post_action_menu() {
-  ui_clear
-  ui_print_header
-  printf "\n"
-  ui_section_header "INSTALLATION COMPLETE"
-  printf "\n"
-  ui_success_message "UFTC has been successfully installed to /dev/\$1"
-  printf "\n"
-  printf "${COLOR_BRIGHT_WHITE}What would you like to do next?${COLOR_RESET}\n\n"
+  local target_disk="$1"
+
+  {
+    ui_clear
+    ui_print_header
+    printf "\n"
+    ui_section_header "INSTALLATION COMPLETE"
+    printf "\n"
+    ui_success_message "UFTC has been successfully installed to /dev/$target_disk"
+    printf "\n"
+    printf "${COLOR_BRIGHT_WHITE}What would you like to do next?${COLOR_RESET}\n\n"
+  } >&2
   
-  printf "  ${COLOR_BRIGHT_WHITE}[1]${COLOR_RESET}  Power off (recommended for USB removal)\n"
-  printf "  ${COLOR_BRIGHT_WHITE}[2]${COLOR_RESET}  Reboot immediately\n"
-  printf "  ${COLOR_BRIGHT_WHITE}[3]${COLOR_RESET}  Open shell for troubleshooting\n"
+  printf "  ${COLOR_BRIGHT_WHITE}[1]${COLOR_RESET}  Power off (recommended for USB removal)\n" >&2
+  printf "  ${COLOR_BRIGHT_WHITE}[2]${COLOR_RESET}  Reboot immediately\n" >&2
+  printf "  ${COLOR_BRIGHT_WHITE}[3]${COLOR_RESET}  Open shell for troubleshooting\n" >&2
   
-  printf "\n${COLOR_BRIGHT_WHITE}Select [1-3]: ${COLOR_RESET}"
+  printf "\n${COLOR_BRIGHT_WHITE}Select [1-3]: ${COLOR_RESET}" >&2
   read -r choice
   
   case "$choice" in
