@@ -30,9 +30,32 @@ To succesfully build the image this project must be git cloned with a Linux syst
 
 Image building requires docker and can be done inside of WSL2 if desired.
 
+On Windows, line endings are a common source of shell-script failures. This repository includes `.gitattributes` to enforce LF endings for Linux-consumed files.
+
+If you are approaching this repo as a developer, see [BUILDING.md](BUILDING.md) for a step by step explanation of what gets built and how to package a basic installer ISO.
+
 ```
 ./build.sh
 ```
+
+To build a super basic installer ISO (auto install + power off):
+
+```
+./build-installer-iso.sh
+```
+
+Installer ISO dependencies:
+
+```bash
+# Debian/Ubuntu
+sudo apt-get update
+sudo apt-get install -y xorriso qemu-utils zstd curl
+
+# Fedora
+sudo dnf install -y xorriso qemu-img zstd curl
+```
+
+This installer ISO boots, writes UFTC to the first non-removable disk that is not the USB boot media, then powers off so you can remove the flash drive.
 
 grub as the bootloader unlocks a few things most importantly uefi support, you also get a seperate fat32 boot partition where you can place the config files when provisioning.
 Boot partition is a sizable 4GB to reduce the risk of running out of space for the kernels, with a total size of under 16GB this should fit on a 16GB USB stick if you wish to use a USB Stick for customization and capture.
@@ -43,21 +66,31 @@ Important: The modern kernel could not be included in the build process, boot yo
 
 ### Installation from the ISO
 
-For easy installation an ISO based on clonezilla is available, this iso can be burned to a CD, flashed to USB with Rufus or be loaded from a Ventoy/Easy2boot USB stick.
+You can build an ISO from your local `uftc.vhd` using `./build-installer-iso.sh`.
 
-While a full copy of Clonezilla is bundled that allows you to capture your own images the recommended way of installing the official image is by using the first option in the boot menu. This will automatically use the recommended CloneZilla options.
+The generated `uftc-installer.iso` is designed to be minimal: it boots directly into unattended install mode, restores UFTC to the first non-removable target disk (excluding the boot USB), and powers off when done.
+
+If you saw a `Permission denied` error while editing extracted boot files during ISO build, update to the latest `build-installer-iso.sh` from this repo (that behavior is handled in the current script).
+
+Flash it to USB with Rufus, Ventoy, or your preferred ISO writer, boot the target system from USB, wait for poweroff, then remove the flash drive.
+
+Safety note: this installer is intentionally simple and destructive. It will erase the selected target disk without an interactive confirmation.
+
+References used for this flow:
+- Clonezilla Live docs: https://clonezilla.org/live-doc.php
+- Clonezilla advanced boot parameters (`ocs_live_run`, batch mode): https://clonezilla.org/show-live-doc-content.php?topic=clonezilla-live/doc/99_Misc
 
 ### Network deployment using Clonezilla on the ISO
 
 Because a full copy of Clonezilla is bundled on the disk you can use this to facilitate PXE deployments over the network using a tempoary private bittorrent server. A full copy of Clonezilla is normally not present on clonezilla made disks, because of this we will need to apply a small workaround to be able to use this option.
 
-##### Requirements:
+##### Requirements
 
 - The PXE server should be one of your target machines with the smallest amount of disk space and an identical type of drive.
 - This source machine should be correctly installed and configured as desired without disabling dynamic_hostname.
 - Every PXE booting machine will be wiped, ensure no machines that are not part of the deployment will PXE boot during this time.
 
-##### Instructions:
+##### Instructions
 
 0. Install and configure the source machine with UFTC.
 1. Load CloneZilla from the installation disk using the Start Clonezilla option.
