@@ -1,0 +1,182 @@
+#!/bin/bash
+set -euo pipefail
+
+TCCONFIG_DEST="${HOME}/tcconfig"
+OVERRIDE_DEST="${HOME}/tcconfig_override"
+VERSION="$(< /tcversion)"
+DEFAULT_ADMINPASS="uftc"
+
+# Find mountpoints of USB-backed block devices, excluding /boot and /
+find_usb_mounts() {
+    lsblk -d -o NAME,TRAN -n 2>/dev/null | while read -r name tran; do
+        [[ "$tran" == "usb" ]] || continue
+        lsblk -o MOUNTPOINT -n "/dev/$name" 2>/dev/null | while read -r mp; do
+            [[ -n "$mp" && "$mp" != "/boot" && "$mp" != "/" ]] || continue
+            printf '%s\n' "$mp"
+        done || true
+    done
+}
+
+# Returns 0 if any USB drive has importable files not already applied, 1 otherwise.
+# Used by thinclient --scan to decide whether to show the wizard.
+scan_mode() {
+    local mnt
+    while IFS= read -r mnt; do
+        if [[ -f "$mnt/tcconfig" ]]; then
+            # Don't re-offer if the drive content is identical to what's already installed
+            if [[ -f "$TCCONFIG_DEST" ]] && cmp -s "$mnt/tcconfig" "$TCCONFIG_DEST"; then
+                :
+            else
+                return 0
+            fi
+        fi
+        [[ -f "$mnt/wpa_supplicant.conf" || -f "$mnt/tcconfig_override" ]] && return 0
+    done < <(find_usb_mounts)
+    return 1
+}
+
+# Prompt for admin password if an existing config has one set.
+# Returns 0 if access granted (no config, default pass, or correct entry).
+check_adminpass() {
+    if [[ ! -f "$TCCONFIG_DEST" ]]; then
+        return 0
+    fi
+
+    local stored_pass="$DEFAULT_ADMINPASS"
+    local key value
+    while IFS='=' read -r key value || [[ -n "$key" ]]; do
+        [[ -z "$key" || "$key" =~ ^# ]] && continue
+        [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || continue
+        value="${value#\"}"
+        value="${value%\"}"
+        if [[ "$key" == "adminpass" && -n "$value" ]]; then
+            stored_pass="$value"
+            break
+        fi
+    done < "$TCCONFIG_DEST"
+
+    local output entered_pass
+    output=$(yad --form --center --width=480 --title="Import Config | $VERSION" \
+        --text="Enter the admin password to import a config from USB." \
+        --separator=$'\x1F' \
+        --button="Cancel":1 --button="Unlock":0 \
+        --field="Admin Password":h "") || return 1
+
+    entered_pass="$(awk -F'\x1F' '{print $1}' <<<"$output")"
+    if [[ "$entered_pass" != "$stored_pass" ]]; then
+        yad --error --center --title="Import Config" \
+            --text="Incorrect admin password." 2>/dev/null || true
+        return 1
+    fi
+    return 0
+}
+
+# Build a human-readable preview of a tcconfig, masking sensitive values
+preview_tcconfig() {
+    local path="$1"
+    local preview=""
+    local key value
+    while IFS='=' read -r key value || [[ -n "$key" ]]; do
+        [[ -z "$key" || "$key" =~ ^# ]] && continue
+        [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || continue
+        value="${value#\"}"
+        value="${value%\"}"
+        case "$key" in
+            adminpass|wg_private_key|wg_preshared_key) value="(hidden)" ;;
+        esac
+        preview+="  $key = $value\n"
+    done < "$path"
+    printf '%s' "$preview"
+}
+
+import_from_drive() {
+    local mnt="$1"
+    local import_tc=0 import_wpa=0 import_override=0
+    local found_items="" preview_text=""
+
+    if [[ -f "$mnt/tcconfig" ]];            then import_tc=1;       found_items+="  • tcconfig (main configuration)\n"; fi
+    if [[ -f "$mnt/tcconfig_override" ]];   then import_override=1; found_items+="  • tcconfig_override (local overrides)\n"; fi
+    if [[ -f "$mnt/wpa_supplicant.conf" ]]; then import_wpa=1;      found_items+="  • wpa_supplicant.conf (WiFi credentials)\n"; fi
+
+    if ((import_tc)); then
+        preview_text="\nConfig preview:\n$(preview_tcconfig "$mnt/tcconfig")\n"
+    fi
+
+    yad --question --center --width=640 --title="Import Config | $VERSION" \
+        --button="Cancel":1 --button="Import":0 \
+        --text="Found the following files on the USB drive at ${mnt}:\n\n${found_items}${preview_text}\nImport these files?" 2>/dev/null || return 1
+
+    if ((import_tc)); then
+        cp -- "$mnt/tcconfig" "$TCCONFIG_DEST"
+        chmod 600 "$TCCONFIG_DEST"
+    fi
+
+    if ((import_override)); then
+        cp -- "$mnt/tcconfig_override" "$OVERRIDE_DEST"
+        chmod 600 "$OVERRIDE_DEST"
+    fi
+
+    if ((import_wpa)); then
+        if ! sudo -n /usr/bin/tc-configure-wifi --from-usb-drive "$mnt/wpa_supplicant.conf" 2>/dev/null; then
+            yad --warning --center --title="Import Config" \
+                --text="WiFi credentials could not be imported.\nYou can configure WiFi manually from the network settings." 2>/dev/null || true
+        fi
+    fi
+
+    yad --info --center --title="Import Config | $VERSION" \
+        --text="Configuration imported successfully.\nRemove the USB drive — the new settings will take effect immediately." \
+        --button="OK":0 2>/dev/null || true
+
+    return 0
+}
+
+interactive_mode() {
+    local -a drives=()
+    local mnt
+
+    while IFS= read -r mnt; do
+        if [[ -f "$mnt/tcconfig" || -f "$mnt/wpa_supplicant.conf" || -f "$mnt/tcconfig_override" ]]; then
+            drives+=("$mnt")
+        fi
+    done < <(find_usb_mounts)
+
+    if [[ ${#drives[@]} -eq 0 ]]; then
+        yad --info --center --title="Import Config | $VERSION" \
+            --text="No USB drives with configuration files were found.\n\nInsert a USB drive containing a 'tcconfig' or 'wpa_supplicant.conf' file and try again." \
+            --button="OK":0 2>/dev/null || true
+        return 1
+    fi
+
+    check_adminpass || return 1
+
+    local selected_drive
+    if [[ ${#drives[@]} -eq 1 ]]; then
+        selected_drive="${drives[0]}"
+    else
+        local yad_list=""
+        for d in "${drives[@]}"; do yad_list+="$d\n"; done
+        selected_drive=$(printf '%b' "$yad_list" | sed '/^$/d' | \
+            yad --list --center --title="Import Config | $VERSION" \
+                --text="Multiple USB drives found. Select one to import from:" \
+                --column="Mountpoint" --width=420 --height=260 \
+                --button="Cancel":1 --button="Select":0 2>/dev/null) || return 1
+        # yad --list appends a trailing pipe character
+        selected_drive="${selected_drive%|}"
+        selected_drive="${selected_drive%%$'\n'*}"
+    fi
+
+    import_from_drive "$selected_drive"
+}
+
+main() {
+    case "${1:-}" in
+        --scan)
+            scan_mode
+            ;;
+        --interactive|*)
+            interactive_mode
+            ;;
+    esac
+}
+
+main "$@"

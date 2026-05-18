@@ -444,7 +444,7 @@ edit_tools_section() {
         set +e
         yad --info --center --width=620 --title="Tools | $VERSION" \
             --text="Run common admin tools from here instead of using hidden password shortcuts." \
-            --button="Back":2 --button="Close":1 --button="Terminal":10 --button="Ping/Trace":11 --button="Network Info":12 --button="WiFi Wizard":13 >/dev/null
+            --button="Back":2 --button="Close":1 --button="Terminal":10 --button="Ping/Trace":11 --button="Network Info":12 --button="WiFi Wizard":13 --button="Import USB Config":14 >/dev/null
         status=$?
         set -e
 
@@ -464,6 +464,9 @@ edit_tools_section() {
                 else
                     show_warning "No wireless adapter was detected on this device."
                 fi
+                ;;
+            14)
+                /usr/bin/tc-import-usb --interactive || true
                 ;;
             2)
                 return 2

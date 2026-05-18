@@ -87,6 +87,49 @@ validate_boot_wpa_source() {
     return 0
 }
 
+validate_usb_wpa_source() {
+    local source_file="$1"
+    local resolved
+
+    resolved="$(canonical_path "$source_file")"
+
+    if [ "$(basename "$resolved")" != "wpa_supplicant.conf" ]; then
+        echo "Source file must be named wpa_supplicant.conf" >&2
+        return 1
+    fi
+
+    if [ ! -f "$resolved" ]; then
+        echo "WiFi source file does not exist: $resolved" >&2
+        return 1
+    fi
+
+    # Verify the file lives on a USB-backed mountpoint
+    local dev disk tran
+    dev=$(lsblk -o NAME,MOUNTPOINT -n -p 2>/dev/null | \
+        awk -v target="$(dirname "$resolved")" '
+            $2 != "" && index(target, $2) == 1 && length($2) > length(best) {
+                best = $2; dev = $1
+            }
+            END { print dev }
+        ')
+
+    if [ -z "$dev" ]; then
+        echo "Could not determine device for path: $resolved" >&2
+        return 1
+    fi
+
+    disk=$(lsblk -n -o PKNAME "$dev" 2>/dev/null | head -1)
+    [ -z "$disk" ] && disk="$(basename "$dev")"
+    tran=$(lsblk -d -n -o TRAN "/dev/$disk" 2>/dev/null | head -1)
+
+    if [ "$tran" != "usb" ]; then
+        echo "Source file is not on a USB device (transport: ${tran:-unknown})" >&2
+        return 1
+    fi
+
+    return 0
+}
+
 disable_powersave() {
     local device
     local iface
@@ -179,6 +222,12 @@ main() {
             validate_boot_wpa_source "$2"
             iface="$(find_wireless_interface)"
             install_config "$iface" "$2" "$move_source"
+            ;;
+        --from-usb-drive)
+            [ "$#" -ge 2 ] || exit 1
+            validate_usb_wpa_source "$2"
+            iface="$(find_wireless_interface)"
+            install_config "$iface" "$2" "false"
             ;;
         --configure)
             [ "$#" -eq 4 ] || exit 1

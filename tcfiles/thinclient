@@ -54,6 +54,15 @@ if [[ $hostname == "thinclient" || -f ~/dynamic_hostname ]]; then
     fi
 fi
 
+# Check for a USB drive containing config files and offer to import them.
+# Runs before config is loaded so any imported config takes effect this session.
+if /usr/bin/tc-import-usb --scan 2>/dev/null; then
+    if /usr/bin/tc-import-usb --interactive; then
+        $0 "$@" &
+        exit 0
+    fi
+fi
+
 # This module is to load configs in a safe manner, if someone malicious were to add commands to the bash config files they will not be executed
 load_config ()
 {

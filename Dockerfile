@@ -72,6 +72,7 @@ RUN --mount=type=bind,source=.,target=/build-context,ro \
 
 COPY tcfiles/thinclient /usr/bin/thinclient
 COPY tcfiles/tc-settings /usr/bin/tc-settings
+COPY tcfiles/tc-import-usb /usr/bin/tc-import-usb
 COPY tcfiles/tc-configure-network /usr/bin/tc-configure-network
 COPY tcfiles/tc-configure-wifi /usr/bin/tc-configure-wifi
 COPY tcfiles/tc-scan-wifi /usr/bin/tc-scan-wifi
@@ -84,6 +85,7 @@ RUN chown root:root /etc/sudoers.d/099_tc && chmod 440 /etc/sudoers.d/099_tc
 RUN chmod +x \
     /usr/bin/thinclient \
     /usr/bin/tc-settings \
+    /usr/bin/tc-import-usb \
     /usr/bin/tc-configure-network \
     /usr/bin/tc-configure-wifi \
     /usr/bin/tc-scan-wifi \
