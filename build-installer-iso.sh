@@ -208,7 +208,7 @@ fi
 
 EFI_BOOT_REL=""
 while IFS= read -r efi_file; do
-  EFI_BOOT_REL="${efi_file#$ISO_ROOT/}"
+  EFI_BOOT_REL="${efi_file#"$ISO_ROOT"/}"
   break
 done < <(find "$ISO_ROOT" -type f \( -iname 'bootx64.efi' -o -iname 'BOOTx64.EFI' \))
 
