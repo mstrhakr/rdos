@@ -239,7 +239,7 @@ fi
 
 if [ "$password" = "ping" ];then
     if [[ "$server" == *"$PROTOCOL_DETECT"* ]]; then
-        mtr $(cat ~/destination.rdp | grep "full address:s:" | sed 's/full address:s://g' | sed 's/:.*//g' | tr -d '\r' | tr -d '\n')
+        mtr "$(grep "full address:s:" ~/destination.rdp | sed 's/full address:s://g' | sed 's/:.*//g' | tr -d '\r' | tr -d '\n')"
     else
         mtr $( echo "$server" | sed 's/:.*//g' )
     fi
