@@ -15,11 +15,11 @@ if [[ $1 = "gui" ]]; then
     )
 
     if [[ "$MENU" = "Run" ]] ;then
-        xterm -e $0
+        xterm -e "$0"
     elif [[ "$MENU" = "Enable" ]] ;then
-        xterm -e $0 enable
+        xterm -e "$0" enable
     elif [[ "$MENU" = "Disable" ]] ;then
-        xterm -e $0 disable
+        xterm -e "$0" disable
     fi
     exit 0
 fi
@@ -33,7 +33,7 @@ fi
 if [[ $1 = "enable" ]]; then
 if [[ ! -f /usr/bin/auto-maintenance ]]; then
     echo auto-maintenance is not installed in the system, copying self to /usr/bin
-    cp $0 /usr/bin/auto-maintenance
+    cp "$0" /usr/bin/auto-maintenance
 fi
 echo '[Unit]
 Description=Automatic Maintenance
@@ -49,7 +49,7 @@ WantedBy=multi-user.target' > /etc/systemd/system/auto-maintenance.service
 systemctl enable auto-maintenance
 echo Automatic Maintenance will be enabled upon reboot.
 echo Use systemctl start auto-maintenance to start the service immediately.
-read -p "Press a key to continue"
+read -r -p "Press a key to continue"
 exit 0
 fi
 
@@ -58,7 +58,7 @@ systemctl stop auto-maintenance
 systemctl disable auto-maintenance
 rm /etc/systemd/system/auto-maintenance.service
 echo Automatic Maintenance is now disabled.
-read -p "Press a key to continue"
+read -r -p "Press a key to continue"
 exit 0
 fi
 
@@ -73,8 +73,8 @@ fi
 # NOTE: Default is to keep 2 more, user overrides with --keep N
 KEEP=2
 # NOTE: Any unrecognized option will be passed straight through to apt
-APT_OPTS=
-while [ ! -z "$1" ]; do
+APT_OPTS=()
+while [ -n "$1" ]; do
 	case "$1" in
 		--keep)
 			# User specified the number of kernels to keep
@@ -82,17 +82,24 @@ while [ ! -z "$1" ]; do
 			shift 2
 		;;
 		*)
-			APT_OPTS="$APT_OPTS $1"
+      APT_OPTS+=("$1")
 			shift 1
 		;;
 	esac
 done
 
 # Build our list of kernel packages to purge
-CANDIDATES=$(ls -tr /boot/vmlinuz-* | head -n -${KEEP} | grep -v "$(uname -r)$" | cut -d- -f2- | awk '{print "linux-image-" $0 " linux-headers-" $0}' )
-for c in $CANDIDATES; do
-	dpkg-query -s "$c" >/dev/null 2>&1 && PURGE="$PURGE $c"
-done
+PURGE=()
+while IFS= read -r c; do
+  dpkg-query -s "$c" >/dev/null 2>&1 && PURGE+=("$c")
+done < <(
+  find /boot -maxdepth 1 -type f -name 'vmlinuz-*' -printf '%f\n' |
+    sed 's/^vmlinuz-//' |
+    sort -V |
+    head -n "-$KEEP" |
+    grep -v "$(uname -r)$" |
+    awk '{print "linux-image-" $0 "\nlinux-headers-" $0}'
+)
 
 #Ensure we have the latest list of packages
 apt update
@@ -106,8 +113,8 @@ DEBIAN_FRONTEND=noninteractive \
     -y \
   install -f
 
-if [ ! -z "$PURGE" ]; then
-	apt $APT_OPTS remove -yq --purge $PURGE
+if [ "${#PURGE[@]}" -gt 0 ]; then
+  apt "${APT_OPTS[@]}" remove -yq --purge "${PURGE[@]}"
 fi
 
 #Remove unrequired packages
