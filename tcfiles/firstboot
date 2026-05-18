@@ -2,6 +2,8 @@
 set -euo pipefail
 
 XANMOD_PACKAGE="linux-xanmod-lts-x64v1"
+XANMOD_KEY_SHA256="ed26eb39330fd296cd037b8229adccea0197b21989ec0a1ad4f4f74f5a41c7a7"
+XANMOD_KEY_FINGERPRINT="D38D7D1DA1349567ADED882D86F7D09EE734E623"
 
 package_installed() {
 	dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q '^install ok installed$'
@@ -22,7 +24,14 @@ if package_installed "$XANMOD_PACKAGE"; then
 	echo "$XANMOD_PACKAGE is already present in the image, skipping package install."
 else
 	install -d -m 755 /etc/apt/keyrings
-	wget -qO - https://dl.xanmod.org/archive.key | gpg --dearmor -o /etc/apt/keyrings/xanmod-archive-keyring.gpg
+	wget -qO /tmp/xanmod-archive.key https://dl.xanmod.org/archive.key
+	echo "$XANMOD_KEY_SHA256  /tmp/xanmod-archive.key" | sha256sum -c -
+	if [[ "$(gpg --show-keys --with-colons /tmp/xanmod-archive.key | awk -F: '$1=="fpr"{print $10; exit}')" != "$XANMOD_KEY_FINGERPRINT" ]]; then
+		echo "Unexpected XanMod key fingerprint." >&2
+		exit 1
+	fi
+	gpg --dearmor -o /etc/apt/keyrings/xanmod-archive-keyring.gpg /tmp/xanmod-archive.key
+	rm -f /tmp/xanmod-archive.key
 	echo 'deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' > /etc/apt/sources.list.d/xanmod-release.list
 	apt-get update
 

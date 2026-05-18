@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1
 FROM debian:trixie
 
+ARG XANMOD_ARCHIVE_KEY_SHA256=ed26eb39330fd296cd037b8229adccea0197b21989ec0a1ad4f4f74f5a41c7a7
+ARG XANMOD_ARCHIVE_KEY_FINGERPRINT=D38D7D1DA1349567ADED882D86F7D09EE734E623
+
 COPY tcfiles/debian.sources /etc/apt/sources.list.d/debian.sources
 
 # Stable system packages — this layer is only invalidated when the list below changes.
@@ -37,7 +40,11 @@ RUN printf '%s\n' 'blacklist pcspkr' 'install pcspkr /bin/false' > /etc/modprobe
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     install -d -m 755 /etc/apt/keyrings && \
-    wget -qO - https://dl.xanmod.org/archive.key | gpg --dearmor -o /etc/apt/keyrings/xanmod-archive-keyring.gpg && \
+    wget -qO /tmp/xanmod-archive.key https://dl.xanmod.org/archive.key && \
+    echo "$XANMOD_ARCHIVE_KEY_SHA256  /tmp/xanmod-archive.key" | sha256sum -c - && \
+    test "$(gpg --show-keys --with-colons /tmp/xanmod-archive.key | awk -F: '$1==\"fpr\"{print $10; exit}')" = "$XANMOD_ARCHIVE_KEY_FINGERPRINT" && \
+    gpg --dearmor -o /etc/apt/keyrings/xanmod-archive-keyring.gpg /tmp/xanmod-archive.key && \
+    rm -f /tmp/xanmod-archive.key && \
     echo 'deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' > /etc/apt/sources.list.d/xanmod-release.list && \
     apt-get update && \
     INITRD=No DEBIAN_FRONTEND=noninteractive apt-get install -y linux-xanmod-lts-x64v1 || \

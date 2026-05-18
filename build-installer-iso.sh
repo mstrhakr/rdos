@@ -9,6 +9,8 @@ cd "$SCRIPT_DIR"
 CLONEZILLA_VERSION="${CLONEZILLA_VERSION:-3.3.1-35}"
 CLONEZILLA_ISO_URL_DEFAULT="https://downloads.sourceforge.net/project/clonezilla/clonezilla_live_stable/${CLONEZILLA_VERSION}/clonezilla-live-${CLONEZILLA_VERSION}-amd64.iso"
 CLONEZILLA_ISO_URL="${CLONEZILLA_ISO_URL:-$CLONEZILLA_ISO_URL_DEFAULT}"
+CLONEZILLA_ISO_SHA256="${CLONEZILLA_ISO_SHA256:-}"
+CLONEZILLA_ALLOW_UNVERIFIED="${CLONEZILLA_ALLOW_UNVERIFIED:-0}"
 INPUT_VHD="${INPUT_VHD:-uftc.vhd}"
 OUTPUT_ISO="${OUTPUT_ISO:-uftc-installer.iso}"
 DEFAULT_WORKDIR=".installer-work"
@@ -49,6 +51,8 @@ Options:
       --base-iso-cache PATH        Persistent Clonezilla ISO cache file (default: .installer-cache/clonezilla-base.iso)
       --clonezilla-version VER     Clonezilla release version (default: 3.3.1-35)
       --clonezilla-iso-url URL     Base Clonezilla ISO URL
+      --clonezilla-iso-sha256 HEX  Expected SHA256 for the base Clonezilla ISO
+      --allow-unverified-downloads Permit unsigned/unchecked base ISO download
       --zstd-level N               Compression level 1-19 (default: 9)
       --auto-install-default       Make unattended installer the default boot entry
   -h, --help                       Show this help message
@@ -146,6 +150,18 @@ while [[ $# -gt 0 ]]; do
       CLONEZILLA_ISO_URL="https://downloads.sourceforge.net/project/clonezilla/clonezilla_live_stable/${CLONEZILLA_VERSION}/clonezilla-live-${CLONEZILLA_VERSION}-amd64.iso"
       shift 2
       ;;
+    --clonezilla-iso-sha256)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      CLONEZILLA_ISO_SHA256="$2"
+      shift 2
+      ;;
+    --allow-unverified-downloads)
+      CLONEZILLA_ALLOW_UNVERIFIED=1
+      shift
+      ;;
     --zstd-level)
       if [[ $# -lt 2 ]]; then
         echo "Missing value for $1" >&2
@@ -186,6 +202,25 @@ need_cmd findmnt
 
 log_phase() {
   printf '\n[%s] %s\n' "$(date +'%H:%M:%S')" "$1"
+}
+
+verify_clonezilla_iso() {
+  local file_path="$1"
+
+  if [[ -n "$CLONEZILLA_ISO_SHA256" ]]; then
+    echo "$CLONEZILLA_ISO_SHA256  $file_path" | sha256sum -c -
+    return 0
+  fi
+
+  if [[ "$CLONEZILLA_ALLOW_UNVERIFIED" == "1" ]]; then
+    echo "Warning: base ISO checksum verification is disabled." >&2
+    return 0
+  fi
+
+  echo "Refusing unverified base ISO download/cache." >&2
+  echo "Set CLONEZILLA_ISO_SHA256 or pass --clonezilla-iso-sha256." >&2
+  echo "To bypass explicitly, pass --allow-unverified-downloads." >&2
+  return 1
 }
 
 if [[ ! "$ZSTD_LEVEL" =~ ^[0-9]+$ ]] || (( ZSTD_LEVEL < 1 || ZSTD_LEVEL > 19 )); then
@@ -260,6 +295,8 @@ if [[ "$need_download" == "1" ]]; then
   log_phase "Downloading Clonezilla Live base ISO"
   curl -L "$CLONEZILLA_ISO_URL" -o "$BASE_ISO"
 fi
+
+verify_clonezilla_iso "$BASE_ISO"
 
 # Quick integrity sanity check: ensure the largest live payload exists in the ISO.
 if ! xorriso -indev "$BASE_ISO" -find /live/filesystem.squashfs -exec report_lba >/dev/null 2>&1; then
