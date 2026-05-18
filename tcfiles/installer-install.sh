@@ -145,6 +145,27 @@ pick_target_disk() {
     return 1
   fi
 
+  if (( ${#options[@]} == 2 )); then
+    local only_disk="${options[0]}"
+    local only_desc="${options[1]}"
+
+    if declare -F ui_clear >/dev/null 2>&1 && declare -F ui_print_header >/dev/null 2>&1; then
+      ui_clear
+      ui_print_header
+      printf "\n"
+      ui_section_header "INSTALL TARGET"
+      printf "\n"
+      ui_info_message "Only one eligible install target was detected."
+      printf "\n"
+      printf "  /dev/%s - %s\n" "$only_disk" "$only_desc"
+      printf "\n${COLOR_DIM}Press Enter to continue...${COLOR_RESET}"
+      read -r
+    fi
+
+    echo "$only_disk"
+    return 0
+  fi
+
   ui_simple_disk_menu options
 }
 
