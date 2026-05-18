@@ -239,6 +239,63 @@ ui_progress_gauge() {
   local target_disk="$1"
   local image_path="$2"
   local log_file="${LOG_FILE:-/var/log/uftc-installer.log}"
+  local dev="/dev/$target_disk"
+  local expected_bytes=""
+  local start_sectors="0"
+
+  # Convert size+unit (for example: 14.0 GiB) to bytes.
+  _size_to_bytes() {
+    local value="$1"
+    local unit="$2"
+    awk -v v="$value" -v u="$unit" '
+      BEGIN {
+        m = 1
+        if (u == "B" || u == "bytes") m = 1
+        else if (u == "KB") m = 1000
+        else if (u == "MB") m = 1000 * 1000
+        else if (u == "GB") m = 1000 * 1000 * 1000
+        else if (u == "TB") m = 1000 * 1000 * 1000 * 1000
+        else if (u == "KiB") m = 1024
+        else if (u == "MiB") m = 1024 * 1024
+        else if (u == "GiB") m = 1024 * 1024 * 1024
+        else if (u == "TiB") m = 1024 * 1024 * 1024 * 1024
+
+        printf "%.0f\n", (v * m)
+      }
+    '
+  }
+
+  # Try to read uncompressed image size from zstd metadata.
+  _detect_expected_bytes() {
+    local line value unit
+    line="$(zstd --list -v "$image_path" 2>>"$log_file" | awk '/^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]/ {print; exit}')"
+    if [[ -n "$line" ]]; then
+      set -- $line
+      if (( $# >= 6 )); then
+        value="$5"
+        unit="$6"
+        if [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+          _size_to_bytes "$value" "$unit"
+          return 0
+        fi
+      fi
+    fi
+
+    # Fallback: UFTC images are built as fixed 14 GiB VHDs.
+    _size_to_bytes "14" "GiB"
+  }
+
+  _read_written_sectors() {
+    local stat_path="/sys/class/block/$target_disk/stat"
+    if [[ -r "$stat_path" ]]; then
+      awk '{print $7}' "$stat_path" 2>/dev/null || echo 0
+    else
+      echo 0
+    fi
+  }
+
+  expected_bytes="$(_detect_expected_bytes)"
+  start_sectors="$(_read_written_sectors)"
   
   ui_clear
   ui_print_header
@@ -249,28 +306,57 @@ ui_progress_gauge() {
   printf "\n"
   
   # Start the write operation in the background and track one process.
-  zstd -d -c "$image_path" 2>>"$log_file" | dd of="/dev/$target_disk" bs=16M conv=fsync status=none 2>>"$log_file" &
+  zstd -d -c "$image_path" 2>>"$log_file" | dd of="$dev" bs=16M conv=fsync status=none 2>>"$log_file" &
   local bg_pid=$!
   
-  # Keep animating until write process exits.
-  local pct=5
+  # Update progress from real block-device write counters.
+  local pct=0
+  local current_sectors=0
+  local written_sectors=0
+  local written_bytes=0
+  local bar_width=30
+  local fill=0
+  local written_mib=0
+  local total_mib=0
   while kill -0 "$bg_pid" 2>/dev/null; do
+    current_sectors="$(_read_written_sectors)"
+    if [[ "$current_sectors" =~ ^[0-9]+$ ]] && [[ "$start_sectors" =~ ^[0-9]+$ ]] && (( current_sectors >= start_sectors )); then
+      written_sectors=$((current_sectors - start_sectors))
+    else
+      written_sectors=0
+    fi
+    written_bytes=$((written_sectors * 512))
+
+    if [[ "$expected_bytes" =~ ^[0-9]+$ ]] && (( expected_bytes > 0 )); then
+      pct=$((written_bytes * 100 / expected_bytes))
+      if (( pct > 99 )); then
+        pct=99
+      fi
+      total_mib=$((expected_bytes / 1024 / 1024))
+    else
+      pct=0
+      total_mib=0
+    fi
+
+    written_mib=$((written_bytes / 1024 / 1024))
+    fill=$((pct * bar_width / 100))
+
     printf "\r  "
     printf "${COLOR_BRIGHT_GREEN}"
-    for ((i = 0; i < pct / 5; i++)); do
+    for ((i = 0; i < fill; i++)); do
       printf "█"
     done
     printf "${COLOR_DIM}"
-    for ((i = pct / 5; i < 20; i++)); do
+    for ((i = fill; i < bar_width; i++)); do
       printf "░"
     done
-    printf "${COLOR_RESET}  ${pct}%%"
+    if (( total_mib > 0 )); then
+      printf "${COLOR_RESET}  %3d%%  (%d/%d MiB)" "$pct" "$written_mib" "$total_mib"
+    else
+      printf "${COLOR_RESET}  writing... (%d MiB)" "$written_mib"
+    fi
     
     sleep 1
-    pct=$((pct + 5))
-    if (( pct > 95 )); then
-      pct=95
-    fi
   done
   
   if ! wait "$bg_pid"; then
@@ -281,7 +367,7 @@ ui_progress_gauge() {
   
   printf "\r  "
   printf "${COLOR_BRIGHT_GREEN}"
-  for ((i = 0; i < 20; i++)); do
+  for ((i = 0; i < bar_width; i++)); do
     printf "█"
   done
   printf "${COLOR_RESET}  100%%\n"
