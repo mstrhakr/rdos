@@ -8,6 +8,9 @@ INPUT_VHD="${INPUT_VHD:-uftc.vhd}"
 OUTPUT_ISO="${OUTPUT_ISO:-uftc-installer.iso}"
 WORKDIR="${WORKDIR:-.installer-work}"
 AUTO_INSTALL_DEFAULT="${AUTO_INSTALL_DEFAULT:-0}"
+# Compression level for the installer payload. 9 is a good balance (fast + small).
+# Set to 19 for maximum compression at the cost of significantly longer build times.
+ZSTD_LEVEL="${ZSTD_LEVEL:-9}"
 
 BASE_ISO="$WORKDIR/clonezilla-base.iso"
 ISO_ROOT="$WORKDIR/iso-root"
@@ -82,8 +85,8 @@ mkdir -p "$ISO_ROOT/uftc"
 log_phase "Converting $INPUT_VHD to raw image"
 qemu-img convert -f vpc -O raw "$INPUT_VHD" "$RAW_IMAGE"
 
-log_phase "Compressing installer payload"
-zstd -T0 -19 -f "$RAW_IMAGE" -o "$COMPRESSED_IMAGE"
+log_phase "Compressing installer payload (zstd level ${ZSTD_LEVEL}, threads: all)"
+zstd -T0 "-${ZSTD_LEVEL}" -f "$RAW_IMAGE" -o "$COMPRESSED_IMAGE"
 rm -f "$RAW_IMAGE"
 
 cat >"$ISO_ROOT/uftc/install.sh" <<'EOF'
