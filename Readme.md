@@ -143,11 +143,11 @@ network={
 
 ### Manual configuration
 
-If the thinclient is not preconfigured on the boot partition it will automatically open a configuration wizard on the first boot.
-Fill in the fields you require for your deployment, if your server is not connected to a domain leave this blank.
-The parameters field are for additional xfreerdp parameters.
-The helpdesk field will be used in the middle of error message sentences, for example "Please contact HELPDESK if this is not resolved after 5 minutes."
-Once saved the thin client immediately presents the login screen on all subsequent boots.
+If the thinclient is not preconfigured on the boot partition it will automatically open a multi-step first boot wizard.
+The first boot wizard focuses on the essentials only: connection details, DHCP vs static IPv4, optional WiFi setup, and support information.
+Sensible defaults are applied automatically for display, timeout, keyboard, and audio settings.
+
+After first boot, use `config` or `settings` as the login password to open the full settings page. The full settings page breaks options into separate sections for connection, network, device behavior, and support settings.
 
 ### Automatic configuration
 
@@ -168,7 +168,19 @@ screen_timeout="600"
 keylayout=""
 exit_type="Shutdown"
 config_url=""
+network_mode="dhcp"
+network_interface=""
+static_address=""
+static_prefix="24"
+static_gateway=""
+static_dns=""
 ```
+
+Static IPv4 notes:
+
+- Set `network_mode="static"` to enable static addressing.
+- Set `network_interface` to the exact adapter name such as `eth0` or `wlan0`.
+- Set `static_address` and `static_prefix` at minimum. `static_gateway` and `static_dns` are optional.
 
 ### Remote configuration (Own risk)
 
@@ -210,7 +222,9 @@ When self building you can pass a -p parameter to enable the root password.
 
 ### Password commands
 
-config : Re-open the config dialogue
+config : Open the full settings page
+
+settings : Open the full settings page
 
 terminal: Open the terminal
 

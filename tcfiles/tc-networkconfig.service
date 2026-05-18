@@ -1,0 +1,11 @@
+[Unit]
+Description=Apply ThinClient network configuration
+After=tc-copyconfig.service tc-copywpa.service
+Before=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/tc-configure-network --apply-tcconfig /home/thinclient/tcconfig
+
+[Install]
+WantedBy=network-pre.target

@@ -1,0 +1,153 @@
+#!/bin/bash
+
+set -euo pipefail
+
+STATIC_NETWORK_FILE="/etc/systemd/network/10-uftc-static.network"
+
+list_interfaces() {
+    local device
+    local iface
+
+    for device in /sys/class/net/*; do
+        iface="$(basename "$device")"
+        if [ "$iface" = "lo" ]; then
+            continue
+        fi
+        printf '%s\n' "$iface"
+    done
+}
+
+list_wireless_interfaces() {
+    local device
+
+    for device in /sys/class/net/*; do
+        [ -d "$device/wireless" ] || continue
+        basename "$device"
+    done
+}
+
+load_tcconfig() {
+    local config_path="$1"
+    local key
+    local value
+
+    network_mode="dhcp"
+    network_interface=""
+    static_address=""
+    static_prefix="24"
+    static_gateway=""
+    static_dns=""
+
+    [ -f "$config_path" ] || return 0
+
+    while IFS='=' read -r key value || [[ -n "$key" ]]; do
+        [[ -z "$key" || "$key" =~ ^# ]] && continue
+        [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || continue
+
+        value="${value#\"}"
+        value="${value%\"}"
+
+        case "$key" in
+            network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns)
+                printf -v "$key" '%s' "$value"
+                ;;
+        esac
+    done < "$config_path"
+}
+
+write_static_network_file() {
+    local dns_server
+    local dns_values
+
+    dns_values="${static_dns//,/ }"
+
+    {
+        echo '[Match]'
+        echo "Name=$network_interface"
+        echo
+        echo '[Network]'
+        echo 'DHCP=no'
+        echo "Address=$static_address/$static_prefix"
+        if [ -n "$static_gateway" ]; then
+            echo "Gateway=$static_gateway"
+        fi
+        for dns_server in $dns_values; do
+            [ -n "$dns_server" ] || continue
+            echo "DNS=$dns_server"
+        done
+        echo
+        echo '[IPv6AcceptRA]'
+        echo 'UseDNS=no'
+    } > "$STATIC_NETWORK_FILE"
+}
+
+apply_tcconfig() {
+    local config_path="$1"
+
+    load_tcconfig "$config_path"
+    rm -f "$STATIC_NETWORK_FILE"
+
+    if [ "$network_mode" != "static" ]; then
+        return 0
+    fi
+
+    if [ -z "$network_interface" ] || [ -z "$static_address" ] || [ -z "$static_prefix" ]; then
+        echo 'Incomplete static network settings, leaving DHCP enabled.' >&2
+        return 0
+    fi
+
+    if ! ip link show "$network_interface" >/dev/null 2>&1; then
+        echo "Interface $network_interface does not exist, leaving DHCP enabled." >&2
+        return 0
+    fi
+
+    write_static_network_file
+}
+
+reload_network() {
+    local target_interface="$1"
+
+    networkctl reload >/dev/null 2>&1 || true
+
+    if [ -n "$target_interface" ] && ip link show "$target_interface" >/dev/null 2>&1; then
+        networkctl reconfigure "$target_interface" >/dev/null 2>&1 || systemctl restart systemd-networkd.service
+    else
+        systemctl restart systemd-networkd.service
+    fi
+
+    systemctl try-restart systemd-resolved.service >/dev/null 2>&1 || true
+}
+
+main() {
+    local should_reload=false
+
+    case "${1:-}" in
+        --apply-tcconfig)
+            [ "$#" -ge 2 ] || exit 1
+            apply_tcconfig "$2"
+            if [ "${3:-}" = "--reload" ]; then
+                should_reload=true
+            fi
+            if [ "$should_reload" = "true" ]; then
+                reload_network "$network_interface"
+            fi
+            ;;
+        --list-interfaces)
+            list_interfaces
+            ;;
+        --list-wireless-interfaces)
+            list_wireless_interfaces
+            ;;
+        --has-wireless)
+            if list_wireless_interfaces | grep -q .; then
+                exit 0
+            fi
+            exit 1
+            ;;
+        *)
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

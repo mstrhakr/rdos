@@ -1,0 +1,620 @@
+#!/bin/bash
+
+set -euo pipefail
+
+CONFIG_PATH="${HOME}/tcconfig"
+VERSION="$(< /tcversion)"
+
+list_interfaces() {
+    local device
+    local iface
+
+    for device in /sys/class/net/*; do
+        iface="$(basename "$device")"
+        if [ "$iface" = "lo" ]; then
+            continue
+        fi
+        printf '%s\n' "$iface"
+    done
+}
+
+wireless_adapter_present() {
+    sudo -n /usr/bin/tc-configure-network --has-wireless
+}
+
+show_error() {
+    yad --error --center --title="Configuration" --text="$1"
+}
+
+show_warning() {
+    yad --warning --center --title="Configuration" --text="$1"
+}
+
+build_choice_list() {
+    local current="$1"
+    shift
+    local options=()
+    local option
+
+    if [ -n "$current" ]; then
+        options+=("$current")
+    fi
+
+    for option in "$@"; do
+        if [ "$option" != "$current" ]; then
+            options+=("$option")
+        fi
+    done
+
+    local IFS='!'
+    printf '%s' "${options[*]}"
+}
+
+build_interface_choices() {
+    local selected="${1:-Automatic}"
+    local options=("$selected")
+    local iface
+
+    for iface in $(list_interfaces); do
+        if [ "$iface" != "$selected" ]; then
+            options+=("$iface")
+        fi
+    done
+
+    local IFS='!'
+    printf '%s' "${options[*]}"
+}
+
+quote_config_value() {
+    local value="$1"
+
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    printf '"%s"' "$value"
+}
+
+load_config() {
+    local key
+    local value
+
+    server=""
+    domain=""
+    param=""
+    adminpass=""
+    helpdesk="the helpdesk"
+    login_timeout="600"
+    volume="100"
+    microphone="100"
+    brightness="50"
+    screen_timeout="600"
+    keylayout="us"
+    exit_type="Shutdown"
+    config_url=""
+    network_mode="dhcp"
+    network_interface=""
+    static_address=""
+    static_prefix="24"
+    static_gateway=""
+    static_dns=""
+
+    [ -f "$CONFIG_PATH" ] || return 0
+
+    while IFS='=' read -r key value || [[ -n "$key" ]]; do
+        [[ -z "$key" || "$key" =~ ^# ]] && continue
+        [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || continue
+
+        value="${value#\"}"
+        value="${value%\"}"
+
+        case "$key" in
+            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns)
+                printf -v "$key" '%s' "$value"
+                ;;
+        esac
+    done < "$CONFIG_PATH"
+}
+
+save_config() {
+    {
+        printf 'server=%s\n' "$(quote_config_value "$server")"
+        printf 'domain=%s\n' "$(quote_config_value "$domain")"
+        printf 'param=%s\n' "$(quote_config_value "$param")"
+        printf 'adminpass=%s\n' "$(quote_config_value "$adminpass")"
+        printf 'helpdesk=%s\n' "$(quote_config_value "$helpdesk")"
+        printf 'login_timeout=%s\n' "$(quote_config_value "$login_timeout")"
+        printf 'volume=%s\n' "$(quote_config_value "$volume")"
+        printf 'microphone=%s\n' "$(quote_config_value "$microphone")"
+        printf 'brightness=%s\n' "$(quote_config_value "$brightness")"
+        printf 'screen_timeout=%s\n' "$(quote_config_value "$screen_timeout")"
+        printf 'keylayout=%s\n' "$(quote_config_value "$keylayout")"
+        printf 'exit_type=%s\n' "$(quote_config_value "$exit_type")"
+        printf 'config_url=%s\n' "$(quote_config_value "$config_url")"
+        printf 'network_mode=%s\n' "$(quote_config_value "$network_mode")"
+        printf 'network_interface=%s\n' "$(quote_config_value "$network_interface")"
+        printf 'static_address=%s\n' "$(quote_config_value "$static_address")"
+        printf 'static_prefix=%s\n' "$(quote_config_value "$static_prefix")"
+        printf 'static_gateway=%s\n' "$(quote_config_value "$static_gateway")"
+        printf 'static_dns=%s\n' "$(quote_config_value "$static_dns")"
+    } > "$CONFIG_PATH"
+}
+
+apply_network_config() {
+    local log_path="${HOME}/.uftc-network-apply.log"
+
+    if ! sudo -n /usr/bin/tc-configure-network --apply-tcconfig "$CONFIG_PATH" --reload 2>&1 | tee "$log_path" >/dev/null; then
+        show_warning "The network settings were saved, but the live network reload reported an error. They will still be applied on the next boot.\n\nDetails:\n$(tail -n 5 "$log_path" 2>/dev/null)"
+    fi
+}
+
+network_mode_label() {
+    if [ "$network_mode" = "static" ]; then
+        printf 'Static IPv4'
+    else
+        printf 'Automatic (DHCP)'
+    fi
+}
+
+selected_interface_label() {
+    if [ -n "$network_interface" ]; then
+        printf '%s' "$network_interface"
+    else
+        printf 'Automatic'
+    fi
+}
+
+settings_summary() {
+    local network_summary
+
+    if [ "$network_mode" = "static" ]; then
+        network_summary="Static on ${network_interface:-unset}: ${static_address:-unset}/${static_prefix:-unset}"
+    else
+        network_summary="Automatic (DHCP)"
+    fi
+
+    cat <<EOF
+Connection: ${server:-Not configured}
+Domain: ${domain:-Not set}
+Network: $network_summary
+Keyboard: ${keylayout:-us}
+Exit action: ${exit_type:-Shutdown}
+Helpdesk: ${helpdesk:-the helpdesk}
+EOF
+}
+
+edit_static_details() {
+    local output
+    local status
+
+    set +e
+    output=$(yad --form --center --width=560 --title="Network Settings | $VERSION" \
+        --text="Enter the static IPv4 settings for ${network_interface:-the selected interface}." \
+        --separator=$'\x1F' \
+        --button="Back":2 --button="Cancel":1 --button="Save":0 \
+        --field="IPv4 Address" "$static_address" \
+        --field="Prefix Length" "$static_prefix" \
+        --field="Gateway (optional)" "$static_gateway" \
+        --field="DNS Servers (space or comma separated)" "$static_dns")
+    status=$?
+    set -e
+
+    case "$status" in
+        0)
+            static_address="$(awk -F'\x1F' '{print $1}' <<<"$output")"
+            static_prefix="$(awk -F'\x1F' '{print $2}' <<<"$output")"
+            static_gateway="$(awk -F'\x1F' '{print $3}' <<<"$output")"
+            static_dns="$(awk -F'\x1F' '{print $4}' <<<"$output")"
+            if [ -z "$static_address" ] || [ -z "$static_prefix" ]; then
+                show_error "Static IPv4 requires an address and prefix length."
+                return 3
+            fi
+            return 0
+            ;;
+        1)
+            return 1
+            ;;
+        2)
+            return 2
+            ;;
+    esac
+
+    return 1
+}
+
+edit_connection_section() {
+    local output
+    local status
+
+    set +e
+    output=$(yad --form --center --width=600 --title="Connection Settings | $VERSION" \
+        --text="Update the main connection settings." \
+        --separator=$'\x1F' \
+        --button="Cancel":1 --button="Save":0 \
+        --field="Server or Mode" "$server" \
+        --field="Domain (optional)" "$domain" \
+        --field="Advanced Parameters (optional)" "$param" \
+        --field="Remote Config URL (optional)" "$config_url")
+    status=$?
+    set -e
+
+    if ((status != 0)); then
+        return 1
+    fi
+
+    server="$(awk -F'\x1F' '{print $1}' <<<"$output")"
+    domain="$(awk -F'\x1F' '{print $2}' <<<"$output")"
+    param="$(awk -F'\x1F' '{print $3}' <<<"$output")"
+    config_url="$(awk -F'\x1F' '{print $4}' <<<"$output")"
+
+    if [ -z "$server" ]; then
+        show_error "A server name or mode is required."
+        return 1
+    fi
+
+    return 0
+}
+
+edit_network_section() {
+    local output
+    local status
+    local selected_mode
+    local selected_interface
+    local configure_wifi
+    local interface_choices
+
+    interface_choices="$(build_interface_choices "$(selected_interface_label)")"
+
+    set +e
+    if wireless_adapter_present; then
+        output=$(yad --form --center --width=600 --title="Network Settings | $VERSION" \
+            --text="Choose how this device should obtain its network settings." \
+            --separator=$'\x1F' \
+            --button="Cancel":1 --button="Save":0 \
+            --field="Addressing:CB" "$(build_choice_list "$(network_mode_label)" "Automatic (DHCP)" "Static IPv4")" \
+            --field="Interface:CB" "$interface_choices" \
+            --field="Open WiFi Wizard after saving:CHK" "FALSE")
+    else
+        output=$(yad --form --center --width=600 --title="Network Settings | $VERSION" \
+            --text="Choose how this device should obtain its network settings." \
+            --separator=$'\x1F' \
+            --button="Cancel":1 --button="Save":0 \
+            --field="Addressing:CB" "$(build_choice_list "$(network_mode_label)" "Automatic (DHCP)" "Static IPv4")" \
+            --field="Interface:CB" "$interface_choices")
+    fi
+    status=$?
+    set -e
+
+    if ((status != 0)); then
+        return 1
+    fi
+
+    selected_mode="$(awk -F'\x1F' '{print $1}' <<<"$output")"
+    selected_interface="$(awk -F'\x1F' '{print $2}' <<<"$output")"
+    configure_wifi="$(awk -F'\x1F' '{print tolower($3)}' <<<"$output")"
+
+    if [ "$selected_mode" = "Static IPv4" ]; then
+        network_mode="static"
+    else
+        network_mode="dhcp"
+    fi
+
+    if [ "$selected_interface" = "Automatic" ]; then
+        network_interface=""
+    else
+        network_interface="$selected_interface"
+    fi
+
+    if [ "$network_mode" = "static" ]; then
+        if [ -z "$network_interface" ]; then
+            show_error "Static IPv4 requires a specific interface selection."
+            return 1
+        fi
+        if ! edit_static_details; then
+            return 1
+        fi
+    fi
+
+    if [ "$configure_wifi" = "true" ] && wireless_adapter_present; then
+        /usr/bin/tc-wifi-wizard || true
+    fi
+
+    return 0
+}
+
+edit_experience_section() {
+    local output
+    local status
+
+    set +e
+    output=$(yad --form --center --width=600 --title="Device Settings | $VERSION" \
+        --text="Adjust the login, display, and audio defaults." \
+        --separator=$'\x1F' \
+        --button="Cancel":1 --button="Save":0 \
+        --field="Login Timeout in Seconds" "$login_timeout" \
+        --field="Speaker Volume" "$volume" \
+        --field="Microphone Volume" "$microphone" \
+        --field="Screen Brightness" "$brightness" \
+        --field="Screen Standby Timeout in Seconds" "$screen_timeout" \
+        --field="Keyboard Layout" "$keylayout" \
+        --field="Exit Type:CB" "$(build_choice_list "$exit_type" "Shutdown" "Sleep" "Restart" "Exit")")
+    status=$?
+    set -e
+
+    if ((status != 0)); then
+        return 1
+    fi
+
+    login_timeout="$(awk -F'\x1F' '{print $1}' <<<"$output")"
+    volume="$(awk -F'\x1F' '{print $2}' <<<"$output")"
+    microphone="$(awk -F'\x1F' '{print $3}' <<<"$output")"
+    brightness="$(awk -F'\x1F' '{print $4}' <<<"$output")"
+    screen_timeout="$(awk -F'\x1F' '{print $5}' <<<"$output")"
+    keylayout="$(awk -F'\x1F' '{print $6}' <<<"$output")"
+    exit_type="$(awk -F'\x1F' '{print $7}' <<<"$output")"
+    return 0
+}
+
+edit_support_section() {
+    local output
+    local status
+
+    set +e
+    output=$(yad --form --center --width=560 --title="Support Settings | $VERSION" \
+        --text="Configure support-facing options and protected commands." \
+        --separator=$'\x1F' \
+        --button="Cancel":1 --button="Save":0 \
+        --field="Helpdesk Contact" "$helpdesk" \
+        --field="Admin Password (optional)":h "$adminpass")
+    status=$?
+    set -e
+
+    if ((status != 0)); then
+        return 1
+    fi
+
+    helpdesk="$(awk -F'\x1F' '{print $1}' <<<"$output")"
+    adminpass="$(awk -F'\x1F' '{print $2}' <<<"$output")"
+    return 0
+}
+
+run_settings_page() {
+    local status
+
+    load_config
+
+    while true; do
+        set +e
+        yad --form --center --width=620 --title="Settings | $VERSION" \
+            --image=preferences-system \
+            --text="$(settings_summary)\n\nChoose a section to edit." \
+            --button="Connection":10 \
+            --button="Network":11 \
+            --button="Device":12 \
+            --button="Support":13 \
+            --button="WiFi Wizard":14 \
+            --button="Save & Exit":0 \
+            --button="Cancel":1 >/dev/null
+        status=$?
+        set -e
+
+        case "$status" in
+            0)
+                if [ -z "$server" ]; then
+                    show_error "A server name or mode is required before saving."
+                    continue
+                fi
+                save_config
+                apply_network_config
+                return 0
+                ;;
+            1)
+                return 1
+                ;;
+            10)
+                edit_connection_section || true
+                ;;
+            11)
+                edit_network_section || true
+                ;;
+            12)
+                edit_experience_section || true
+                ;;
+            13)
+                edit_support_section || true
+                ;;
+            14)
+                if wireless_adapter_present; then
+                    /usr/bin/tc-wifi-wizard || true
+                else
+                    show_warning "No wireless adapter was detected on this device."
+                fi
+                ;;
+        esac
+    done
+}
+
+run_first_boot_wizard() {
+    local page="welcome"
+    local output
+    local status
+    local wifi_after_save="false"
+    local selected_mode
+    local selected_interface
+
+    load_config
+
+    while true; do
+        case "$page" in
+            welcome)
+                set +e
+                yad --info --center --width=620 --title="First Time Setup | $VERSION" \
+                    --button="Cancel":1 --button="Start Setup":0 \
+                    --text="This setup will walk through the essential first-boot settings in a few short steps.\n\nYou can change advanced options later from the settings page using the config or settings command." >/dev/null
+                status=$?
+                set -e
+
+                if ((status != 0)); then
+                    return 1
+                fi
+                page="connection"
+                ;;
+            connection)
+                set +e
+                output=$(yad --form --center --width=560 --title="First Time Setup | $VERSION" \
+                    --text="Step 1 of 4: Enter the main connection details." \
+                    --separator=$'\x1F' \
+                    --button="Cancel":1 --button="Next":0 \
+                    --field="Server or Mode" "$server" \
+                    --field="Domain (optional)" "$domain")
+                status=$?
+                set -e
+
+                if ((status == 1)); then
+                    return 1
+                fi
+
+                server="$(awk -F'\x1F' '{print $1}' <<<"$output")"
+                domain="$(awk -F'\x1F' '{print $2}' <<<"$output")"
+                if [ -z "$server" ]; then
+                    show_error "A server name or mode is required."
+                    continue
+                fi
+                page="network"
+                ;;
+            network)
+                set +e
+                if wireless_adapter_present; then
+                    output=$(yad --form --center --width=600 --title="First Time Setup | $VERSION" \
+                        --text="Step 2 of 4: Choose the network behavior for this device." \
+                        --separator=$'\x1F' \
+                        --button="Back":2 --button="Cancel":1 --button="Next":0 \
+                        --field="Addressing:CB" "$(build_choice_list "$(network_mode_label)" "Automatic (DHCP)" "Static IPv4")" \
+                        --field="Interface:CB" "$(build_interface_choices "$(selected_interface_label)")" \
+                        --field="Open WiFi Wizard after saving:CHK" "$( [ "$wifi_after_save" = "true" ] && printf 'TRUE' || printf 'FALSE' )")
+                else
+                    output=$(yad --form --center --width=600 --title="First Time Setup | $VERSION" \
+                        --text="Step 2 of 4: Choose the network behavior for this device." \
+                        --separator=$'\x1F' \
+                        --button="Back":2 --button="Cancel":1 --button="Next":0 \
+                        --field="Addressing:CB" "$(build_choice_list "$(network_mode_label)" "Automatic (DHCP)" "Static IPv4")" \
+                        --field="Interface:CB" "$(build_interface_choices "$(selected_interface_label)")")
+                fi
+                status=$?
+                set -e
+
+                if ((status == 2)); then
+                    page="connection"
+                    continue
+                fi
+                if ((status == 1)); then
+                    return 1
+                fi
+
+                selected_mode="$(awk -F'\x1F' '{print $1}' <<<"$output")"
+                selected_interface="$(awk -F'\x1F' '{print $2}' <<<"$output")"
+                wifi_after_save="$(awk -F'\x1F' '{print tolower($3)}' <<<"$output")"
+
+                if [ "$selected_mode" = "Static IPv4" ]; then
+                    network_mode="static"
+                else
+                    network_mode="dhcp"
+                fi
+
+                if [ "$selected_interface" = "Automatic" ]; then
+                    network_interface=""
+                else
+                    network_interface="$selected_interface"
+                fi
+
+                if [ "$network_mode" = "static" ]; then
+                    if [ -z "$network_interface" ]; then
+                        show_error "Static IPv4 requires a specific interface selection."
+                        continue
+                    fi
+                    page="static"
+                else
+                    page="support"
+                fi
+                ;;
+            static)
+                if edit_static_details; then
+                    page="support"
+                    continue
+                fi
+                status=$?
+                if ((status == 2)); then
+                    page="network"
+                    continue
+                fi
+                if ((status == 1)); then
+                    return 1
+                fi
+                ;;
+            support)
+                set +e
+                output=$(yad --form --center --width=560 --title="First Time Setup | $VERSION" \
+                    --text="Step 3 of 4: Add support information and optional protection." \
+                    --separator=$'\x1F' \
+                    --button="Back":2 --button="Cancel":1 --button="Next":0 \
+                    --field="Helpdesk Contact" "$helpdesk" \
+                    --field="Admin Password (optional)":h "$adminpass")
+                status=$?
+                set -e
+
+                if ((status == 2)); then
+                    if [ "$network_mode" = "static" ]; then
+                        page="static"
+                    else
+                        page="network"
+                    fi
+                    continue
+                fi
+                if ((status == 1)); then
+                    return 1
+                fi
+
+                helpdesk="$(awk -F'\x1F' '{print $1}' <<<"$output")"
+                adminpass="$(awk -F'\x1F' '{print $2}' <<<"$output")"
+                page="summary"
+                ;;
+            summary)
+                set +e
+                yad --question --center --width=620 --title="First Time Setup | $VERSION" \
+                    --button="Back":2 --button="Cancel":1 --button="Save":0 \
+                    --text="Step 4 of 4: Review the summary below before saving.\n\n$(settings_summary)\n\nDefault audio, display, timeout, and keyboard settings will be applied automatically. You can adjust them later from the settings page." >/dev/null
+                status=$?
+                set -e
+
+                if ((status == 2)); then
+                    page="support"
+                    continue
+                fi
+                if ((status == 1)); then
+                    return 1
+                fi
+
+                save_config
+                if [ "$wifi_after_save" = "true" ] && wireless_adapter_present; then
+                    /usr/bin/tc-wifi-wizard || true
+                fi
+                apply_network_config
+                return 0
+                ;;
+        esac
+    done
+}
+
+main() {
+    case "${1:-}" in
+        --wizard)
+            run_first_boot_wizard
+            ;;
+        --settings)
+            run_settings_page
+            ;;
+        *)
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

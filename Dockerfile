@@ -48,6 +48,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 COPY Moonlight.AppImage* /usr/bin/moonlight
 
 COPY tcfiles/thinclient /usr/bin/thinclient
+COPY tcfiles/tc-settings /usr/bin/tc-settings
+COPY tcfiles/tc-configure-network /usr/bin/tc-configure-network
 COPY tcfiles/tc-configure-wifi /usr/bin/tc-configure-wifi
 COPY tcfiles/tc-scan-wifi /usr/bin/tc-scan-wifi
 COPY tcfiles/tc-wifi-wizard /usr/bin/tc-wifi-wizard
@@ -69,6 +71,9 @@ RUN systemctl enable tc-copyconfig.service
 
 COPY tcfiles/tc-copywpa.service /etc/systemd/system/tc-copywpa.service
 RUN systemctl enable tc-copywpa.service
+
+COPY tcfiles/tc-networkconfig.service /etc/systemd/system/tc-networkconfig.service
+RUN systemctl enable tc-networkconfig.service
 
 COPY tcfiles/tc-wifipower.service /etc/systemd/system/tc-wifipower.service
 RUN systemctl enable tc-wifipower.service

@@ -21,7 +21,14 @@ shutdown_thinclient(){
 PROTOCOL_DETECT="://"
 VERSION=$(< /tcversion)
 adminpass="${adminpass:-}"
-keylayout="${keylayout:-}"
+keylayout="${keylayout:-us}"
+exit_type="${exit_type:-Shutdown}"
+helpdesk="${helpdesk:-the helpdesk}"
+volume="${volume:-100}"
+microphone="${microphone:-100}"
+brightness="${brightness:-50}"
+screen_timeout="${screen_timeout:-600}"
+login_timeout="${login_timeout:-600}"
 
 # Run second phase of the build if present
 if [[ -f /usr/bin/firstboot ]]; then
@@ -122,14 +129,9 @@ if [ -f ~/tcconfig ];then
     fi
 
     load_config ~/tcconfig_override
-    original_param=$param
     # Some values used to be hardcoded but are important, we define the old hardcoded variables here in case they are missing from production configs
     if [[ -z "$exit_type" ]]; then
         exit_type="Shutdown"
-    fi
-
-    if [[ -z "$login_timeout" ]]; then
-        login_timeout="600"
     fi
 
     # Give the fake please wait option to allow manual logon
@@ -215,14 +217,14 @@ if [ -f ~/tcconfig ];then
         echo "Autologon is enabled, skipping login form"
     else
         # Login Dialogue
-        OUTPUT=$(yad --form --center --window-icon=changes-prevent --image=dialog-password --button="$exit_type":1 --button="WiFi Wizard":2 --button=Login:0 --timeout="$login_timeout" --title="Network Login | $VERSION" \
+        OUTPUT=$(yad --form --center --window-icon=changes-prevent --image=dialog-password --button="$exit_type":1 --button="Settings":2 --button=Login:0 --timeout="$login_timeout" --title="Network Login | $VERSION" \
             --text="Enter your network credentials below" \
             --separator=$'\x1F' \
             --field="Username" \
             --field="Password":h)
         OUTPUT_RESULTS=$?
         if ((OUTPUT_RESULTS == 2)); then
-            /usr/bin/tc-wifi-wizard
+            /usr/bin/tc-settings --settings || true
             $0 "$@" &
             exit 0
         fi
@@ -232,6 +234,15 @@ if [ -f ~/tcconfig ];then
         username=$(printf '%q' "$(awk -F'\x1F' '{print $1}' <<<"$OUTPUT")")
         password=$(printf '%q' "$(awk -F'\x1F' '{print $2}' <<<"$OUTPUT")")
     fi
+fi
+
+# First time setup is handled before the login flow so new images land in a guided wizard.
+if [ ! -f ~/tcconfig ];then
+    if /usr/bin/tc-settings --wizard; then
+        $0 "$@" &
+        exit 0
+    fi
+    shutdown_thinclient
 fi
 
 # Password commands
@@ -275,65 +286,8 @@ if [ "$password" = "wifi" ];then
 fi
 
 # This section handles the default configuration and configuration dialogue
-if [ ! -f ~/tcconfig ];then
-    yad --info --ellipsize=middle --center --title="User Friendly Thin Client $VERSION by Henk.Tech" --text="You have not yet configured your thin client and a configuration screen will now open.\nTo access this configuration screen at a later time use config as the login password.\nYou can also use the login password terminal to access the terminal.\n\nNOTE: If you enter an admin password you will need to type this in front of the commands,\nthis version stores that password in plain text so do not submit your usual administrator passwords.\n\nCommands:\nconfig: Configuration screen\nterminal: Interactive Terminal\nping (Without password): My Traceroute\nip (Without password): Show IP information\nwifi (Without password): Open the WiFi Wizard\nkill: Shut down this tool"
-    password=config
-    helpdesk="the helpdesk"
-    volume="100"
-    microphone="100"
-    brightness="50"
-    login_timeout="600"
-    screen_timeout="600"
-    exit_type="Shutdown"
-fi
-
-if [ "$password" = "${adminpass}config" ];then
-    server=$server_list
-    OUTPUT=$(yad --form --center --window-icon=changes-allow --image=preferences-system --button="WiFi Wizard":2 --button="Save":0 --button="Cancel":1 --title="Configuration Utility | $VERSION" \
-        --text="This will replace the configuration file with the provided settings" \
-        --separator=$'\x1F' \
-        --field="RDP Configuration":lbl --align=center "" \
-        --field="Server" "$server" \
-        --field="Domain" "$domain" \
-        --field="Parameters" "$original_param" \
-        --field="Dialog Configuration":lbl --align=center "" \
-        --field="Admin Password":h "$adminpass" \
-        --field="Helpdesk Contact" "$helpdesk" \
-        --field="Login Timeout in Seconds" "$login_timeout" \
-        --field="OS Configuration":lbl --align=center "" \
-        --field="Speaker Volume" "$volume" \
-        --field="Microphone Volume" "$microphone" \
-        --field="Screen Brightness" "$brightness" \
-        --field="Screen Standby Timeout in Seconds" "$screen_timeout" \
-        --field="Keyboard Layout" "$keylayout" \
-        --field="Exit Type (Shutdown/Sleep/Restart)" "$exit_type" \
-        --field="Remote Configuration":lbl --align=center "" \
-        --field="Remote Config Location" "$config_url" )
-    OUTPUT_RESULTS=$?
-    if ((OUTPUT_RESULTS == 2)); then
-        /usr/bin/tc-wifi-wizard
-        $0 "$@" &
-        exit 0
-    fi
-    if ((OUTPUT_RESULTS == 0)); then
-        {
-            echo "server=\"$(awk -F'\x1F' '{print $2}' <<<"$OUTPUT")\""
-            echo "domain=\"$(awk -F'\x1F' '{print $3}' <<<"$OUTPUT")\""
-            echo "param=\"$(awk -F'\x1F' '{print $4}' <<<"$OUTPUT")\""
-            echo "adminpass=\"$(awk -F'\x1F' '{print $6}' <<<"$OUTPUT")\""
-            echo "helpdesk=\"$(awk -F'\x1F' '{print $7}' <<<"$OUTPUT")\""
-            echo "login_timeout=\"$(awk -F'\x1F' '{print $8}' <<<"$OUTPUT")\""
-            echo "volume=\"$(awk -F'\x1F' '{print $10}' <<<"$OUTPUT")\""
-            echo "microphone=\"$(awk -F'\x1F' '{print $11}' <<<"$OUTPUT")\""
-            echo "brightness=\"$(awk -F'\x1F' '{print $12}' <<<"$OUTPUT")\""
-            echo "screen_timeout=\"$(awk -F'\x1F' '{print $13}' <<<"$OUTPUT")\""
-            echo "keylayout=\"$(awk -F'\x1F' '{print $14}' <<<"$OUTPUT")\""
-            echo "exit_type=\"$(awk -F'\x1F' '{print $15}' <<<"$OUTPUT")\""
-            echo "config_url=\"$(awk -F'\x1F' '{print $17}' <<<"$OUTPUT")\""
-        } > ~/tcconfig
-    else
-        yad --error --title="Error" --center --ellipsize=middle --text="Configuration cancelled or failed"
-    fi
+if [ "$password" = "${adminpass}config" ] || [ "$password" = "${adminpass}settings" ];then
+    /usr/bin/tc-settings --settings || true
     $0 "$@" &
     exit 0
 fi
