@@ -201,6 +201,13 @@ xorriso -osirrox on -indev "$BASE_ISO" -extract / "$ISO_ROOT" >/dev/null
 # Extracted ISO files can be read-only; make them writable before patching configs.
 chmod -R u+w "$ISO_ROOT"
 
+# Clonezilla's GRUB config includes a startup "play" tone. Remove it to mute menu beeps.
+for grub_file in "$ISO_ROOT/boot/grub/grub.cfg" "$ISO_ROOT/boot/grub/config.cfg"; do
+  if [[ -f "$grub_file" ]]; then
+    sed -i '/^[[:space:]]*play[[:space:]]\+/d' "$grub_file"
+  fi
+done
+
 mkdir -p "$ISO_ROOT/uftc"
 
 log_phase "Converting $INPUT_VHD to raw image"
@@ -220,6 +227,10 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=== UFTC unattended installer ==="
 date
+
+# Silence console bell and unload pcspkr if it is present.
+setterm -blength 0 -bfreq 0 >/dev/null 2>&1 || true
+rmmod pcspkr >/dev/null 2>&1 || true
 
 IMAGE_ZST="/run/live/medium/uftc/uftc.img.zst"
 if [[ ! -f "$IMAGE_ZST" ]]; then
@@ -279,7 +290,7 @@ EOF
 
 chmod +x "$ISO_ROOT/uftc/install.sh"
 
-CLONEZILLA_BOOT_ARGS="boot=live union=overlay username=user config components quiet loglevel=3 ocs_1_cpu_udev noswap edd=on nomodeset enforcing=0 locales= keyboard-layouts= net.ifnames=0 nosplash"
+CLONEZILLA_BOOT_ARGS="boot=live union=overlay username=user config components quiet loglevel=3 ocs_1_cpu_udev noswap edd=on nomodeset enforcing=0 locales= keyboard-layouts= net.ifnames=0 nosplash modprobe.blacklist=pcspkr"
 
 for SYS_CFG in "$ISO_ROOT/syslinux/syslinux.cfg" "$ISO_ROOT/syslinux/isolinux.cfg"; do
   if [[ -f "$SYS_CFG" ]] && ! grep -q "label uftc_auto" "$SYS_CFG"; then

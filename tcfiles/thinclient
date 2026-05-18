@@ -149,6 +149,7 @@ if [ -f ~/tcconfig ];then
     pamixer -u --default-source --allow-boost --set-volume "$microphone"
     light -S "$brightness"
     setxkbmap "$keylayout"
+    xset b off
     xset dpms 0 "$screen_timeout" 0
 
 

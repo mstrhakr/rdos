@@ -26,6 +26,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         adwaita-icon-theme-legacy libfuse2 \
         libcap2-bin
 
+# Disable audible terminal/system bell where possible.
+RUN printf '%s\n' 'blacklist pcspkr' 'install pcspkr /bin/false' > /etc/modprobe.d/nobeep.conf && \
+    printf '%s\n' 'set bell-style none' >> /etc/inputrc
+
 # XanMod kernel — installed during Docker build so no VM first-boot is needed.
 # INITRD=No suppresses update-initramfs here (it would fail without a live kernel);
 # d2vm runs privileged and regenerates the initramfs correctly during conversion.
