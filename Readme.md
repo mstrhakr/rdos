@@ -60,8 +60,6 @@ This installer ISO boots, writes UFTC to the first non-removable disk that is no
 grub as the bootloader unlocks a few things most importantly uefi support, you also get a seperate fat32 boot partition where you can place the config files when provisioning.
 Boot partition is a sizable 4GB to reduce the risk of running out of space for the kernels, with a total size of under 16GB this should fit on a 16GB USB stick if you wish to use a USB Stick for customization and capture.
 
-Important: The modern kernel could not be included in the build process, boot your generated image in a VM once so it can finalize the build. Release images have this step completed.
-
 ## Usage
 
 ### Installation from the ISO
@@ -144,10 +142,11 @@ network={
 
 ### Manual configuration
 
-If the thinclient is not preconfigured on the boot partition it will automatically boot its configuration screen.
+If the thinclient is not preconfigured on the boot partition it will automatically open a configuration wizard on the first boot.
 Fill in the fields you require for your deployment, if your server is not connected to a domain leave this blank.
 The parameters field are for additional xfreerdp parameters.
 The helpdesk field will be used in the middle of error message sentences, for example "Please contact HELPDESK if this is not resolved after 5 minutes."
+Once saved the thin client immediately presents the login screen on all subsequent boots.
 
 ### Automatic configuration
 

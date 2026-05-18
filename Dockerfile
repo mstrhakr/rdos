@@ -23,7 +23,21 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         open-vm-tools \
         ffmpeg \
         enca nano udiskie mc mtr \
-        adwaita-icon-theme-legacy libfuse2
+        adwaita-icon-theme-legacy libfuse2 \
+        libcap2-bin
+
+# XanMod kernel — installed during Docker build so no VM first-boot is needed.
+# INITRD=No suppresses update-initramfs here (it would fail without a live kernel);
+# d2vm runs privileged and regenerates the initramfs correctly during conversion.
+# Falls back gracefully if the package is temporarily unavailable from deb.xanmod.org.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    install -d -m 755 /etc/apt/keyrings && \
+    wget -qO - https://dl.xanmod.org/archive.key | gpg --dearmor -o /etc/apt/keyrings/xanmod-archive-keyring.gpg && \
+    echo 'deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' > /etc/apt/sources.list.d/xanmod-release.list && \
+    apt-get update && \
+    INITRD=No DEBIAN_FRONTEND=noninteractive apt-get install -y linux-xanmod-lts-x64v1 || \
+        echo 'Warning: linux-xanmod-lts-x64v1 not available; d2vm will install a default kernel.'
 
 # Optional: Citrix ICA client — drop icaclient.deb next to the Dockerfile to include it.
 COPY icaclient.deb* /tmp/
@@ -38,12 +52,13 @@ COPY tcfiles/tc-configure-wifi /usr/bin/tc-configure-wifi
 COPY tcfiles/tc-scan-wifi /usr/bin/tc-scan-wifi
 COPY tcfiles/tc-wifi-wizard /usr/bin/tc-wifi-wizard
 COPY tcfiles/set-hostname /usr/bin/set-hostname
-COPY tcfiles/firstboot /usr/bin/firstboot
 COPY tcfiles/auto-maintenance.debian /usr/bin/auto-maintenance
 COPY tcfiles/099_tc /etc/sudoers.d/099_tc
 COPY tcfiles/usb-access.rules /etc/udev/rules.d/usb-access.rules
 RUN chown root:root /etc/sudoers.d/099_tc && chmod 440 /etc/sudoers.d/099_tc
 RUN chmod +x /usr/bin/*
+# Allow mtr to send raw ICMP packets without root (capability survives into the final image)
+RUN setcap cap_net_raw+ep /usr/bin/mtr-packet
 
 RUN mkdir -p /etc/systemd/system/getty@tty1.service.d
 COPY tcfiles/autologin /etc/systemd/system/getty@tty1.service.d/override.conf
