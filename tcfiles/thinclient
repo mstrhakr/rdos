@@ -226,11 +226,11 @@ if [ -f ~/tcconfig ];then
 fi
 
 # Password commands
-if [ "$password" = $adminpass"kill" ];then
+if [ "$password" = "${adminpass}kill" ];then
     exit 0
 fi
 
-if [ "$password" = $adminpass"terminal" ];then
+if [ "$password" = "${adminpass}terminal" ];then
     xterm -bg black -fg white
     $0
     exit 0
@@ -275,7 +275,7 @@ if [ ! -f ~/tcconfig ];then
     exit_type="Shutdown"
 fi
 
-if [ "$password" = $adminpass"config" ];then
+if [ "$password" = "${adminpass}config" ];then
     server=$server_list
     OUTPUT=$(yad --form --center --window-icon=changes-allow --image=preferences-system --button="WiFi Wizard":2 --button="Save":0 --button="Cancel":1 --title="Configuration Utility | $VERSION" \
         --text="This will replace the configuration file with the provided settings" \
