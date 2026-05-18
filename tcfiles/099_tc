@@ -2,3 +2,5 @@
 ALL ALL=(ALL) NOPASSWD: /usr/bin/set-hostname
 ALL ALL=(ALL) NOPASSWD: /usr/bin/firstboot
 ALL ALL=(ALL) NOPASSWD: /usr/bin/auto-maintenance
+ALL ALL=(ALL) NOPASSWD: /usr/bin/tc-configure-wifi
+ALL ALL=(ALL) NOPASSWD: /usr/bin/tc-scan-wifi

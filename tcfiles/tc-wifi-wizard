@@ -1,0 +1,223 @@
+#!/bin/bash
+
+set -euo pipefail
+
+find_wireless_interface() {
+    local device
+
+    for device in /sys/class/net/*; do
+        [ -d "$device/wireless" ] || continue
+        basename "$device"
+        return 0
+    done
+
+    return 1
+}
+
+list_wireless_interfaces() {
+    local device
+
+    for device in /sys/class/net/*; do
+        [ -d "$device/wireless" ] || continue
+        basename "$device"
+    done
+}
+
+choose_wireless_interface() {
+    local interfaces
+    local choice
+
+    mapfile -t interfaces < <(list_wireless_interfaces)
+
+    if [ "${#interfaces[@]}" -eq 0 ]; then
+        return 1
+    fi
+
+    if [ "${#interfaces[@]}" -eq 1 ]; then
+        printf '%s\n' "${interfaces[0]}"
+        return 0
+    fi
+
+    choice=$(printf '%s\n' "${interfaces[@]}" | yad --list --center --width=400 --height=250 --title="WiFi Wizard" \
+        --text="Select the wireless adapter to scan." \
+        --separator=$'\x1F' --print-all \
+        --button="Cancel":1 --button="Scan":0 \
+        --column="Adapter") || return 1
+
+    printf '%s\n' "$(awk -F'\x1F' '{print $1}' <<<"$choice")"
+}
+
+show_scan_progress() {
+    local iface="$1"
+    local title="WiFi Wizard"
+
+    set +e
+    yad --progress --center --pulsate --auto-close --no-buttons \
+        --title="$title" \
+        --text="Scanning for WiFi networks on $iface..." >/dev/null 2>&1 &
+    echo $!
+    set -e
+}
+
+prompt_manual_network() {
+    local output
+    local status
+
+    set +e
+    output=$(yad --form --center --width=500 --title="WiFi Wizard" \
+        --text="Enter the WiFi details manually." \
+        --separator=$'\x1F' \
+        --button="Cancel":1 --button="Next":0 \
+        --field="SSID" "$manual_ssid" \
+        --field="Password":h "$manual_password" \
+        --field="Hidden Network:CHK" "$manual_hidden")
+    status=$?
+    set -e
+
+    if ((status != 0)); then
+        return 1
+    fi
+
+    manual_ssid="$(awk -F'\x1F' '{print $1}' <<<"$output")"
+    manual_password="$(awk -F'\x1F' '{print $2}' <<<"$output")"
+    manual_hidden="$(awk -F'\x1F' '{print tolower($3)}' <<<"$output")"
+    return 0
+}
+
+prompt_password() {
+    local help_text="$1"
+    local output
+    local status
+
+    set +e
+    output=$(yad --form --center --width=500 --title="WiFi Wizard" \
+        --text="$help_text" \
+        --separator=$'\x1F' \
+        --button="Back":2 --button="Cancel":1 --button="Connect":0 \
+        --field="Password":h "$network_password")
+    status=$?
+    set -e
+
+    if ((status == 2)); then
+        return 2
+    fi
+
+    if ((status != 0)); then
+        return 1
+    fi
+
+    network_password="$(awk -F'\x1F' '{print $1}' <<<"$output")"
+    return 0
+}
+
+show_success() {
+    local iface="$1"
+    local address
+    local attempts=0
+
+    while [ "$attempts" -lt 15 ]; do
+        address=$(ip -4 -o addr show dev "$iface" | awk '{print $4}' | head -n 1)
+        if [ -n "$address" ]; then
+            yad --info --center --title="WiFi Wizard" --text="Connected to $network_ssid on $iface.\nIPv4 address: $address"
+            return 0
+        fi
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    yad --info --center --title="WiFi Wizard" --text="WiFi settings were saved for $network_ssid on $iface.\nThe connection may take a few more seconds to complete."
+}
+
+iface="$(choose_wireless_interface || true)"
+manual_ssid=""
+manual_password=""
+manual_hidden="FALSE"
+network_password=""
+network_ssid=""
+network_hidden="false"
+
+if [ -z "$iface" ]; then
+    yad --error --center --title="WiFi Wizard" --text="No wireless adapter was detected on this device."
+    exit 1
+fi
+
+while true; do
+    scan_progress_pid="$(show_scan_progress "$iface")"
+    scan_results="$(sudo /usr/bin/tc-scan-wifi "$iface" 2>/tmp/uftc-wifi-scan.log || true)"
+    wait "$scan_progress_pid" >/dev/null 2>&1 || true
+
+    if [ -z "$scan_results" ]; then
+        if [ -s /tmp/uftc-wifi-scan.log ]; then
+            yad --warning --center --title="WiFi Wizard" --text="The adapter scan returned an error or no usable results.\n\nDetails:\n$(tail -n 5 /tmp/uftc-wifi-scan.log)"
+        else
+            yad --info --center --title="WiFi Wizard" --text="No WiFi networks were detected on $iface. You can enter the network details manually."
+        fi
+        if ! prompt_manual_network; then
+            exit 0
+        fi
+        network_ssid="$manual_ssid"
+        network_password="$manual_password"
+        network_hidden="$manual_hidden"
+        break
+    fi
+
+    set +e
+    selection=$(printf '%s\n' "$scan_results" | yad --list --center --width=700 --height=400 --title="WiFi Wizard" \
+        --text="Select a wireless network for $iface." \
+        --separator=$'\x1F' --print-all \
+        --button="Manual Network":2 --button="Rescan":3 --button="Cancel":1 --button="Next":0 \
+        --column="SSID" --column="Signal" --column="Security")
+    status=$?
+    set -e
+
+    if ((status == 3)); then
+        continue
+    fi
+
+    if ((status == 2)); then
+        if ! prompt_manual_network; then
+            exit 0
+        fi
+        network_ssid="$manual_ssid"
+        network_password="$manual_password"
+        network_hidden="$manual_hidden"
+        break
+    fi
+
+    if ((status != 0)); then
+        exit 0
+    fi
+
+    network_ssid="$(awk -F'\x1F' '{print $1}' <<<"$selection")"
+    network_security="$(awk -F'\x1F' '{print $3}' <<<"$selection")"
+    network_hidden="false"
+
+    if [ "$network_security" = "Open" ]; then
+        network_password=""
+        break
+    fi
+
+    if prompt_password "Enter the password for $network_ssid. Leave it blank only if the network is actually open."; then
+        break
+    fi
+
+    password_status=$?
+    if ((password_status == 2)); then
+        continue
+    fi
+    exit 0
+done
+
+if [ -z "$network_ssid" ]; then
+    yad --error --center --title="WiFi Wizard" --text="A network name is required."
+    exit 1
+fi
+
+yad --info --center --title="WiFi Wizard" --text="Saving WiFi settings for $network_ssid. This can take up to 30 seconds while the connection comes up." --timeout=5 >/dev/null 2>&1 || true
+
+if ! configured_iface=$(printf '%s\n' "$network_password" | sudo /usr/bin/tc-configure-wifi --configure "$iface" "$network_ssid" "$network_hidden"); then
+    yad --error --center --title="WiFi Wizard" --text="Failed to save the WiFi configuration."
+    exit 1
+fi
+
+show_success "$configured_iface"

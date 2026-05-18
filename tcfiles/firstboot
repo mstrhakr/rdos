@@ -1,12 +1,24 @@
 #!/bin/bash
+set -euo pipefail
+
+XANMOD_PACKAGE="linux-xanmod-lts-x64v1"
+
 echo "Completing the final steps for the golden image."
 echo "Once finished the machine will turn off, please wait until this is complete."
 echo "If you see this and can not login after turning it back on contact the helpdesk."
 update-initramfs -c -k all
-wget -qO - https://dl.xanmod.org/archive.key | sudo gpg --dearmor -vo /etc/apt/keyrings/xanmod-archive-keyring.gpg
-echo 'deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' | sudo tee /etc/apt/sources.list.d/xanmod-release.list
+install -d -m 755 /etc/apt/keyrings
+wget -qO - https://dl.xanmod.org/archive.key | gpg --dearmor -o /etc/apt/keyrings/xanmod-archive-keyring.gpg
+echo 'deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' > /etc/apt/sources.list.d/xanmod-release.list
 apt update
-apt install linux-xanmod-lts-x64v1 -y
+
+if apt-cache show "$XANMOD_PACKAGE" >/dev/null 2>&1; then
+	apt install "$XANMOD_PACKAGE" -y
+else
+	echo "Warning: $XANMOD_PACKAGE is not currently available from deb.xanmod.org."
+	echo "Continuing with the kernel already present in the image."
+fi
+
 setcap cap_net_raw+ep /usr/bin/mtr-packet
 set-hostname thinclient
-rm $0 && systemctl poweroff
+rm "$0" && systemctl poweroff

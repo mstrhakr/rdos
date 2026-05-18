@@ -94,6 +94,7 @@ The recommended method of flashing VHD's directly is using RescueZilla on a Vent
 ### WiFi
 
 WiFi can be enabled by placing a suitable wpa_supplicant.conf on the boot partition.
+If you are on the running thin client, there is also a built-in WiFi Wizard available from the login screen, the configuration screen, or by entering `wifi` as the login password.
 Here is a template (Don't forget to change the country, I put china as the example due to the broadest range):
 
 ```
@@ -181,6 +182,8 @@ terminal: Open the terminal
 ping (without your admin password in front): Ping the RDP server with a full traceroute, users can change this to any required destination if needed.
 
 ip (without your admin password in front): Shows the devices network information
+
+wifi (without your admin password in front): Opens the WiFi Wizard
 
 ## Terms of Use
 

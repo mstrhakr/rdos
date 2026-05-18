@@ -10,11 +10,15 @@ RUN apt install /tmp/icaclient.deb -y && rm /tmp/icaclient.deb || true
 COPY Moonlight.AppImage* /usr/bin/moonlight
 
 COPY tcfiles/thinclient /usr/bin/thinclient
+COPY tcfiles/tc-configure-wifi /usr/bin/tc-configure-wifi
+COPY tcfiles/tc-scan-wifi /usr/bin/tc-scan-wifi
+COPY tcfiles/tc-wifi-wizard /usr/bin/tc-wifi-wizard
 COPY tcfiles/set-hostname /usr/bin/set-hostname
 COPY tcfiles/firstboot /usr/bin/firstboot
 COPY tcfiles/auto-maintenance.debian /usr/bin/auto-maintenance
 COPY tcfiles/099_tc /etc/sudoers.d/099_tc
 COPY tcfiles/usb-access.rules /etc/udev/rules.d/usb-access.rules
+RUN chown root:root /etc/sudoers.d/099_tc && chmod 440 /etc/sudoers.d/099_tc
 RUN chmod +x /usr/bin/*
 
 RUN mkdir -p /etc/systemd/system/getty@tty1.service.d

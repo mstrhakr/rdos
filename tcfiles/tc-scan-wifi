@@ -1,0 +1,91 @@
+#!/bin/bash
+
+set -euo pipefail
+
+find_wireless_interface() {
+    local device
+
+    for device in /sys/class/net/*; do
+        [ -d "$device/wireless" ] || continue
+        basename "$device"
+        return 0
+    done
+
+    return 1
+}
+
+list_wireless_interfaces() {
+    local device
+
+    for device in /sys/class/net/*; do
+        [ -d "$device/wireless" ] || continue
+        basename "$device"
+    done
+}
+
+iface="${1:-$(find_wireless_interface)}"
+
+ip link set "$iface" up >/dev/null 2>&1 || true
+
+scan_output=$(mktemp)
+scan_error=$(mktemp)
+
+if ! timeout 20 iw dev "$iface" scan ap-force >"$scan_output" 2>"$scan_error"; then
+    cat "$scan_error" >&2
+    rm -f "$scan_output" "$scan_error"
+    exit 1
+fi
+
+awk '
+function flush_network() {
+    if (ssid == "") {
+        return
+    }
+
+    if (!(ssid in best_signal) || signal > best_signal[ssid]) {
+        best_signal[ssid] = signal
+        best_security[ssid] = security
+    }
+}
+
+BEGIN {
+    ssid = ""
+    signal = -1000
+    security = "Open"
+}
+
+/^BSS / {
+    flush_network()
+    ssid = ""
+    signal = -1000
+    security = "Open"
+    next
+}
+
+/^[[:space:]]*SSID:/ {
+    sub(/^[[:space:]]*SSID:[[:space:]]*/, "")
+    ssid = $0
+    next
+}
+
+/^[[:space:]]*signal:/ {
+    sub(/^[[:space:]]*signal:[[:space:]]*/, "")
+    split($0, parts, " ")
+    signal = parts[1] + 0
+    next
+}
+
+/^[[:space:]]*(RSN:|WPA:)/ {
+    security = "Secured"
+    next
+}
+
+END {
+    flush_network()
+    for (name in best_signal) {
+        printf "%s\t%d dBm\t%s\n", name, best_signal[name], best_security[name]
+    }
+}
+' "$scan_output" | sort -t $'\t' -k2,2nr
+
+rm -f "$scan_output" "$scan_error"

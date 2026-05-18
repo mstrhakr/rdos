@@ -1,0 +1,134 @@
+#!/bin/bash
+
+set -euo pipefail
+
+find_wireless_interface() {
+    local device
+
+    for device in /sys/class/net/*; do
+        [ -d "$device/wireless" ] || continue
+        basename "$device"
+        return 0
+    done
+
+    return 1
+}
+
+escape_wpa_string() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+read_existing_country() {
+    local config
+
+    for config in /etc/wpa_supplicant/wpa_supplicant-*.conf; do
+        [ -f "$config" ] || continue
+        awk -F= '/^country=/{print $2; exit}' "$config"
+        return 0
+    done
+
+    return 1
+}
+
+disable_powersave() {
+    local device
+    local iface
+
+    for device in /sys/class/net/*; do
+        [ -d "$device/wireless" ] || continue
+        iface="$(basename "$device")"
+        iw dev "$iface" set power_save off || true
+    done
+}
+
+install_config() {
+    local iface="$1"
+    local source_file="$2"
+    local move_source="$3"
+    local config_path="/etc/wpa_supplicant/wpa_supplicant-$iface.conf"
+
+    install -D -m 600 "$source_file" "$config_path"
+    ip link set "$iface" up >/dev/null 2>&1 || true
+    systemctl enable --now "wpa_supplicant@$iface.service"
+    disable_powersave
+
+    if [ "$move_source" = "true" ]; then
+        rm -f "$source_file"
+    fi
+}
+
+configure_network() {
+    local iface="$1"
+    local ssid="$2"
+    local hidden="$3"
+    local password
+    local temp_file
+    local country
+    local escaped_ssid
+
+    IFS= read -r password || true
+    temp_file=$(mktemp)
+    country="$(read_existing_country || true)"
+    escaped_ssid="$(escape_wpa_string "$ssid")"
+
+    {
+        echo 'ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev'
+        echo 'update_config=1'
+        if [ -n "$country" ]; then
+            echo "country=$country"
+        fi
+        if [ -n "$password" ]; then
+            wpa_passphrase "$ssid" "$password" | awk -v hidden="$hidden" '
+                /^network=\{/ { print; next }
+                /^\}/ {
+                    if (hidden == "true") {
+                        print "\tscan_ssid=1"
+                    }
+                    print
+                    next
+                }
+                { print }
+            '
+        else
+            printf 'network={\n\tssid="%s"\n' "$escaped_ssid"
+            if [ "$hidden" = "true" ]; then
+                echo $'\tscan_ssid=1'
+            fi
+            echo $'\tkey_mgmt=NONE'
+            echo '}'
+        fi
+    } > "$temp_file"
+
+    install_config "$iface" "$temp_file" "false"
+    rm -f "$temp_file"
+    rm -f /boot/wpa_supplicant.conf
+    echo "$iface"
+}
+
+main() {
+    local iface
+    local move_source=false
+
+    case "${1:-}" in
+        --from-file)
+            [ "$#" -ge 2 ] || exit 1
+            if [ "${3:-}" = "--move-source" ]; then
+                move_source=true
+            fi
+            iface="$(find_wireless_interface)"
+            install_config "$iface" "$2" "$move_source"
+            ;;
+        --configure)
+            [ "$#" -eq 4 ] || exit 1
+            configure_network "$2" "$3" "$4"
+            ;;
+        --disable-powersave)
+            disable_powersave
+            ;;
+        *)
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
