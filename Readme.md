@@ -34,13 +34,13 @@ On Windows, line endings are a common source of shell-script failures. This repo
 
 If you are approaching this repo as a developer, see [BUILDING.md](BUILDING.md) for a step by step explanation of what gets built and how to package a basic installer ISO.
 
-```
+```bash
 ./build.sh
 ```
 
 To build a super basic installer ISO (auto install + power off):
 
-```
+```bash
 ./build-installer-iso.sh
 ```
 
@@ -77,20 +77,21 @@ Flash it to USB with Rufus, Ventoy, or your preferred ISO writer, boot the targe
 Safety note: this installer is intentionally simple and destructive. It will erase the selected target disk without an interactive confirmation.
 
 References used for this flow:
-- Clonezilla Live docs: https://clonezilla.org/live-doc.php
-- Clonezilla advanced boot parameters (`ocs_live_run`, batch mode): https://clonezilla.org/show-live-doc-content.php?topic=clonezilla-live/doc/99_Misc
+
+- Clonezilla Live docs: <https://clonezilla.org/live-doc.php>
+- Clonezilla advanced boot parameters (`ocs_live_run`, batch mode): <https://clonezilla.org/show-live-doc-content.php?topic=clonezilla-live/doc/99_Misc>
 
 ### Network deployment using Clonezilla on the ISO
 
 Because a full copy of Clonezilla is bundled on the disk you can use this to facilitate PXE deployments over the network using a tempoary private bittorrent server. A full copy of Clonezilla is normally not present on clonezilla made disks, because of this we will need to apply a small workaround to be able to use this option.
 
-##### Requirements
+#### Requirements
 
 - The PXE server should be one of your target machines with the smallest amount of disk space and an identical type of drive.
 - This source machine should be correctly installed and configured as desired without disabling dynamic_hostname.
 - Every PXE booting machine will be wiped, ensure no machines that are not part of the deployment will PXE boot during this time.
 
-##### Instructions
+#### Instructions
 
 0. Install and configure the source machine with UFTC.
 1. Load CloneZilla from the installation disk using the Start Clonezilla option.
@@ -130,14 +131,14 @@ WiFi can be enabled by placing a suitable wpa_supplicant.conf on the boot partit
 If you are on the running thin client, there is also a built-in WiFi Wizard available from the login screen, the configuration screen, or by entering `wifi` as the login password.
 Here is a template (Don't forget to change the country, I put china as the example due to the broadest range):
 
-```
+```ini
 ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
 update_config=1
 country=CN
 network={
-	ssid="SSID GOES HERE"
-	psk="Password goes here"
-	bgscan="simple:30:-65:15"
+    ssid="SSID GOES HERE"
+    psk="Password goes here"
+    bgscan="simple:30:-65:15"
 }
 ```
 
@@ -153,7 +154,7 @@ The helpdesk field will be used in the middle of error message sentences, for ex
 Just like the WiFi the settings for the thinclient software can also be preconfigured by placing a tcconfig file in the boot partition.
 The template for this file is as follows (pay attention to the line endings, they need to be linux compatible):
 
-```
+```ini
 server="server1|server2|server3"
 domain=""
 param=""
@@ -187,10 +188,11 @@ You implement this functionality strictly on your own risk. If left blank this f
 UFTC supports existing RDP files if downloaded from a central location, to do this simply put the RDP URL as the server name.
 
 ### Moonlight Mode
+
 Moonlight is included as a self contained 50mb binary and can be activated by using moonlight as the server address.
 Moonlight focuses on remotely connecting to a pre-configured single session PC and provides low latency multimedia as well as game controller support.
 If you are looking to use this thin client for a living room PC or media heavy display moonlight may provide a suitable option.
-For use with the Sunlight or Apollo server. 
+For use with the Sunlight or Apollo server.
 
 ### Multiple Servers
 
@@ -224,5 +226,5 @@ wifi (without your admin password in front): Opens the WiFi Wizard
 - I am not responsible for what happens with your deployment, its designed to be as robust as I could make it. But should unforseen consequences, bugs or updates happen I am not liable as you accept you use and deploy this on your own risk especially if you enabled automatic updates and your company is now offline due to a bad/incompatible debian update.
 - The software is free for both personal and business use and may not be resold. Preinstallation on physical hardware is allowed as long as it is made clear that it runs software based on this free repository.
 - You have the freedom to make modifications to this software as long as you do not sell them (Henk.Tech does have the right to sell private modified builds). If distributed publically for free the source code must be provided (If it was modified manually list your changes and how to apply them, don't just post the image). For private internal modifications within your deployment this requirement does not apply  ( MSP's using it for a customer they manage counts as internal), but if anyone asks what software is running point them to the public repo.
-- Please share your success stories in https://github.com/henk717/uftc/discussions/categories/show-and-tell , while I give out the software for free my reward is the satisfaction of knowing that my work made a positive difference in your organization. Of course for security reasons it is fine if you leave the company name out, deployment size will do.
+- Please share your success stories in <https://github.com/henk717/uftc/discussions/categories/show-and-tell>, while I give out the software for free my reward is the satisfaction of knowing that my work made a positive difference in your organization. Of course for security reasons it is fine if you leave the company name out, deployment size will do.
 - If I pick a formal license that embodies these terms your repo/deployment is retroactively licensed under the license of this (parent) repo on the condition that the new license is an open source license similar to the above (If not the above freedoms apply for any version prior to the license change).
