@@ -280,7 +280,9 @@ zstd -T0 "-${ZSTD_LEVEL}" -f "$RAW_IMAGE" -o "$COMPRESSED_IMAGE"
 rm -f "$RAW_IMAGE"
 
 cp "$SCRIPT_DIR/tcfiles/installer-install.sh" "$ISO_ROOT/uftc/install.sh"
+cp "$SCRIPT_DIR/tcfiles/tc-installer-ui.sh" "$ISO_ROOT/uftc/tc-installer-ui.sh"
 chmod +x "$ISO_ROOT/uftc/install.sh"
+chmod +x "$ISO_ROOT/uftc/tc-installer-ui.sh"
 
 CLONEZILLA_BOOT_ARGS="boot=live union=overlay username=user config components quiet loglevel=3 ocs_1_cpu_udev noswap edd=on nomodeset enforcing=0 locales= keyboard-layouts= net.ifnames=0 nosplash modprobe.blacklist=pcspkr"
 

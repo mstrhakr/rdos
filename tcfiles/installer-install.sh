@@ -14,15 +14,23 @@ rmmod pcspkr >/dev/null 2>&1 || true
 
 MODE="${1:-guided}"
 UI_AVAILABLE=0
-if command -v whiptail >/dev/null 2>&1 && [[ -t 0 && -t 1 ]]; then
+
+# Try to load enhanced UI library
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/tc-installer-ui.sh" ]]; then
+  source "$SCRIPT_DIR/tc-installer-ui.sh"
+  UI_AVAILABLE=1
+elif command -v whiptail >/dev/null 2>&1 && [[ -t 0 && -t 1 ]]; then
   UI_AVAILABLE=1
 fi
 
 show_msg() {
   local title="$1"
   local text="$2"
-  if [[ "$UI_AVAILABLE" == "1" ]]; then
-    whiptail --title "$title" --msgbox "$text" 12 78
+  if [[ "$UI_AVAILABLE" == "1" ]] && declare -F ui_info_page >/dev/null 2>&1; then
+    ui_info_page "$title" "$text"
+  elif command -v whiptail >/dev/null 2>&1; then
+    whiptail --title "$title" --msgbox "$text" 12 78 2>/dev/null || true
   else
     echo
     echo "[$title]"
@@ -33,8 +41,10 @@ show_msg() {
 confirm_msg() {
   local title="$1"
   local text="$2"
-  if [[ "$UI_AVAILABLE" == "1" ]]; then
-    whiptail --title "$title" --yesno "$text" 14 78
+  if [[ "$UI_AVAILABLE" == "1" ]] && declare -F ui_confirm >/dev/null 2>&1; then
+    ui_confirm "$text"
+  elif command -v whiptail >/dev/null 2>&1; then
+    whiptail --title "$title" --yesno "$text" 14 78 2>/dev/null || true
   else
     echo
     echo "[$title] $text"
@@ -46,52 +56,22 @@ confirm_msg() {
 run_with_gauge() {
   local target_disk="$1"
 
-  if [[ "$UI_AVAILABLE" != "1" ]]; then
+  if [[ "$UI_AVAILABLE" != "1" ]] || ! declare -F ui_progress_gauge >/dev/null 2>&1; then
     zstd -d -c "$IMAGE_ZST" | dd of="/dev/$target_disk" bs=16M status=progress conv=fsync
     sync
     return
   fi
 
-  (
-    echo "5"
-    echo "# Preparing installer..."
-    sleep 1
-
-    echo "15"
-    echo "# Starting image stream to /dev/$target_disk"
-
-    zstd -d -c "$IMAGE_ZST" | dd of="/dev/$target_disk" bs=16M status=progress conv=fsync &
-    write_pid=$!
-    pct=20
-    while kill -0 "$write_pid" 2>/dev/null; do
-      echo "$pct"
-      echo "# Writing UFTC image to /dev/$target_disk\n# Detailed transfer output is logged to $LOG_FILE"
-      sleep 2
-      pct=$((pct + 1))
-      if (( pct > 95 )); then
-        pct=20
-      fi
-    done
-    wait "$write_pid"
-
-    echo "98"
-    echo "# Finalizing sync..."
-    sync
-    echo "100"
-    echo "# Install complete."
-  ) | whiptail --title "UFTC Installer" --gauge "Installing UFTC..." 12 78 0
+  ui_progress_gauge "$target_disk" "$IMAGE_ZST"
 }
 
 choose_post_action() {
-  if [[ "$UI_AVAILABLE" != "1" ]]; then
+  if [[ "$UI_AVAILABLE" != "1" ]] || ! declare -F ui_post_action_menu >/dev/null 2>&1; then
     echo "poweroff"
     return
   fi
 
-  whiptail --title "UFTC Installer" --menu "Select post-install action:" 15 78 4 \
-    "poweroff" "Power off (recommended for USB removal)" \
-    "reboot" "Reboot immediately after install" \
-    "shell" "Open shell after install" 3>&1 1>&2 2>&3
+  ui_post_action_menu
 }
 
 IMAGE_ZST="/run/live/medium/uftc/uftc.img.zst"
@@ -142,7 +122,7 @@ auto_target_disk() {
 }
 
 pick_target_disk() {
-  if [[ "$UI_AVAILABLE" != "1" ]]; then
+  if [[ "$UI_AVAILABLE" != "1" ]] || ! declare -F ui_simple_disk_menu >/dev/null 2>&1; then
     auto_target_disk
     return
   fi
@@ -163,7 +143,7 @@ pick_target_disk() {
     return 1
   fi
 
-  whiptail --title "UFTC Installer" --menu "Select install target disk (WILL BE ERASED):" 20 90 10 "${options[@]}" 3>&1 1>&2 2>&3
+  ui_simple_disk_menu options
 }
 
 TARGET_DISK=""
@@ -176,7 +156,20 @@ if [[ "$MODE" == "auto" ]]; then
     poweroff -f
   fi
 else
-  show_msg "UFTC Installer" "Guided mode will let you choose target disk and post-install behavior.\n\nLive media disk: ${LIVE_DISK:-unknown}"
+  if [[ "$UI_AVAILABLE" == "1" ]] && declare -F ui_print_header >/dev/null 2>&1; then
+    ui_clear
+    ui_print_header
+    printf "\n"
+    printf "${COLOR_BRIGHT_CYAN}═══════════════════════════════════════════════════════════════${COLOR_RESET}\n"
+    printf "${COLOR_BRIGHT_WHITE}Welcome to UFTC Guided Installation${COLOR_RESET}\n"
+    printf "${COLOR_BRIGHT_CYAN}═══════════════════════════════════════════════════════════════${COLOR_RESET}\n\n"
+    ui_info_message "Live media disk: ${LIVE_DISK:-unknown}"
+    printf "\n${COLOR_DIM}Press Enter to continue...${COLOR_RESET}"
+    read -r
+  else
+    show_msg "UFTC Installer" "Guided mode will let you choose target disk and post-install behavior.\n\nLive media disk: ${LIVE_DISK:-unknown}"
+  fi
+  
   TARGET_DISK="$(pick_target_disk || true)"
   if [[ -z "$TARGET_DISK" ]]; then
     show_msg "UFTC Installer" "No install target disk was selected or available."

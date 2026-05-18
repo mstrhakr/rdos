@@ -1,10 +1,14 @@
-# Keep Linux build/runtime files on LF even when edited on Windows.
-*.sh text eol=lf
-Dockerfile text eol=lf
-d2vm text eol=lf
-build.sh text eol=lf
-build-installer-iso.sh text eol=lf
+# Binary files (not subject to line ending conversion)
+*.png binary
+*.vhd binary
 
-# Thin-client runtime scripts and service/config files are consumed by Linux.
+# Default: all files use LF
+* text eol=lf
+
+# Windows PowerShell and batch files use CRLF
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+
+# Keep Linux build/runtime files on LF even when edited on Windows.
 tcfiles/* text eol=lf
 tcfiles/** text eol=lf
