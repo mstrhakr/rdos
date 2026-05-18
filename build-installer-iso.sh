@@ -8,6 +8,8 @@ INPUT_VHD="${INPUT_VHD:-uftc.vhd}"
 OUTPUT_ISO="${OUTPUT_ISO:-uftc-installer.iso}"
 WORKDIR="${WORKDIR:-.installer-work}"
 AUTO_INSTALL_DEFAULT="${AUTO_INSTALL_DEFAULT:-0}"
+SKIP_BUILD="${SKIP_BUILD:-0}"
+BUILD_SCRIPT="${BUILD_SCRIPT:-./build.sh}"
 # Compression level for the installer payload. 9 is a good balance (fast + small).
 # Set to 19 for maximum compression at the cost of significantly longer build times.
 ZSTD_LEVEL="${ZSTD_LEVEL:-9}"
@@ -17,6 +19,108 @@ ISO_ROOT="$WORKDIR/iso-root"
 RAW_IMAGE="$WORKDIR/uftc.img"
 COMPRESSED_IMAGE="$ISO_ROOT/uftc/uftc.img.zst"
 MIN_BASE_ISO_SIZE_BYTES=400000000
+
+usage() {
+  cat <<'EOF'
+Usage: ./build-installer-iso.sh [options]
+
+Builds a Clonezilla-based unattended installer ISO for UFTC.
+By default, this script builds a fresh VHD first by invoking ./build.sh.
+
+Options:
+      --skip-build                 Skip invoking build.sh and use existing --input-vhd
+      --build-script PATH          Path to build script (default: ./build.sh)
+      --build-arg ARG              Pass one argument to build.sh (repeatable)
+      --input-vhd PATH             Input VHD path (default: uftc.vhd)
+      --output-iso PATH            Output ISO path (default: uftc-installer.iso)
+      --workdir PATH               Working directory for intermediate files
+      --clonezilla-iso-url URL     Base Clonezilla ISO URL
+      --zstd-level N               Compression level 1-19 (default: 9)
+      --auto-install-default       Make unattended installer the default boot entry
+  -h, --help                       Show this help message
+
+Environment variables with same names are also supported.
+EOF
+}
+
+BUILD_SCRIPT_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --skip-build)
+      SKIP_BUILD=1
+      shift
+      ;;
+    --build-script)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      BUILD_SCRIPT="$2"
+      shift 2
+      ;;
+    --build-arg)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      BUILD_SCRIPT_ARGS+=("$2")
+      shift 2
+      ;;
+    --input-vhd)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      INPUT_VHD="$2"
+      shift 2
+      ;;
+    --output-iso)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      OUTPUT_ISO="$2"
+      shift 2
+      ;;
+    --workdir)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      WORKDIR="$2"
+      shift 2
+      ;;
+    --clonezilla-iso-url)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      CLONEZILLA_ISO_URL="$2"
+      shift 2
+      ;;
+    --zstd-level)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      ZSTD_LEVEL="$2"
+      shift 2
+      ;;
+    --auto-install-default)
+      AUTO_INSTALL_DEFAULT=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
 
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -32,13 +136,30 @@ need_cmd curl
 need_cmd lsblk
 need_cmd findmnt
 
+if [[ ! "$ZSTD_LEVEL" =~ ^[0-9]+$ ]] || (( ZSTD_LEVEL < 1 || ZSTD_LEVEL > 19 )); then
+  echo "Invalid --zstd-level: $ZSTD_LEVEL (expected 1-19)" >&2
+  exit 1
+fi
+
 log_phase() {
   printf '\n[%s] %s\n' "$(date +'%H:%M:%S')" "$1"
 }
 
+if [[ "$SKIP_BUILD" != "1" ]]; then
+  if [[ ! -x "$BUILD_SCRIPT" ]]; then
+    echo "Build script not found or not executable: $BUILD_SCRIPT" >&2
+    exit 1
+  fi
+
+  log_phase "Building fresh VHD via $BUILD_SCRIPT"
+  "$BUILD_SCRIPT" --output "$INPUT_VHD" --force "${BUILD_SCRIPT_ARGS[@]}"
+else
+  log_phase "Skipping VHD build; using existing $INPUT_VHD"
+fi
+
 if [[ ! -f "$INPUT_VHD" ]]; then
   echo "Input VHD not found: $INPUT_VHD" >&2
-  echo "Run ./build.sh first or set INPUT_VHD=/path/to/uftc.vhd" >&2
+  echo "Re-run without --skip-build, or set --input-vhd to an existing file." >&2
   exit 1
 fi
 
