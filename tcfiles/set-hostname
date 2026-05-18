@@ -5,5 +5,17 @@ exit
 fi
 
 read oldhost </etc/hostname
-sed -i "s/$oldhost/$1/g" /etc/hosts
-sed -i "s/$oldhost/$1/g" /etc/hostname
+
+escape_sed_pattern() {
+	printf '%s' "$1" | sed -e 's/[.[\\*^$()+?{|]/\\&/g' -e 's/]/\\]/g'
+}
+
+escape_sed_replacement() {
+	printf '%s' "$1" | sed -e 's/[&/\\]/\\&/g'
+}
+
+oldhost_escaped="$(escape_sed_pattern "$oldhost")"
+newhost_escaped="$(escape_sed_replacement "$1")"
+
+sed -i "s/$oldhost_escaped/$newhost_escaped/g" /etc/hosts
+sed -i "s/$oldhost_escaped/$newhost_escaped/g" /etc/hostname
