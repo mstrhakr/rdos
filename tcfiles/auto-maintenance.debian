@@ -103,7 +103,7 @@ DEBIAN_FRONTEND=noninteractive \
   apt-get \
   -o Dpkg::Options::=--force-confold \
   -o Dpkg::Options::=--force-confdef \
-  -y --allow-downgrades --allow-remove-essential --allow-change-held-packages \
+    -y \
   install -f
 
 if [ ! -z "$PURGE" ]; then
@@ -118,7 +118,7 @@ DEBIAN_FRONTEND=noninteractive \
   apt-get \
   -o Dpkg::Options::=--force-confold \
   -o Dpkg::Options::=--force-confdef \
-  -y --allow-downgrades --allow-remove-essential --allow-change-held-packages \
+    -y \
   dist-upgrade
 
 #Update flatpak's and remove unused dependencies
