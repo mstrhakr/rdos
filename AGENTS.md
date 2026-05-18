@@ -127,7 +127,7 @@ Machines auto-rename to `TC-{MAC_ADDRESS}` on first boot (dynamic hostname). To 
 
 ### Testing
 
-- No automated tests; validation via VM boot cycles (see BUILDING.md)
+- No automated tests; validation via VM boot cycles (see [docs/building.md](docs/building.md))
 - Always boot twice: first boot runs `firstboot`, second boot validates actual thin-client behavior
 
 ### Versioning
@@ -145,9 +145,9 @@ Machines auto-rename to `TC-{MAC_ADDRESS}` on first boot (dynamic hostname). To 
 
 ## Key References
 
-- [BUILDING.md](BUILDING.md) – Detailed build process and safe test loop
+- [docs/building.md](docs/building.md) – Detailed build process and safe test loop
 - [Readme.md](Readme.md) – Project overview and usage
-- [UTFC Thin Client Troubleshooting.md](UTFC%20Thin%20Client%20Troubleshooting.md) – User-facing troubleshooting guide
+- [docs/troubleshooting.md](docs/troubleshooting.md) – User-facing troubleshooting guide
 
 ---
 

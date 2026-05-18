@@ -32,7 +32,7 @@ Image building requires docker and can be done inside of WSL2 if desired.
 
 On Windows, line endings are a common source of shell-script failures. This repository includes `.gitattributes` to enforce LF endings for Linux-consumed files.
 
-If you are approaching this repo as a developer, see [BUILDING.md](BUILDING.md) for a step by step explanation of what gets built and how to package a basic installer ISO.
+If you are approaching this repo as a developer, see [docs/building.md](docs/building.md) for a step by step explanation of what gets built and how to package a basic installer ISO.
 
 ```bash
 ./build.sh
