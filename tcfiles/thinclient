@@ -79,6 +79,15 @@ load_config ()
     fi
 }
 
+download_config ()
+{
+    curl --fail --silent --show-error --location \
+        --connect-timeout 2 \
+        --max-time 8 \
+        --retry 1 \
+        --output "$1" "$2"
+}
+
 # Config file (down)loading and also the start of the main UI routine
 if [ -f ~/tcconfig ];then
     load_config ~/config_url
@@ -87,10 +96,10 @@ if [ -f ~/tcconfig ];then
     if [[ $config_url ]]; then
         config_url_invalid="$config_url"
         # If downloads fail we try the last successful one just in case someone made a typo, if its successful we backup the working URL
-        if ! curl -fLo ~/tcconfig "$config_url"; then
+        if ! download_config ~/tcconfig "$config_url"; then
             echo "Download failed, trying backup URL"
             load_config ~/config_url
-            if ! curl -fLo ~/tcconfig "$config_url"; then
+            if ! download_config ~/tcconfig "$config_url"; then
                 config_url="Config URL $config_url_invalid failed to download, the above settings are from a backup."  # This was a dilemma since it can pick either one from the file depending on external servers, lets just warn instead. In an automatic scenario this is not saved, even if the admin ends up saving this the backup URL should revert it again.
             fi
         else
@@ -103,7 +112,7 @@ if [ -f ~/tcconfig ];then
             else
                 # Something didn't go right and we did not use the new URL successfully
                 load_config ~/config_url
-                curl -fLo ~/tcconfig "$config_url"
+                download_config ~/tcconfig "$config_url"
                 load_config ~/tcconfig
                 if [ "$config_url_invalid" == "$config_url" ]; then
                     config_url="Config URL $config_url_invalid was invalid and a backup was used." # This was a dilemma since it can pick either one from the file depending on external servers, lets just warn instead. In an automatic scenario this is not saved, even if the admin ends up saving this the backup URL should revert it again.
