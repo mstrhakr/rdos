@@ -4,15 +4,15 @@ setlocal enabledelayedexpansion
 set "ROOT=%~dp0"
 set "found=0"
 
-echo Applying permissive ACLs to build artifacts in "%ROOT%"
+echo Applying scoped ACLs to build artifacts in "%ROOT%"
 
 for %%F in ("%ROOT%*.vhd" "%ROOT%*.iso") do (
     if exist "%%~fF" (
         set "found=1"
         echo   - %%~nxF
-        icacls "%%~fF" /grant *S-1-1-0:F >nul
+        icacls "%%~fF" /inheritance:e /grant:r "%USERNAME%":F "BUILTIN\Administrators":F "NT AUTHORITY\SYSTEM":F >nul
         if errorlevel 1 (
-            echo     ! Failed to grant Everyone full control on %%~nxF
+            echo     ! Failed to apply scoped ACLs on %%~nxF
         ) else (
             echo     OK
         )
