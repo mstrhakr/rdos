@@ -81,7 +81,15 @@ COPY tcfiles/auto-maintenance.debian /usr/bin/auto-maintenance
 COPY tcfiles/099_tc /etc/sudoers.d/099_tc
 COPY tcfiles/usb-access.rules /etc/udev/rules.d/usb-access.rules
 RUN chown root:root /etc/sudoers.d/099_tc && chmod 440 /etc/sudoers.d/099_tc
-RUN chmod +x /usr/bin/*
+RUN chmod +x \
+    /usr/bin/thinclient \
+    /usr/bin/tc-settings \
+    /usr/bin/tc-configure-network \
+    /usr/bin/tc-configure-wifi \
+    /usr/bin/tc-scan-wifi \
+    /usr/bin/tc-wifi-wizard \
+    /usr/bin/set-hostname \
+    /usr/bin/auto-maintenance
 # Allow mtr to send raw ICMP packets without root (capability survives into the final image)
 RUN setcap cap_net_raw+ep /usr/bin/mtr-packet
 
