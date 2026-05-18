@@ -28,6 +28,7 @@ microphone="${microphone:-100}"
 brightness="${brightness:-50}"
 screen_timeout="${screen_timeout:-600}"
 login_timeout="${login_timeout:-600}"
+cert_policy="${cert_policy:-tofu}"
 
 # Run second phase of the build if present
 if [[ -f /usr/bin/firstboot ]]; then
@@ -137,9 +138,6 @@ if [ -f ~/tcconfig ];then
     if [[ "$autologon" == "true" ]]; then
         if yad --center --title=Loading --button="Please wait" --timeout=1; then
             autologon="false"
-        else # We can't trust these inputs just like with the login form, so we wrap them (I do it here because for the login form I want it to be very early in the chain directly after the form, and we cant do it twice)
-            username=$(printf '%q' "$username")
-            password=$(printf '%q' "$password")
         fi
     fi
 
@@ -231,8 +229,8 @@ if [ -f ~/tcconfig ];then
         if ((OUTPUT_RESULTS != 0)); then
             shutdown_thinclient
         fi
-        username=$(printf '%q' "$(awk -F'\x1F' '{print $1}' <<<"$OUTPUT")")
-        password=$(printf '%q' "$(awk -F'\x1F' '{print $2}' <<<"$OUTPUT")")
+        username="$(awk -F'\x1F' '{print $1}' <<<"$OUTPUT")"
+        password="$(awk -F'\x1F' '{print $2}' <<<"$OUTPUT")"
     fi
 fi
 
@@ -248,34 +246,51 @@ fi
 # We passed all the UI's and now try to launch RDP
 echo "Start of session" > session.log
 if [[ "$server" != "citrix" && "$server" != "moonlight" ]]; then
-    # Because we are about to bash -c we sanetize the inputs which bash -c will convert back properly
-    # Conditional because xfreerdp breaks if we do this with an empty variable
-    if [[ -n "$rdp_destination" ]]; then
-        rdp_destination=$(printf '%q' "$rdp_destination")
-    fi
+    freerdp_args=(
+        "$rdp_destination"
+        /multimon
+        +multitouch
+        /f
+        /network:auto
+        /sound:rate:44100,channel:2
+        /dynamic-resolution
+        /usb:auto
+        +drives
+        +auto-reconnect
+        +multitransport
+        "/client-hostname:$hostname"
+    )
 
+    case "$cert_policy" in
+        ignore)
+            freerdp_args+=(/cert:ignore)
+            ;;
+        deny|tofu|fingerprint:*)
+            freerdp_args+=("/cert:$cert_policy")
+            ;;
+        *)
+            freerdp_args+=(/cert:tofu)
+            ;;
+    esac
+
+    if [[ -n "$username" ]]; then
+        freerdp_args+=("/u:$username")
+    fi
     if [[ -n "$domain" ]]; then
-        domain=$(printf '%q' "$domain")
+        freerdp_args+=("/d:$domain")
     fi
 
     if [[ -n "$param" ]]; then
-        param=$(printf '%q' "$param")
+        read -r -a extra_params <<< "$param"
+        freerdp_args+=("${extra_params[@]}")
     fi
 
-    if [[ -n "$hostname" ]]; then
-        hostname=$(printf '%q' "$hostname")
-    fi
-    # Username and Password are already sanetized during input, we don't do it twice but we do need to append the correct prefix
-    if [[ -n "$username" ]]; then
-        username="/u:$username"
-    fi
     if [[ -n "$password" ]]; then
-        password="/p:$password"
+        # Keep credentials out of process arguments when possible.
+        printf '%s\n' "$password" | WLOG_APPENDER=file WLOG_FILEAPPENDER_OUTPUT_FILE_NAME=session.log WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=. xfreerdp3 "${freerdp_args[@]}" /from-stdin
+    else
+        WLOG_APPENDER=file WLOG_FILEAPPENDER_OUTPUT_FILE_NAME=session.log WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=. xfreerdp3 "${freerdp_args[@]}"
     fi
-    if [[ -n "$domain" ]]; then
-        domain="/d:$domain"
-    fi
-    bash -c "WLOG_APPENDER=file WLOG_FILEAPPENDER_OUTPUT_FILE_NAME=session.log WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=. xfreerdp3 $rdp_destination $domain $username $password /multimon +multitouch /cert:ignore /f /network:auto /sound:rate:44100,channel:2 /dynamic-resolution /usb:auto +drives +auto-reconnect +multitransport /client-hostname:$hostname $param" # Somehow this only works when wrapped in bash otherwise it cant understand the positional argument
 fi
 
 # RDP is no longer running, we diagnose why
