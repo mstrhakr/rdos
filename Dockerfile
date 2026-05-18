@@ -13,7 +13,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         xterm xinit x11-xserver-utils \
         fvwm yad light \
         freerdp3-x11 \
-        wpasupplicant iw net-tools ifupdown ethtool \
+        wpasupplicant iw net-tools ethtool \
         systemd-resolved \
         polkitd mingetty \
         pulseaudio pamixer \
@@ -74,7 +74,8 @@ COPY tcfiles/tc-wifipower.service /etc/systemd/system/tc-wifipower.service
 RUN systemctl enable tc-wifipower.service
 
 COPY tcfiles/dhcp.network /etc/systemd/network/dhcp.network
-COPY tcfiles/interfaces /etc/network/interfaces
+COPY tcfiles/systemd-resolved.conf /etc/tmpfiles.d/systemd-resolved.conf
+RUN systemctl enable systemd-networkd.service systemd-resolved.service
 
 COPY tcfiles/xorg.conf /etc/X11/xorg.conf.d/thinclient.conf
 

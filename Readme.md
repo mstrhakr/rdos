@@ -127,6 +127,7 @@ The recommended method of flashing VHD's directly is using RescueZilla on a Vent
 
 WiFi can be enabled by placing a suitable wpa_supplicant.conf on the boot partition.
 If you are on the running thin client, there is also a built-in WiFi Wizard available from the login screen, the configuration screen, or by entering `wifi` as the login password.
+Wireless association is handled by `wpa_supplicant` and DHCP/DNS are handled by `systemd-networkd` and `systemd-resolved`.
 Here is a template (Don't forget to change the country, I put china as the example due to the broadest range):
 
 ```ini

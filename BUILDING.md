@@ -19,6 +19,7 @@ In practice that means:
 - [Dockerfile](Dockerfile) assembles a Debian-based thin-client filesystem.
 - [build.sh](build.sh) builds the container and converts it into `uftc.vhd`.
 - [d2vm](d2vm) is a wrapper around the `linkacloud/d2vm` container, which needs privileged access and the Docker socket.
+- Runtime networking is provided by `systemd-networkd` and `systemd-resolved`, with `wpa_supplicant@<iface>.service` used for WiFi association.
 
 ## Recommended environment
 
