@@ -279,107 +279,49 @@ log_phase "Compressing installer payload (zstd level ${ZSTD_LEVEL}, threads: all
 zstd -T0 "-${ZSTD_LEVEL}" -f "$RAW_IMAGE" -o "$COMPRESSED_IMAGE"
 rm -f "$RAW_IMAGE"
 
-cat >"$ISO_ROOT/uftc/install.sh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-LOG_FILE="/var/log/uftc-installer.log"
-touch "$LOG_FILE"
-exec > >(tee -a "$LOG_FILE") 2>&1
-
-echo "=== UFTC unattended installer ==="
-date
-
-# Silence console bell and unload pcspkr if it is present.
-setterm -blength 0 -bfreq 0 >/dev/null 2>&1 || true
-rmmod pcspkr >/dev/null 2>&1 || true
-
-IMAGE_ZST="/run/live/medium/uftc/uftc.img.zst"
-if [[ ! -f "$IMAGE_ZST" ]]; then
-  IMAGE_ZST="/lib/live/mount/medium/uftc/uftc.img.zst"
-fi
-
-if [[ ! -f "$IMAGE_ZST" ]]; then
-  echo "Installer image payload missing from live media."
-  poweroff -f
-fi
-
-LIVE_SOURCE="$(findmnt -n -o SOURCE /run/live/medium 2>/dev/null || true)"
-if [[ -z "$LIVE_SOURCE" ]]; then
-  LIVE_SOURCE="$(findmnt -n -o SOURCE /lib/live/mount/medium 2>/dev/null || true)"
-fi
-LIVE_DISK=""
-
-if [[ -n "$LIVE_SOURCE" ]]; then
-  LIVE_RESOLVED="$(readlink -f "$LIVE_SOURCE" || echo "$LIVE_SOURCE")"
-  LIVE_DISK="$(lsblk -ndo PKNAME "$LIVE_RESOLVED" 2>/dev/null || true)"
-fi
-
-TARGET_DISK=""
-
-while read -r disk _type; do
-  if [[ -z "$disk" ]]; then
-    continue
-  fi
-
-  if [[ "$disk" == "$LIVE_DISK" ]]; then
-    continue
-  fi
-
-  if [[ -f "/sys/block/$disk/removable" ]] && [[ "$(cat "/sys/block/$disk/removable")" != "0" ]]; then
-    continue
-  fi
-
-  TARGET_DISK="$disk"
-  break
-done < <(lsblk -ndo NAME,TYPE | awk '$2=="disk" { print $1, $2 }')
-
-if [[ -z "$TARGET_DISK" ]]; then
-  echo "No install target disk was found."
-  echo "Live media disk was: ${LIVE_DISK:-unknown}"
-  poweroff -f
-fi
-
-echo "Writing image to /dev/$TARGET_DISK"
-echo "This will erase all data on /dev/$TARGET_DISK"
-
-zstd -d -c "$IMAGE_ZST" | dd of="/dev/$TARGET_DISK" bs=16M status=progress conv=fsync
-sync
-
-echo "Install complete. Powering off."
-poweroff -f
-EOF
-
+cp "$SCRIPT_DIR/tcfiles/installer-install.sh" "$ISO_ROOT/uftc/install.sh"
 chmod +x "$ISO_ROOT/uftc/install.sh"
 
 CLONEZILLA_BOOT_ARGS="boot=live union=overlay username=user config components quiet loglevel=3 ocs_1_cpu_udev noswap edd=on nomodeset enforcing=0 locales= keyboard-layouts= net.ifnames=0 nosplash modprobe.blacklist=pcspkr"
 
 for SYS_CFG in "$ISO_ROOT/syslinux/syslinux.cfg" "$ISO_ROOT/syslinux/isolinux.cfg"; do
   if [[ -f "$SYS_CFG" ]]; then
-    log_phase "Writing single-entry BIOS boot config in $(basename "$SYS_CFG")"
+    log_phase "Writing BIOS boot config in $(basename "$SYS_CFG")"
     cat >"$SYS_CFG" <<EOF
-default uftc_auto
+default uftc_guided
 prompt 0
-timeout 0
+timeout 50
+
+menu title UFTC Installer
+
+label uftc_guided
+  menu label UFTC guided installer (disk selection + progress UI)
+  kernel /live/vmlinuz
+  append initrd=/live/initrd.img ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/uftc/install.sh guided" ocs_live_extra_param="" ocs_live_batch="yes"
 
 label uftc_auto
-  menu label UFTC automatic install (erase target disk)
+  menu label UFTC automatic install (first target disk)
   kernel /live/vmlinuz
-  append initrd=/live/initrd.img ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/uftc/install.sh" ocs_live_extra_param="" ocs_live_batch="yes"
+  append initrd=/live/initrd.img ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/uftc/install.sh auto" ocs_live_extra_param="" ocs_live_batch="yes"
 EOF
   fi
 done
 
 GRUB_CFG="$ISO_ROOT/boot/grub/grub.cfg"
 if [[ -f "$GRUB_CFG" ]]; then
-  log_phase "Writing single-entry GRUB boot config"
+  log_phase "Writing GRUB boot config"
   cat >"$GRUB_CFG" <<EOF
 set default="0"
-set timeout=0
-set timeout_style=hidden
+set timeout=5
+set timeout_style=menu
 
-menuentry "UFTC automatic install (erase target disk)" --id uftc_auto {
-  linux /live/vmlinuz ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/uftc/install.sh" ocs_live_extra_param="" ocs_live_batch="yes"
+menuentry "UFTC guided installer (disk selection + progress UI)" --id uftc_guided {
+  linux /live/vmlinuz ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/uftc/install.sh guided" ocs_live_extra_param="" ocs_live_batch="yes"
+  initrd /live/initrd.img
+}
+
+menuentry "UFTC automatic install (first target disk)" --id uftc_auto {
+  linux /live/vmlinuz ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/uftc/install.sh auto" ocs_live_extra_param="" ocs_live_batch="yes"
   initrd /live/initrd.img
 }
 EOF
@@ -421,7 +363,7 @@ xorriso -as mkisofs \
 
 log_phase "Installer ISO build complete"
 echo "Created $OUTPUT_ISO"
-echo "Boot mode: single unattended installer entry (destructive), timeout 0s."
+echo "Boot mode: guided installer default (5s timeout) with optional automatic mode."
 echo "Payload mode: zstd compressed."
 echo "Review target disk detection in uftc/install.sh if you need a different policy."
 
