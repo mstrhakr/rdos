@@ -1,7 +1,7 @@
 [Unit]
 Description=Disable Wifi Powersave
 ConditionPathExistsGlob=/etc/wpa_supplicant/wpa_supplicant-*.conf
-After=dhcpcd.service
+After=network.target
 
 [Service]
 Type=oneshot

@@ -1,7 +1,7 @@
 [Unit]
 Description=Copy user wpa_supplicant.conf
 ConditionPathExists=/boot/wpa_supplicant.conf
-Before=dhcpcd.service
+Before=network-pre.target
 
 [Service]
 Type=oneshot
@@ -9,4 +9,4 @@ RemainAfterExit=yes
 ExecStart=/usr/bin/tc-configure-wifi --from-file /boot/wpa_supplicant.conf --move-source
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=network-pre.target
