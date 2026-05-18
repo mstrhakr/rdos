@@ -39,6 +39,7 @@ OUTPUT_VHD="uftc.vhd"
 FORCE_OVERWRITE=0
 SKIP_DOCKER_BUILD=0
 NO_STAGING=0
+NO_CACHE=0
 STAGING_DIR=""
 AUTO_STAGING_DIR=""
 
@@ -54,13 +55,13 @@ Options:
 			--skip-docker-build    Reuse existing Docker image and only run d2vm convert
 			--staging-dir PATH     Run d2vm conversion in PATH, then copy result to --output
 			--no-staging           Disable automatic /mnt performance staging
+			--no-cache             Rebuild Docker image without cache
 	-f, --force                Overwrite an existing output VHD
 	-h, --help                 Show this help message
 
 Any arguments after -- are passed directly to d2vm convert.
 EOF
 }
-
 D2VM_ARGS=()
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -96,6 +97,10 @@ while [[ $# -gt 0 ]]; do
 			NO_STAGING=1
 			shift
 			;;
+		--no-cache)
+			NO_CACHE=1
+			shift
+			;;
 		-f|--force)
 			FORCE_OVERWRITE=1
 			shift
@@ -123,7 +128,11 @@ if [[ -f "$OUTPUT_VHD" ]] && [[ "$FORCE_OVERWRITE" != "1" ]]; then
 fi
 
 if [[ "$SKIP_DOCKER_BUILD" != "1" ]]; then
-	run_with_heartbeat "Building Docker image ($IMAGE_NAME)" sudo docker build . -t "$IMAGE_NAME"
+	DOCKER_BUILD_ARGS=()
+	if [[ "$NO_CACHE" == "1" ]]; then
+		DOCKER_BUILD_ARGS+=("--no-cache")
+	fi
+	run_with_heartbeat "Building Docker image ($IMAGE_NAME)" sudo docker build "${DOCKER_BUILD_ARGS[@]}" . -t "$IMAGE_NAME"
 else
 	log_phase "Skipping Docker build; reusing image ${IMAGE_NAME}:latest"
 fi

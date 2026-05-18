@@ -38,6 +38,7 @@ Options:
       --skip-build                 Skip invoking build.sh and use existing --input-vhd
       --build-script PATH          Path to build script (default: ./build.sh)
       --build-arg ARG              Pass one argument to build.sh (repeatable)
+      --no-cache                   Build without Docker cache (alias for --build-arg --no-cache)
       --input-vhd PATH             Input VHD path (default: uftc.vhd)
       --output-iso PATH            Output ISO path (default: uftc-installer.iso)
       --workdir PATH               Working directory for intermediate files
@@ -110,6 +111,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-staging)
       NO_STAGING=1
+      shift
+      ;;
+    --no-cache)
+      BUILD_SCRIPT_ARGS+=(--no-cache)
       shift
       ;;
     --base-iso-cache)
