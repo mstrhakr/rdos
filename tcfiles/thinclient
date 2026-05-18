@@ -221,7 +221,6 @@ if [ -f ~/tcconfig ];then
         if ((OUTPUT_RESULTS != 0)); then
             shutdown_thinclient
         fi
-        Blank=""
         username=$(printf '%q' "$(awk -F'\x1F' '{print $1}' <<<"$OUTPUT")")
         password=$(printf '%q' "$(awk -F'\x1F' '{print $2}' <<<"$OUTPUT")")
     fi
