@@ -13,7 +13,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         xterm xinit x11-xserver-utils \
         fvwm yad light \
         freerdp3-x11 \
-        wpasupplicant iw net-tools ethtool \
+        wpasupplicant iw rfkill net-tools ethtool \
         systemd-resolved \
         polkitd mingetty \
         pulseaudio pamixer \
