@@ -160,7 +160,13 @@ If the thinclient is not preconfigured on the boot partition it will automatical
 The first boot wizard focuses on the essentials only: connection details, DHCP vs static IPv4, optional WiFi setup, and support information.
 Sensible defaults are applied automatically for display, timeout, keyboard, and audio settings.
 
-After first boot, use `config` or `settings` as the login password to open the full settings page. The full settings page breaks options into separate sections for connection, network, device behavior, and support settings.
+After first boot, use the `Settings` button on the login screen to open the full settings page. If an admin password is configured, you will get a separate unlock prompt before the panel opens.
+
+Default settings password: `uftc`
+
+The first-time setup wizard shows this default and lets you replace it during the Support step.
+
+The full settings page breaks options into separate sections for connection, network, device behavior, support settings, and common tools.
 
 ### Automatic configuration
 
@@ -171,7 +177,7 @@ The template for this file is as follows (pay attention to the line endings, the
 server="server1|server2|server3"
 domain=""
 param=""
-adminpass=""
+adminpass="uftc"
 helpdesk="the helpdesk"
 login_timeout="600"
 volume="100"

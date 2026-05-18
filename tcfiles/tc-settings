@@ -4,6 +4,7 @@ set -euo pipefail
 
 CONFIG_PATH="${HOME}/tcconfig"
 VERSION="$(< /tcversion)"
+DEFAULT_ADMINPASS="uftc"
 
 list_interfaces() {
     local device
@@ -19,7 +20,14 @@ list_interfaces() {
 }
 
 wireless_adapter_present() {
-    sudo -n /usr/bin/tc-configure-network --has-wireless
+    local device
+
+    for device in /sys/class/net/*; do
+        [ -d "$device/wireless" ] || continue
+        return 0
+    done
+
+    return 1
 }
 
 show_error() {
@@ -80,7 +88,7 @@ load_config() {
     server=""
     domain=""
     param=""
-    adminpass=""
+    adminpass="$DEFAULT_ADMINPASS"
     helpdesk="the helpdesk"
     login_timeout="600"
     volume="100"
@@ -359,7 +367,7 @@ edit_support_section() {
 
     set +e
     output=$(yad --form --center --width=560 --title="Support Settings | $VERSION" \
-        --text="Configure support-facing options and protected commands." \
+        --text="Configure support-facing options." \
         --separator=$'\x1F' \
         --button="Cancel":1 --button="Save":0 \
         --field="Helpdesk Contact" "$helpdesk" \
@@ -376,10 +384,127 @@ edit_support_section() {
     return 0
 }
 
+show_network_info() {
+    local public_ip
+
+    public_ip="$(curl -4 --max-time 3 --connect-timeout 2 -fsS ifconfig.me 2>/dev/null || echo unavailable)"
+    yad --info --center --title="Tools | $VERSION" --width=620 \
+        --text="Hostname: $(hostname)\nLocal IP: $(hostname --all-ip-addresses || hostname -I)\nPublic IP: $public_ip\n$(resolvectl status 2>/dev/null | grep 'DNS Servers' | sed -e 's/^[ \t]*//' || true)\nGateway: $(ip route | awk '/default/ { print $3 }')" >/dev/null
+}
+
+prompt_ping_target() {
+    local output
+    local status
+    local default_target
+
+    default_target="${server%%:*}"
+
+    set +e
+    output=$(yad --form --center --width=520 --title="Tools | $VERSION" \
+        --text="Enter a host name or IP address to test connectivity." \
+        --separator=$'\x1F' \
+        --button="Cancel":1 --button="Run":0 \
+        --field="Target" "$default_target")
+    status=$?
+    set -e
+
+    if ((status != 0)); then
+        return 1
+    fi
+
+    printf '%s\n' "$(awk -F'\x1F' '{print $1}' <<<"$output")"
+    return 0
+}
+
+run_terminal_tool() {
+    xterm -bg black -fg white
+}
+
+run_ping_tool() {
+    local target
+    local quoted_target
+
+    if ! target="$(prompt_ping_target)"; then
+        return 1
+    fi
+
+    if [ -z "$target" ]; then
+        show_error "A ping target is required."
+        return 1
+    fi
+
+    quoted_target="$(printf '%q' "$target")"
+    xterm -bg black -fg white -hold -e /bin/bash -lc "mtr $quoted_target"
+}
+
+edit_tools_section() {
+    local status
+
+    while true; do
+        set +e
+        yad --info --center --width=620 --title="Tools | $VERSION" \
+            --text="Run common admin tools from here instead of using hidden password shortcuts." \
+            --button="Back":2 --button="Close":1 --button="Terminal":10 --button="Ping/Trace":11 --button="Network Info":12 --button="WiFi Wizard":13 >/dev/null
+        status=$?
+        set -e
+
+        case "$status" in
+            10)
+                run_terminal_tool
+                ;;
+            11)
+                run_ping_tool || true
+                ;;
+            12)
+                show_network_info || true
+                ;;
+            13)
+                if wireless_adapter_present; then
+                    /usr/bin/tc-wifi-wizard || true
+                else
+                    show_warning "No wireless adapter was detected on this device."
+                fi
+                ;;
+            2)
+                return 2
+                ;;
+            1)
+                return 1
+                ;;
+            0)
+                return 0
+                ;;
+        esac
+    done
+}
+
 run_settings_page() {
     local status
 
     load_config
+
+    if [ -n "$adminpass" ]; then
+        while true; do
+            set +e
+            output=$(yad --form --center --width=480 --title="Settings Access | $VERSION" \
+                --text="Enter the admin password to open the settings panel." \
+                --separator=$'\x1F' \
+                --button="Cancel":1 --button="Unlock":0 \
+                --field="Admin Password":h "")
+            status=$?
+            set -e
+
+            if ((status != 0)); then
+                return 1
+            fi
+
+            if [ "$(awk -F'\x1F' '{print $1}' <<<"$output")" = "$adminpass" ]; then
+                break
+            fi
+
+            show_error "Incorrect admin password."
+        done
+    fi
 
     while true; do
         set +e
@@ -390,7 +515,7 @@ run_settings_page() {
             --button="Network":11 \
             --button="Device":12 \
             --button="Support":13 \
-            --button="WiFi Wizard":14 \
+            --button="Tools":14 \
             --button="Save & Exit":0 \
             --button="Cancel":1 >/dev/null
         status=$?
@@ -422,11 +547,7 @@ run_settings_page() {
                 edit_support_section || true
                 ;;
             14)
-                if wireless_adapter_present; then
-                    /usr/bin/tc-wifi-wizard || true
-                else
-                    show_warning "No wireless adapter was detected on this device."
-                fi
+                edit_tools_section || true
                 ;;
         esac
     done
@@ -436,11 +557,15 @@ run_first_boot_wizard() {
     local page="welcome"
     local output
     local status
-    local wifi_after_save="false"
+    local first_boot_total_steps=4
     local selected_mode
     local selected_interface
 
     load_config
+
+    if wireless_adapter_present; then
+        first_boot_total_steps=5
+    fi
 
     while true; do
         case "$page" in
@@ -448,7 +573,7 @@ run_first_boot_wizard() {
                 set +e
                 yad --info --center --width=620 --title="First Time Setup | $VERSION" \
                     --button="Cancel":1 --button="Start Setup":0 \
-                    --text="This setup will walk through the essential first-boot settings in a few short steps.\n\nYou can change advanced options later from the settings page using the config or settings command." >/dev/null
+                    --text="This setup will walk through the essential first-boot settings in a few short steps.\n\nDefault settings password: $DEFAULT_ADMINPASS\nYou can change it in the Support step during this setup.\n\nYou can change advanced options later from the settings page." >/dev/null
                 status=$?
                 set -e
 
@@ -460,7 +585,7 @@ run_first_boot_wizard() {
             connection)
                 set +e
                 output=$(yad --form --center --width=560 --title="First Time Setup | $VERSION" \
-                    --text="Step 1 of 4: Enter the main connection details." \
+                    --text="Step 1 of $first_boot_total_steps: Enter the main connection details." \
                     --separator=$'\x1F' \
                     --button="Cancel":1 --button="Next":0 \
                     --field="Server or Mode" "$server" \
@@ -478,21 +603,42 @@ run_first_boot_wizard() {
                     show_error "A server name or mode is required."
                     continue
                 fi
+                if wireless_adapter_present; then
+                    page="wifi"
+                else
+                    page="network"
+                fi
+                ;;
+            wifi)
+                set +e
+                yad --question --center --width=620 --title="First Time Setup | $VERSION" \
+                    --button="Skip":1 --button="Set Up WiFi":0 --button="Cancel":2 \
+                    --text="Step 2 of $first_boot_total_steps: Configure WiFi before choosing how this device uses the network.\n\nThe WiFi wizard will scan for available networks, help you connect, and return here when it is done." >/dev/null
+                status=$?
+                set -e
+
+                if ((status == 2)); then
+                    return 1
+                fi
+
+                if ((status == 0)); then
+                    /usr/bin/tc-wifi-wizard || true
+                fi
+
                 page="network"
                 ;;
             network)
                 set +e
                 if wireless_adapter_present; then
                     output=$(yad --form --center --width=600 --title="First Time Setup | $VERSION" \
-                        --text="Step 2 of 4: Choose the network behavior for this device." \
+                        --text="Step 3 of $first_boot_total_steps: Choose the network behavior for this device." \
                         --separator=$'\x1F' \
                         --button="Back":2 --button="Cancel":1 --button="Next":0 \
                         --field="Addressing:CB" "$(build_choice_list "$(network_mode_label)" "Automatic (DHCP)" "Static IPv4")" \
-                        --field="Interface:CB" "$(build_interface_choices "$(selected_interface_label)")" \
-                        --field="Open WiFi Wizard after saving:CHK" "$( [ "$wifi_after_save" = "true" ] && printf 'TRUE' || printf 'FALSE' )")
+                        --field="Interface:CB" "$(build_interface_choices "$(selected_interface_label)")")
                 else
                     output=$(yad --form --center --width=600 --title="First Time Setup | $VERSION" \
-                        --text="Step 2 of 4: Choose the network behavior for this device." \
+                        --text="Step 2 of $first_boot_total_steps: Choose the network behavior for this device." \
                         --separator=$'\x1F' \
                         --button="Back":2 --button="Cancel":1 --button="Next":0 \
                         --field="Addressing:CB" "$(build_choice_list "$(network_mode_label)" "Automatic (DHCP)" "Static IPv4")" \
@@ -511,7 +657,6 @@ run_first_boot_wizard() {
 
                 selected_mode="$(awk -F'\x1F' '{print $1}' <<<"$output")"
                 selected_interface="$(awk -F'\x1F' '{print $2}' <<<"$output")"
-                wifi_after_save="$(awk -F'\x1F' '{print tolower($3)}' <<<"$output")"
 
                 if [ "$selected_mode" = "Static IPv4" ]; then
                     network_mode="static"
@@ -552,11 +697,11 @@ run_first_boot_wizard() {
             support)
                 set +e
                 output=$(yad --form --center --width=560 --title="First Time Setup | $VERSION" \
-                    --text="Step 3 of 4: Add support information and optional protection." \
+                    --text="Step 4 of $first_boot_total_steps: Add support information." \
                     --separator=$'\x1F' \
                     --button="Back":2 --button="Cancel":1 --button="Next":0 \
                     --field="Helpdesk Contact" "$helpdesk" \
-                    --field="Admin Password (optional)":h "$adminpass")
+                    --field="Settings Admin Password":h "$adminpass")
                 status=$?
                 set -e
 
@@ -580,7 +725,7 @@ run_first_boot_wizard() {
                 set +e
                 yad --question --center --width=620 --title="First Time Setup | $VERSION" \
                     --button="Back":2 --button="Cancel":1 --button="Save":0 \
-                    --text="Step 4 of 4: Review the summary below before saving.\n\n$(settings_summary)\n\nDefault audio, display, timeout, and keyboard settings will be applied automatically. You can adjust them later from the settings page." >/dev/null
+                    --text="Step $first_boot_total_steps of $first_boot_total_steps: Review the summary below before saving.\n\n$(settings_summary)\n\nDefault audio, display, timeout, and keyboard settings will be applied automatically. You can adjust them later from the settings page." >/dev/null
                 status=$?
                 set -e
 
@@ -593,9 +738,6 @@ run_first_boot_wizard() {
                 fi
 
                 save_config
-                if [ "$wifi_after_save" = "true" ] && wireless_adapter_present; then
-                    /usr/bin/tc-wifi-wizard || true
-                fi
                 apply_network_config
                 return 0
                 ;;

@@ -20,7 +20,6 @@ shutdown_thinclient(){
 # Universal variables
 PROTOCOL_DETECT="://"
 VERSION=$(< /tcversion)
-adminpass="${adminpass:-}"
 keylayout="${keylayout:-us}"
 exit_type="${exit_type:-Shutdown}"
 helpdesk="${helpdesk:-the helpdesk}"
@@ -244,53 +243,6 @@ if [ ! -f ~/tcconfig ];then
         exit 0
     fi
     shutdown_thinclient
-fi
-
-# Password commands
-if [ "$password" = "${adminpass}kill" ];then
-    exit 0
-fi
-
-if [ "$password" = "${adminpass}terminal" ];then
-    xterm -bg black -fg white
-    $0
-    exit 0
-fi
-
-if [ "$password" = "ping" ];then
-    if [[ "$server" == *"$PROTOCOL_DETECT"* ]]; then
-        mtr "$(grep "full address:s:" ~/destination.rdp | sed 's/full address:s://g' | sed 's/:.*//g' | tr -d '\r' | tr -d '\n')"
-        mtr_status=$?
-    else
-        mtr "${server%%:*}"
-        mtr_status=$?
-    fi
-    if ((mtr_status != 0)); then
-        yad --title="Error" --text "Something went wrong, will open the ping tool with localhost as the destination instead" --button="Ok"
-        mtr
-    fi
-    $0
-    exit 0
-fi
-
-if [ "$password" = "ip" ];then
-    public_ip="$(curl -4 --max-time 3 --connect-timeout 2 -fsS ifconfig.me 2>/dev/null || echo unavailable)"
-    yad --title="Network Information"  --center --text="Hostname: $hostname\nLocal IP: $(hostname --all-ip-addresses || hostname -I)\nPublic IP: $public_ip\n$(resolvectl status | grep "DNS Servers" | sed -e 's/^[ \t]*//')\nGateway: $(ip route | awk '/default/ { print $3 }')" --button="Ok"
-    $0
-    exit 0
-fi
-
-if [ "$password" = "wifi" ];then
-    /usr/bin/tc-wifi-wizard
-    $0
-    exit 0
-fi
-
-# This section handles the default configuration and configuration dialogue
-if [ "$password" = "${adminpass}config" ] || [ "$password" = "${adminpass}settings" ];then
-    /usr/bin/tc-settings --settings || true
-    $0 "$@" &
-    exit 0
 fi
 
 # We passed all the UI's and now try to launch RDP
