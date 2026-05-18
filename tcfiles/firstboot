@@ -3,22 +3,38 @@ set -euo pipefail
 
 XANMOD_PACKAGE="linux-xanmod-lts-x64v1"
 
+package_installed() {
+	dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q '^install ok installed$'
+}
+
+refresh_initramfs() {
+	if find /boot -maxdepth 1 -name 'initrd.img-*' -print -quit | grep -q .; then
+		update-initramfs -u -k all
+	else
+		update-initramfs -c -k all
+	fi
+}
+
 echo "Completing the final steps for the golden image."
 echo "Once finished the machine will turn off, please wait until this is complete."
 echo "If you see this and can not login after turning it back on contact the helpdesk."
-update-initramfs -c -k all
-install -d -m 755 /etc/apt/keyrings
-wget -qO - https://dl.xanmod.org/archive.key | gpg --dearmor -o /etc/apt/keyrings/xanmod-archive-keyring.gpg
-echo 'deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' > /etc/apt/sources.list.d/xanmod-release.list
-apt update
-
-if apt-cache show "$XANMOD_PACKAGE" >/dev/null 2>&1; then
-	apt install "$XANMOD_PACKAGE" -y
+if package_installed "$XANMOD_PACKAGE"; then
+	echo "$XANMOD_PACKAGE is already present in the image, skipping package install."
 else
-	echo "Warning: $XANMOD_PACKAGE is not currently available from deb.xanmod.org."
-	echo "Continuing with the kernel already present in the image."
+	install -d -m 755 /etc/apt/keyrings
+	wget -qO - https://dl.xanmod.org/archive.key | gpg --dearmor -o /etc/apt/keyrings/xanmod-archive-keyring.gpg
+	echo 'deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' > /etc/apt/sources.list.d/xanmod-release.list
+	apt-get update
+
+	if apt-cache show "$XANMOD_PACKAGE" >/dev/null 2>&1; then
+		DEBIAN_FRONTEND=noninteractive apt-get install -y "$XANMOD_PACKAGE"
+	else
+		echo "Warning: $XANMOD_PACKAGE is not currently available from deb.xanmod.org."
+		echo "Continuing with the kernel already present in the image."
+	fi
 fi
 
+refresh_initramfs
 setcap cap_net_raw+ep /usr/bin/mtr-packet
 set-hostname thinclient
 rm "$0" && systemctl poweroff
