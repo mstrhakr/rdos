@@ -1,7 +1,9 @@
-# Allow any user to factory reset and set the hostname, this way it can be done by thin client admins without needing to know the image password
-ALL ALL=(ALL) NOPASSWD: /usr/bin/set-hostname
-ALL ALL=(ALL) NOPASSWD: /usr/bin/firstboot
-ALL ALL=(ALL) NOPASSWD: /usr/bin/auto-maintenance
-ALL ALL=(ALL) NOPASSWD: /usr/bin/tc-configure-network
-ALL ALL=(ALL) NOPASSWD: /usr/bin/tc-configure-wifi
-ALL ALL=(ALL) NOPASSWD: /usr/bin/tc-scan-wifi
+# Limit passwordless maintenance to the thinclient user and expected command shapes.
+thinclient ALL=(root) NOPASSWD: /usr/bin/set-hostname *
+thinclient ALL=(root) NOPASSWD: /usr/bin/firstboot
+thinclient ALL=(root) NOPASSWD: /usr/bin/auto-maintenance
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-network --apply-tcconfig * --reload
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-network --apply-tcconfig *
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wifi --configure * * *
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wifi --disable-powersave
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-scan-wifi *

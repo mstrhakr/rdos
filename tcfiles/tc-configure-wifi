@@ -53,6 +53,40 @@ resolve_cmd() {
 
 RFKILL_BIN="$(resolve_cmd rfkill || true)"
 
+canonical_path() {
+    local input_path="$1"
+
+    if command -v realpath >/dev/null 2>&1; then
+        realpath -m -- "$input_path"
+        return 0
+    fi
+
+    if readlink -f -- "$input_path" >/dev/null 2>&1; then
+        readlink -f -- "$input_path"
+        return 0
+    fi
+
+    printf '%s\n' "$input_path"
+}
+
+validate_boot_wpa_source() {
+    local source_file="$1"
+    local resolved
+
+    resolved="$(canonical_path "$source_file")"
+    if [ "$resolved" != "/boot/wpa_supplicant.conf" ]; then
+        echo "Only /boot/wpa_supplicant.conf is allowed for --from-file" >&2
+        return 1
+    fi
+
+    if [ ! -f "$source_file" ]; then
+        echo "WiFi source file does not exist: $source_file" >&2
+        return 1
+    fi
+
+    return 0
+}
+
 disable_powersave() {
     local device
     local iface
@@ -79,7 +113,7 @@ install_config() {
     systemctl enable --now "wpa_supplicant@$iface.service"
     disable_powersave
 
-    if [ "$move_source" = "true" ]; then
+    if [ "$move_source" = "true" ] && [ "$source_file" = "/boot/wpa_supplicant.conf" ]; then
         rm -f "$source_file"
     fi
 }
@@ -142,6 +176,7 @@ main() {
             if [ "${3:-}" = "--move-source" ]; then
                 move_source=true
             fi
+            validate_boot_wpa_source "$2"
             iface="$(find_wireless_interface)"
             install_config "$iface" "$2" "$move_source"
             ;;
