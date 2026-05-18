@@ -22,7 +22,8 @@ if ($scriptDir -match '^([A-Za-z]):\\(.*)$') {
     $drive = $matches[1].ToLowerInvariant()
     $rest = ($matches[2] -replace '\\', '/')
     $wslScriptDir = "/mnt/$drive/$rest"
-} else {
+}
+else {
     $wslScriptDir = ($scriptDir -replace '\\', '/')
 }
 

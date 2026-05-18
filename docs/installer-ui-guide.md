@@ -12,7 +12,7 @@ The UFTC guided installer has been upgraded with a full-screen, colorful, and vi
 - **Styled Section Headers**: Color-coded section dividers and titles
 - **Status Messages**: Icons (✓, ✗, ⚠, ℹ) with colored text for various message types
 - **Full-Screen Layout**: Uses the entire terminal for better readability
-- **Color Scheme**: 
+- **Color Scheme**:
   - Cyan for headers and borders
   - Green for success messages
   - Red for errors and warnings
@@ -23,11 +23,13 @@ The UFTC guided installer has been upgraded with a full-screen, colorful, and vi
 ### UI Components
 
 #### 1. Welcome Screen
+
 - Shows UFTC logo and welcome message
 - Displays the live media disk information
 - Prompts to continue to disk selection
 
 #### 2. Disk Selection Menu
+
 - Displays all available disks with:
   - Disk name (`/dev/sdX`)
   - Size and model information
@@ -35,10 +37,12 @@ The UFTC guided installer has been upgraded with a full-screen, colorful, and vi
 - Clear warning about data erasure
 
 #### 3. Confirmation Screen
+
 - Large warning banner with clear text
 - Final confirmation before proceeding with installation
 
 #### 4. Progress Gauge
+
 - Full-screen progress bar with percentage
 - Unicode block characters (█░) for visual representation
 - Real-time feedback during installation
@@ -46,6 +50,7 @@ The UFTC guided installer has been upgraded with a full-screen, colorful, and vi
 - Filesystem sync notification
 
 #### 5. Post-Install Menu
+
 - Three options after successful installation:
   1. Power off (default, recommended)
   2. Reboot immediately
@@ -63,6 +68,7 @@ The UFTC guided installer has been upgraded with a full-screen, colorful, and vi
 ### Fallback Behavior
 
 The installer gracefully degrades to previous behavior:
+
 1. If `tc-installer-ui.sh` is available, uses enhanced UI
 2. Falls back to `whiptail` if available
 3. Falls back to plain text prompts if no UI is available
@@ -97,6 +103,7 @@ ui_confirm "Do you want to proceed?"
 ### Full Installer Testing
 
 1. Build the ISO with the new UI:
+
    ```bash
    ./build-installer-iso.sh
    ```
@@ -122,6 +129,7 @@ You can easily customize the UI by editing `tcfiles/tc-installer-ui.sh`:
 ## Performance Considerations
 
 The enhanced UI adds minimal overhead:
+
 - Library is ~350 lines of bash
 - No external dependencies beyond standard utilities
 - Colors use ANSI escape sequences (universal terminal support)
