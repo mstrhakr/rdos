@@ -7,6 +7,7 @@ CLONEZILLA_ISO_URL="${CLONEZILLA_ISO_URL:-https://downloads.sourceforge.net/proj
 INPUT_VHD="${INPUT_VHD:-uftc.vhd}"
 OUTPUT_ISO="${OUTPUT_ISO:-uftc-installer.iso}"
 WORKDIR="${WORKDIR:-.installer-work}"
+AUTO_INSTALL_DEFAULT="${AUTO_INSTALL_DEFAULT:-0}"
 
 BASE_ISO="$WORKDIR/clonezilla-base.iso"
 ISO_ROOT="$WORKDIR/iso-root"
@@ -167,10 +168,12 @@ label uftc_auto
   append initrd=/live/initrd.img ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/uftc/install.sh" ocs_live_extra_param="" ocs_live_batch="yes"
 EOF
 
-    if grep -q '^default ' "$SYS_CFG"; then
-      sed -i 's/^default .*/default uftc_auto/' "$SYS_CFG"
-    else
-      sed -i '1idefault uftc_auto' "$SYS_CFG"
+    if [[ "$AUTO_INSTALL_DEFAULT" == "1" ]]; then
+      if grep -q '^default ' "$SYS_CFG"; then
+        sed -i 's/^default .*/default uftc_auto/' "$SYS_CFG"
+      else
+        sed -i '1idefault uftc_auto' "$SYS_CFG"
+      fi
     fi
   fi
 done
@@ -186,10 +189,12 @@ menuentry "UFTC automatic install (erase target disk)" --id uftc_auto {
 }
 EOF
 
-  if grep -q '^set default=' "$GRUB_CFG"; then
-    sed -i 's/^set default=.*/set default="uftc_auto"/' "$GRUB_CFG"
-  else
-    sed -i '1iset default="uftc_auto"' "$GRUB_CFG"
+  if [[ "$AUTO_INSTALL_DEFAULT" == "1" ]]; then
+    if grep -q '^set default=' "$GRUB_CFG"; then
+      sed -i 's/^set default=.*/set default="uftc_auto"/' "$GRUB_CFG"
+    else
+      sed -i '1iset default="uftc_auto"' "$GRUB_CFG"
+    fi
   fi
 fi
 
@@ -229,6 +234,11 @@ xorriso -as mkisofs \
 
 log_phase "Installer ISO build complete"
 echo "Created $OUTPUT_ISO"
-echo "This ISO starts the installer automatically, writes UFTC to the first non-removable disk, then powers off."
+if [[ "$AUTO_INSTALL_DEFAULT" == "1" ]]; then
+  echo "Default boot entry: unattended installer (destructive)."
+else
+  echo "Default boot entry: Clonezilla standard menu."
+  echo "Use the UFTC automatic install entry to run unattended deployment."
+fi
 echo "Payload mode: zstd compressed."
 echo "Review target disk detection in uftc/install.sh if you need a different policy."
