@@ -1,20 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 # Build a minimal unattended installer ISO that writes uftc.vhd to disk and powers off.
 
 CLONEZILLA_ISO_URL="${CLONEZILLA_ISO_URL:-https://downloads.sourceforge.net/project/clonezilla/clonezilla_live_stable/3.2.2-5/clonezilla-live-3.2.2-5-amd64.iso}"
 INPUT_VHD="${INPUT_VHD:-uftc.vhd}"
 OUTPUT_ISO="${OUTPUT_ISO:-uftc-installer.iso}"
-WORKDIR="${WORKDIR:-.installer-work}"
+DEFAULT_WORKDIR=".installer-work"
+WORKDIR="${WORKDIR:-$DEFAULT_WORKDIR}"
+BASE_ISO_CACHE="${BASE_ISO_CACHE:-.installer-cache/clonezilla-base.iso}"
 AUTO_INSTALL_DEFAULT="${AUTO_INSTALL_DEFAULT:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 BUILD_SCRIPT="${BUILD_SCRIPT:-./build.sh}"
+NO_STAGING="${NO_STAGING:-0}"
+STAGING_DIR="${STAGING_DIR:-}"
 # Compression level for the installer payload. 9 is a good balance (fast + small).
 # Set to 19 for maximum compression at the cost of significantly longer build times.
 ZSTD_LEVEL="${ZSTD_LEVEL:-9}"
 
-BASE_ISO="$WORKDIR/clonezilla-base.iso"
+BASE_ISO="$BASE_ISO_CACHE"
 ISO_ROOT="$WORKDIR/iso-root"
 RAW_IMAGE="$WORKDIR/uftc.img"
 COMPRESSED_IMAGE="$ISO_ROOT/uftc/uftc.img.zst"
@@ -34,6 +41,9 @@ Options:
       --input-vhd PATH             Input VHD path (default: uftc.vhd)
       --output-iso PATH            Output ISO path (default: uftc-installer.iso)
       --workdir PATH               Working directory for intermediate files
+      --staging-dir PATH           Run ISO build work in PATH, then move final ISO to --output-iso
+      --no-staging                 Disable automatic /mnt performance staging
+      --base-iso-cache PATH        Persistent Clonezilla ISO cache file (default: .installer-cache/clonezilla-base.iso)
       --clonezilla-iso-url URL     Base Clonezilla ISO URL
       --zstd-level N               Compression level 1-19 (default: 9)
       --auto-install-default       Make unattended installer the default boot entry
@@ -90,6 +100,27 @@ while [[ $# -gt 0 ]]; do
       WORKDIR="$2"
       shift 2
       ;;
+    --staging-dir)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      STAGING_DIR="$2"
+      shift 2
+      ;;
+    --no-staging)
+      NO_STAGING=1
+      shift
+      ;;
+    --base-iso-cache)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      BASE_ISO_CACHE="$2"
+      BASE_ISO="$BASE_ISO_CACHE"
+      shift 2
+      ;;
     --clonezilla-iso-url)
       if [[ $# -lt 2 ]]; then
         echo "Missing value for $1" >&2
@@ -136,14 +167,31 @@ need_cmd curl
 need_cmd lsblk
 need_cmd findmnt
 
+log_phase() {
+  printf '\n[%s] %s\n' "$(date +'%H:%M:%S')" "$1"
+}
+
 if [[ ! "$ZSTD_LEVEL" =~ ^[0-9]+$ ]] || (( ZSTD_LEVEL < 1 || ZSTD_LEVEL > 19 )); then
   echo "Invalid --zstd-level: $ZSTD_LEVEL (expected 1-19)" >&2
   exit 1
 fi
 
-log_phase() {
-  printf '\n[%s] %s\n' "$(date +'%H:%M:%S')" "$1"
-}
+AUTO_STAGING_DIR=""
+ORIGINAL_OUTPUT_ISO="$OUTPUT_ISO"
+if [[ -z "$STAGING_DIR" ]] && [[ "$NO_STAGING" != "1" ]] && [[ "$SCRIPT_DIR" == /mnt/* ]] && [[ "$WORKDIR" == "$DEFAULT_WORKDIR" ]]; then
+  AUTO_STAGING_DIR="$(mktemp -d /var/tmp/uftc-iso.XXXXXX)"
+  STAGING_DIR="$AUTO_STAGING_DIR"
+fi
+
+if [[ -n "$STAGING_DIR" ]]; then
+  WORKDIR="$STAGING_DIR/work"
+  OUTPUT_ISO="$STAGING_DIR/$(basename "$ORIGINAL_OUTPUT_ISO")"
+  log_phase "Detected /mnt workspace. Using fast staging at $STAGING_DIR for ISO build"
+fi
+
+ISO_ROOT="$WORKDIR/iso-root"
+RAW_IMAGE="$WORKDIR/uftc.img"
+COMPRESSED_IMAGE="$ISO_ROOT/uftc/uftc.img.zst"
 
 if [[ "$SKIP_BUILD" != "1" ]]; then
   if [[ ! -x "$BUILD_SCRIPT" ]]; then
@@ -151,8 +199,14 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
     exit 1
   fi
 
+  build_output_vhd="$INPUT_VHD"
+  if [[ -n "$STAGING_DIR" ]]; then
+    build_output_vhd="$STAGING_DIR/$(basename "$INPUT_VHD")"
+  fi
+
   log_phase "Building fresh VHD via $BUILD_SCRIPT"
-  "$BUILD_SCRIPT" --output "$INPUT_VHD" --force "${BUILD_SCRIPT_ARGS[@]}"
+  "$BUILD_SCRIPT" --output "$build_output_vhd" --force "${BUILD_SCRIPT_ARGS[@]}"
+  INPUT_VHD="$build_output_vhd"
 else
   log_phase "Skipping VHD build; using existing $INPUT_VHD"
 fi
@@ -163,7 +217,15 @@ if [[ ! -f "$INPUT_VHD" ]]; then
   exit 1
 fi
 
+if [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_VHD" != "$STAGING_DIR/$(basename "$INPUT_VHD")" ]]; then
+  staged_input_vhd="$STAGING_DIR/$(basename "$INPUT_VHD")"
+  log_phase "Copying input VHD to staging area"
+  cp -f "$INPUT_VHD" "$staged_input_vhd"
+  INPUT_VHD="$staged_input_vhd"
+fi
+
 mkdir -p "$WORKDIR"
+mkdir -p "$(dirname "$BASE_ISO")"
 
 need_download=0
 if [[ ! -f "$BASE_ISO" ]]; then
@@ -293,44 +355,34 @@ chmod +x "$ISO_ROOT/uftc/install.sh"
 CLONEZILLA_BOOT_ARGS="boot=live union=overlay username=user config components quiet loglevel=3 ocs_1_cpu_udev noswap edd=on nomodeset enforcing=0 locales= keyboard-layouts= net.ifnames=0 nosplash modprobe.blacklist=pcspkr"
 
 for SYS_CFG in "$ISO_ROOT/syslinux/syslinux.cfg" "$ISO_ROOT/syslinux/isolinux.cfg"; do
-  if [[ -f "$SYS_CFG" ]] && ! grep -q "label uftc_auto" "$SYS_CFG"; then
-    log_phase "Patching BIOS boot menu in $(basename "$SYS_CFG")"
-    cat >>"$SYS_CFG" <<EOF
+  if [[ -f "$SYS_CFG" ]]; then
+    log_phase "Writing single-entry BIOS boot config in $(basename "$SYS_CFG")"
+    cat >"$SYS_CFG" <<EOF
+default uftc_auto
+prompt 0
+timeout 0
 
 label uftc_auto
   menu label UFTC automatic install (erase target disk)
   kernel /live/vmlinuz
   append initrd=/live/initrd.img ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/uftc/install.sh" ocs_live_extra_param="" ocs_live_batch="yes"
 EOF
-
-    if [[ "$AUTO_INSTALL_DEFAULT" == "1" ]]; then
-      if grep -q '^default ' "$SYS_CFG"; then
-        sed -i 's/^default .*/default uftc_auto/' "$SYS_CFG"
-      else
-        sed -i '1idefault uftc_auto' "$SYS_CFG"
-      fi
-    fi
   fi
 done
 
 GRUB_CFG="$ISO_ROOT/boot/grub/grub.cfg"
-if [[ -f "$GRUB_CFG" ]] && ! grep -q -- "--id uftc_auto" "$GRUB_CFG"; then
-  log_phase "Patching GRUB boot menu"
-  cat >>"$GRUB_CFG" <<EOF
+if [[ -f "$GRUB_CFG" ]]; then
+  log_phase "Writing single-entry GRUB boot config"
+  cat >"$GRUB_CFG" <<EOF
+set default="0"
+set timeout=0
+set timeout_style=hidden
 
 menuentry "UFTC automatic install (erase target disk)" --id uftc_auto {
   linux /live/vmlinuz ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/uftc/install.sh" ocs_live_extra_param="" ocs_live_batch="yes"
   initrd /live/initrd.img
 }
 EOF
-
-  if [[ "$AUTO_INSTALL_DEFAULT" == "1" ]]; then
-    if grep -q '^set default=' "$GRUB_CFG"; then
-      sed -i 's/^set default=.*/set default="uftc_auto"/' "$GRUB_CFG"
-    else
-      sed -i '1iset default="uftc_auto"' "$GRUB_CFG"
-    fi
-  fi
 fi
 
 ISOLINUX_BIN="syslinux/isolinux.bin"
@@ -369,11 +421,15 @@ xorriso -as mkisofs \
 
 log_phase "Installer ISO build complete"
 echo "Created $OUTPUT_ISO"
-if [[ "$AUTO_INSTALL_DEFAULT" == "1" ]]; then
-  echo "Default boot entry: unattended installer (destructive)."
-else
-  echo "Default boot entry: Clonezilla standard menu."
-  echo "Use the UFTC automatic install entry to run unattended deployment."
-fi
+echo "Boot mode: single unattended installer entry (destructive), timeout 0s."
 echo "Payload mode: zstd compressed."
 echo "Review target disk detection in uftc/install.sh if you need a different policy."
+
+if [[ -n "$STAGING_DIR" ]]; then
+  log_phase "Moving staged ISO to destination: $ORIGINAL_OUTPUT_ISO"
+  mv -f "$OUTPUT_ISO" "$ORIGINAL_OUTPUT_ISO"
+  if [[ -n "$AUTO_STAGING_DIR" ]]; then
+    rm -rf "$AUTO_STAGING_DIR"
+  fi
+  echo "Created $ORIGINAL_OUTPUT_ISO"
+fi
