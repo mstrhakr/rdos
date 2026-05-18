@@ -6,7 +6,9 @@ cd "$SCRIPT_DIR"
 
 # Build a minimal unattended installer ISO that writes uftc.vhd to disk and powers off.
 
-CLONEZILLA_ISO_URL="${CLONEZILLA_ISO_URL:-https://downloads.sourceforge.net/project/clonezilla/clonezilla_live_stable/3.2.2-5/clonezilla-live-3.2.2-5-amd64.iso}"
+CLONEZILLA_VERSION="${CLONEZILLA_VERSION:-3.3.1-35}"
+CLONEZILLA_ISO_URL_DEFAULT="https://downloads.sourceforge.net/project/clonezilla/clonezilla_live_stable/${CLONEZILLA_VERSION}/clonezilla-live-${CLONEZILLA_VERSION}-amd64.iso"
+CLONEZILLA_ISO_URL="${CLONEZILLA_ISO_URL:-$CLONEZILLA_ISO_URL_DEFAULT}"
 INPUT_VHD="${INPUT_VHD:-uftc.vhd}"
 OUTPUT_ISO="${OUTPUT_ISO:-uftc-installer.iso}"
 DEFAULT_WORKDIR=".installer-work"
@@ -45,6 +47,7 @@ Options:
       --staging-dir PATH           Run ISO build work in PATH, then move final ISO to --output-iso
       --no-staging                 Disable automatic /mnt performance staging
       --base-iso-cache PATH        Persistent Clonezilla ISO cache file (default: .installer-cache/clonezilla-base.iso)
+      --clonezilla-version VER     Clonezilla release version (default: 3.3.1-35)
       --clonezilla-iso-url URL     Base Clonezilla ISO URL
       --zstd-level N               Compression level 1-19 (default: 9)
       --auto-install-default       Make unattended installer the default boot entry
@@ -132,6 +135,15 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       CLONEZILLA_ISO_URL="$2"
+      shift 2
+      ;;
+    --clonezilla-version)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      CLONEZILLA_VERSION="$2"
+      CLONEZILLA_ISO_URL="https://downloads.sourceforge.net/project/clonezilla/clonezilla_live_stable/${CLONEZILLA_VERSION}/clonezilla-live-${CLONEZILLA_VERSION}-amd64.iso"
       shift 2
       ;;
     --zstd-level)
