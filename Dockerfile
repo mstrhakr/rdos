@@ -1,11 +1,35 @@
+# syntax=docker/dockerfile:1
 FROM debian:trixie
 
 COPY tcfiles/debian.sources /etc/apt/sources.list.d/debian.sources
 
-RUN apt update && apt install sudo curl wget freerdp3-x11 yad fvwm xterm xinit light mingetty polkitd net-tools iw wpasupplicant systemd-resolved ifupdown ethtool enca nano udiskie mc mtr cups mesa-utils firmware-linux firmware-linux-nonfree firmware-iwlwifi firmware-realtek firmware-atheros firmware-brcm80211 open-vm-tools ffmpeg pulseaudio pamixer x11-xserver-utils adwaita-icon-theme-legacy libfuse2 -y
+# Stable system packages — this layer is only invalidated when the list below changes.
+# BuildKit cache mounts keep the apt/dpkg cache between builds so packages are not
+# re-downloaded on every run; use DOCKER_BUILDKIT=1 (or Docker 23+ default) to benefit.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y \
+        sudo curl wget \
+        xterm xinit x11-xserver-utils \
+        fvwm yad light \
+        freerdp3-x11 \
+        wpasupplicant iw net-tools ifupdown ethtool \
+        systemd-resolved \
+        polkitd mingetty \
+        pulseaudio pamixer \
+        cups mesa-utils \
+        firmware-linux firmware-linux-nonfree \
+        firmware-iwlwifi firmware-realtek firmware-atheros firmware-brcm80211 \
+        open-vm-tools \
+        ffmpeg \
+        enca nano udiskie mc mtr \
+        adwaita-icon-theme-legacy libfuse2
 
+# Optional: Citrix ICA client — drop icaclient.deb next to the Dockerfile to include it.
 COPY icaclient.deb* /tmp/
-RUN apt install /tmp/icaclient.deb -y && rm /tmp/icaclient.deb || true
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get install -y /tmp/icaclient.deb && rm /tmp/icaclient.deb || true
 
 COPY Moonlight.AppImage* /usr/bin/moonlight
 
