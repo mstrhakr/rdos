@@ -2,6 +2,84 @@
 
 set -euo pipefail
 
+PROGRESS_PID=""
+PROGRESS_FD=""
+
+resolve_privileged_runner() {
+    if command -v sudo >/dev/null 2>&1; then
+        printf '%s\n' sudo
+        return 0
+    fi
+
+    if command -v pkexec >/dev/null 2>&1; then
+        printf '%s\n' pkexec
+        return 0
+    fi
+
+    if [ "$(id -u)" -eq 0 ]; then
+        return 0
+    fi
+
+    return 1
+}
+
+run_privileged() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+        return $?
+    fi
+
+    if [ -n "${PRIVILEGED_RUNNER:-}" ]; then
+        "$PRIVILEGED_RUNNER" "$@"
+        return $?
+    fi
+
+    return 1
+}
+
+start_progress() {
+    local title="$1"
+    local text="$2"
+    local fifo
+
+    fifo=$(mktemp -u)
+    mkfifo "$fifo"
+    yad --progress --center --on-top --width=460 --title="$title" --text="$text" --percentage=0 <"$fifo" >/dev/null 2>&1 &
+    PROGRESS_PID=$!
+    exec {PROGRESS_FD}>"$fifo"
+    rm -f "$fifo"
+    printf '0\n' >&$PROGRESS_FD
+}
+
+update_progress() {
+    local percent="$1"
+    local text="${2:-}"
+
+    if [ -n "$PROGRESS_FD" ]; then
+        if [ -n "$text" ]; then
+            printf '%s: %s\n' "$percent" "$text" >&$PROGRESS_FD
+        else
+            printf '%s\n' "$percent" >&$PROGRESS_FD
+        fi
+    fi
+}
+
+finish_progress() {
+    local hold_seconds="${1:-1}"
+
+    if [ -n "$PROGRESS_FD" ]; then
+        printf '100\n' >&$PROGRESS_FD
+        sleep "$hold_seconds"
+        exec {PROGRESS_FD}>&-
+        PROGRESS_FD=""
+    fi
+
+    if [ -n "$PROGRESS_PID" ]; then
+        wait "$PROGRESS_PID" >/dev/null 2>&1 || true
+        PROGRESS_PID=""
+    fi
+}
+
 find_wireless_interface() {
     local device
 
@@ -51,12 +129,7 @@ show_scan_progress() {
     local iface="$1"
     local title="WiFi Wizard"
 
-    set +e
-    yad --progress --center --pulsate --auto-close --no-buttons \
-        --title="$title" \
-        --text="Scanning for WiFi networks on $iface..." >/dev/null 2>&1 &
-    echo $!
-    set -e
+    start_progress "$title" "Scanning for WiFi networks on $iface..."
 }
 
 prompt_manual_network() {
@@ -128,6 +201,12 @@ show_success() {
     yad --info --center --title="WiFi Wizard" --text="WiFi settings were saved for $network_ssid on $iface.\nThe connection may take a few more seconds to complete."
 }
 
+format_scan_rows() {
+    awk -F'\t' 'BEGIN { OFS = "|" } { print $1, $2, $3 }'
+}
+
+PRIVILEGED_RUNNER="$(resolve_privileged_runner || true)"
+
 iface="$(choose_wireless_interface || true)"
 manual_ssid=""
 manual_password=""
@@ -142,9 +221,11 @@ if [ -z "$iface" ]; then
 fi
 
 while true; do
-    scan_progress_pid="$(show_scan_progress "$iface")"
-    scan_results="$(sudo /usr/bin/tc-scan-wifi "$iface" 2>/tmp/uftc-wifi-scan.log || true)"
-    wait "$scan_progress_pid" >/dev/null 2>&1 || true
+    show_scan_progress "$iface"
+    update_progress 10 "Bringing adapter up"
+    scan_results="$(run_privileged /usr/bin/tc-scan-wifi "$iface" 2>/tmp/uftc-wifi-scan.log || true)"
+    update_progress 100 "Scan complete"
+    finish_progress 1
 
     if [ -z "$scan_results" ]; then
         if [ -s /tmp/uftc-wifi-scan.log ]; then
@@ -162,7 +243,7 @@ while true; do
     fi
 
     set +e
-    selection=$(printf '%s\n' "$scan_results" | yad --list --center --width=700 --height=400 --title="WiFi Wizard" \
+    selection=$(printf '%s\n' "$scan_results" | format_scan_rows | yad --list --center --width=700 --height=400 --title="WiFi Wizard" \
         --text="Select a wireless network for $iface." \
         --separator=$'\x1F' --print-all \
         --button="Manual Network":2 --button="Rescan":3 --button="Cancel":1 --button="Next":0 \
@@ -213,11 +294,16 @@ if [ -z "$network_ssid" ]; then
     exit 1
 fi
 
-yad --info --center --title="WiFi Wizard" --text="Saving WiFi settings for $network_ssid. This can take up to 30 seconds while the connection comes up." --timeout=5 >/dev/null 2>&1 || true
+show_scan_progress "$iface"
+update_progress 25 "Saving WiFi settings"
 
-if ! configured_iface=$(printf '%s\n' "$network_password" | sudo /usr/bin/tc-configure-wifi --configure "$iface" "$network_ssid" "$network_hidden"); then
+if ! configured_iface=$(printf '%s\n' "$network_password" | run_privileged /usr/bin/tc-configure-wifi --configure "$iface" "$network_ssid" "$network_hidden"); then
+    finish_progress 0
     yad --error --center --title="WiFi Wizard" --text="Failed to save the WiFi configuration."
     exit 1
 fi
 
+update_progress 70 "Waiting for the connection"
 show_success "$configured_iface"
+update_progress 100 "Connected"
+finish_progress 1
