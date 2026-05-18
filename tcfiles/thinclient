@@ -20,6 +20,8 @@ shutdown_thinclient(){
 # Universal variables
 PROTOCOL_DETECT="://"
 VERSION=`cat /tcversion`
+adminpass="${adminpass:-}"
+keylayout="${keylayout:-}"
 
 # Run second phase of the build if present
 if [[ -f /usr/bin/firstboot ]]; then
