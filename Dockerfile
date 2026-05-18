@@ -44,13 +44,24 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         echo 'Warning: linux-xanmod-lts-x64v1 not available; d2vm will install a default kernel.' && \
     rm -f /etc/apt/sources.list.d/xanmod-release.list
 
-# Optional: Citrix ICA client — drop icaclient.deb next to the Dockerfile to include it.
-COPY icaclient.deb* /tmp/
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+# Optional: Citrix ICA client and Moonlight AppImage from the build context.
+RUN --mount=type=bind,source=.,target=/build-context,ro \
+    --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get install -y /tmp/icaclient.deb && rm /tmp/icaclient.deb || true
-
-COPY Moonlight.AppImage* /usr/bin/moonlight
+    ICA_DEB="$(find /build-context -maxdepth 1 -type f -name 'icaclient.deb*' | head -n1)" && \
+    if [ -n "$ICA_DEB" ]; then \
+        cp "$ICA_DEB" /tmp/icaclient.deb && \
+        apt-get install -y /tmp/icaclient.deb && \
+        rm -f /tmp/icaclient.deb; \
+    else \
+        echo 'Optional icaclient.deb not found; skipping Citrix package install.'; \
+    fi && \
+    MOONLIGHT_BIN="$(find /build-context -maxdepth 1 -type f -name 'Moonlight.AppImage*' | head -n1)" && \
+    if [ -n "$MOONLIGHT_BIN" ]; then \
+        install -m 0755 "$MOONLIGHT_BIN" /usr/bin/moonlight; \
+    else \
+        echo 'Optional Moonlight.AppImage not found; skipping moonlight install.'; \
+    fi
 
 COPY tcfiles/thinclient /usr/bin/thinclient
 COPY tcfiles/tc-settings /usr/bin/tc-settings
