@@ -7,3 +7,4 @@ build-installer-iso.sh text eol=lf
 
 # Thin-client runtime scripts and service/config files are consumed by Linux.
 tcfiles/* text eol=lf
+tcfiles/** text eol=lf
