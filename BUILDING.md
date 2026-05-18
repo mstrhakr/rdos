@@ -54,9 +54,8 @@ The generated VHD is not fully finalized until it boots once.
 
 At first login the thin-client launcher checks for `/usr/bin/firstboot` and runs it. That script:
 
-- generates initramfs
-- adds the XanMod apt repository
-- installs the XanMod kernel
+- generates or refreshes initramfs
+- installs the XanMod kernel only if it was not already baked into the image
 - restores the hostname to `thinclient`
 - removes itself
 - powers the machine off
@@ -140,8 +139,8 @@ WORKDIR="/tmp/uftc-installer" \
 
 References used for this implementation:
 
-- Clonezilla Live docs: https://clonezilla.org/live-doc.php
-- Clonezilla advanced boot parameters (`ocs_live_run`, batch mode): https://clonezilla.org/show-live-doc-content.php?topic=clonezilla-live/doc/99_Misc
+- Clonezilla Live docs: <https://clonezilla.org/live-doc.php>
+- Clonezilla advanced boot parameters (`ocs_live_run`, batch mode): <https://clonezilla.org/show-live-doc-content.php?topic=clonezilla-live/doc/99_Misc>
 
 ## Best places to start improving the process
 
