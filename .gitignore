@@ -4,3 +4,5 @@
 *.Identifier
 tcconfig*
 *.AppImage
+.installer-work
+*.iso
