@@ -201,8 +201,32 @@ show_success() {
     yad --info --center --title="WiFi Wizard" --text="WiFi settings were saved for $network_ssid on $iface.\nThe connection may take a few more seconds to complete."
 }
 
-format_scan_rows() {
-    awk -F'\t' 'BEGIN { OFS = "|" } { print $1, $2, $3 }'
+sanitize_ssid_for_list() {
+    local ssid="$1"
+
+    ssid="${ssid//$'\r'/ }"
+    ssid="${ssid//$'\n'/ }"
+    ssid="${ssid//|//}"
+    printf '%s' "$ssid"
+}
+
+build_scan_rows() {
+    local scan_text="$1"
+    local ssid
+    local signal
+    local security
+    local safe_ssid
+    local index=0
+
+    scanned_ssids=()
+
+    while IFS=$'\t' read -r ssid signal security; do
+        [ -n "$ssid" ] || continue
+        safe_ssid="$(sanitize_ssid_for_list "$ssid")"
+        scanned_ssids+=("$ssid")
+        printf '[%d] %s|%s|%s\n' "$index" "$safe_ssid" "$signal" "$security"
+        index=$((index + 1))
+    done <<< "$scan_text"
 }
 
 PRIVILEGED_RUNNER="$(resolve_privileged_runner || true)"
@@ -214,6 +238,7 @@ manual_hidden="FALSE"
 network_password=""
 network_ssid=""
 network_hidden="false"
+scanned_ssids=()
 
 if [ -z "$iface" ]; then
     yad --error --center --title="WiFi Wizard" --text="No wireless adapter was detected on this device."
@@ -242,8 +267,20 @@ while true; do
         break
     fi
 
+    scan_rows="$(build_scan_rows "$scan_results")"
+
+    if [ -z "$scan_rows" ]; then
+        if ! prompt_manual_network; then
+            exit 0
+        fi
+        network_ssid="$manual_ssid"
+        network_password="$manual_password"
+        network_hidden="$manual_hidden"
+        break
+    fi
+
     set +e
-    selection=$(printf '%s\n' "$scan_results" | format_scan_rows | yad --list --center --width=700 --height=400 --title="WiFi Wizard" \
+    selection=$(printf '%s\n' "$scan_rows" | yad --list --center --width=700 --height=400 --title="WiFi Wizard" \
         --text="Select a wireless network for $iface." \
         --separator=$'\x1F' --print-all \
         --button="Manual Network":2 --button="Rescan":3 --button="Cancel":1 --button="Next":0 \
@@ -269,7 +306,15 @@ while true; do
         exit 0
     fi
 
-    network_ssid="$(awk -F'\x1F' '{print $1}' <<<"$selection")"
+    selected_label="$(awk -F'\x1F' '{print $1}' <<<"$selection")"
+    selected_index="$(sed -n 's/^\[\([0-9]\+\)\].*/\1/p' <<<"$selected_label")"
+
+    if [ -z "$selected_index" ] || [ "$selected_index" -ge "${#scanned_ssids[@]}" ]; then
+        yad --error --center --title="WiFi Wizard" --text="Unable to parse the selected WiFi network. Please rescan or enter it manually."
+        continue
+    fi
+
+    network_ssid="${scanned_ssids[$selected_index]}"
     network_security="$(awk -F'\x1F' '{print $3}' <<<"$selection")"
     network_hidden="false"
 

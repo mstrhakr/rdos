@@ -516,7 +516,7 @@ run_settings_page() {
             --button="Device":12 \
             --button="Support":13 \
             --button="Tools":14 \
-            --button="Save & Exit":0 \
+            --button="Save and Exit":0 \
             --button="Cancel":1 >/dev/null
         status=$?
         set -e
