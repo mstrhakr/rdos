@@ -10,7 +10,7 @@ for %%F in ("%ROOT%*.vhd" "%ROOT%*.iso") do (
     if exist "%%~fF" (
         set "found=1"
         echo   - %%~nxF
-        icacls "%%~fF" /inheritance:e /grant:r "%USERNAME%":F "BUILTIN\Administrators":F "NT AUTHORITY\SYSTEM":F >nul
+        icacls "%%~fF" /inheritance:e /grant:r "%USERNAME%":F "BUILTIN\Administrators":F "NT AUTHORITY\SYSTEM":F "NT VIRTUAL MACHINE\Virtual Machines":F >nul
         if errorlevel 1 (
             echo     ! Failed to apply scoped ACLs on %%~nxF
         ) else (
