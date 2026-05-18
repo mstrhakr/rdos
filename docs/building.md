@@ -45,6 +45,21 @@ chmod +x build.sh d2vm
 ./build.sh
 ```
 
+Optional: avoid repeated sudo password prompts during local builds:
+
+```bash
+chmod +x setup-build-sudoers.sh
+./setup-build-sudoers.sh
+```
+
+This creates `/etc/sudoers.d/uftc-build-nopasswd` for the current Linux user and allows passwordless sudo only for the local `docker` binary and this repo's `d2vm` wrapper.
+
+To remove the rule later:
+
+```bash
+./setup-build-sudoers.sh --remove
+```
+
 If the build succeeds, you should get:
 
 - `uftc.vhd`
