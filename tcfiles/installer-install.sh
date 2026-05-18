@@ -65,6 +65,29 @@ run_with_gauge() {
   ui_progress_gauge "$target_disk" "$IMAGE_ZST"
 }
 
+prepare_target_disk() {
+  local target_disk="$1"
+  local dev="/dev/$target_disk"
+  local node type mnt
+
+  # Best-effort cleanup: make sure target partitions are not mounted/in use.
+  while read -r node type; do
+    [[ -n "$node" ]] || continue
+    [[ "$type" == "part" ]] || continue
+
+    mnt="$(lsblk -nr -o MOUNTPOINT "$node" 2>/dev/null | head -n1 || true)"
+    if [[ -n "$mnt" ]]; then
+      echo "Unmounting $node from $mnt"
+      umount "$node" || {
+        echo "Failed to unmount $node"
+        return 1
+      }
+    fi
+
+    swapoff "$node" >/dev/null 2>&1 || true
+  done < <(lsblk -nr -o NAME,TYPE "$dev" 2>/dev/null | awk '{print "/dev/" $1, $2}')
+}
+
 choose_post_action() {
   local target_disk="${1:-}"
 
@@ -74,6 +97,17 @@ choose_post_action() {
   fi
 
   ui_post_action_menu "$target_disk"
+}
+
+sanitize_disk_name() {
+  local raw="$1"
+
+  # Keep only the first token that matches common Linux disk names.
+  printf '%s\n' "$raw" \
+    | tr -d '\r' \
+    | tr -cs '[:alnum:]_-' '\n' \
+    | grep -E '^(sd[a-z]+|vd[a-z]+|xvd[a-z]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+)$' \
+    | head -n1
 }
 
 IMAGE_ZST="/run/live/medium/uftc/uftc.img.zst"
@@ -150,16 +184,17 @@ pick_target_disk() {
     local only_desc="${options[1]}"
 
     if declare -F ui_clear >/dev/null 2>&1 && declare -F ui_print_header >/dev/null 2>&1; then
-      ui_clear
-      ui_print_header
-      printf "\n"
-      ui_section_header "INSTALL TARGET"
-      printf "\n"
-      ui_info_message "Only one eligible install target was detected."
-      printf "\n"
-      printf "  /dev/%s - %s\n" "$only_disk" "$only_desc"
-      printf "\n${COLOR_DIM}Press Enter to continue...${COLOR_RESET}"
-      read -r
+      {
+        ui_clear
+        ui_print_header
+        printf "\n"
+        ui_section_header "INSTALL TARGET"
+        printf "\n"
+        ui_info_message "Only one eligible install target was detected."
+        printf "\n"
+        printf "  /dev/%s - %s\n" "$only_disk" "$only_desc"
+        printf "\n${COLOR_DIM}Auto-selecting target and continuing...${COLOR_RESET}\n"
+      } >&2
     fi
 
     echo "$only_disk"
@@ -173,6 +208,7 @@ TARGET_DISK=""
 
 if [[ "$MODE" == "auto" ]]; then
   TARGET_DISK="$(auto_target_disk || true)"
+  TARGET_DISK="$(sanitize_disk_name "$TARGET_DISK")"
   if [[ -z "$TARGET_DISK" ]]; then
     echo "No install target disk was found."
     echo "Live media disk was: ${LIVE_DISK:-unknown}"
@@ -194,6 +230,7 @@ else
   fi
   
   TARGET_DISK="$(pick_target_disk || true)"
+  TARGET_DISK="$(sanitize_disk_name "$TARGET_DISK")"
   if [[ -z "$TARGET_DISK" ]]; then
     show_msg "UFTC Installer" "No install target disk was selected or available."
     poweroff -f
@@ -205,6 +242,11 @@ fi
 
 echo "Writing image to /dev/$TARGET_DISK"
 echo "This will erase all data on /dev/$TARGET_DISK"
+
+if ! prepare_target_disk "$TARGET_DISK"; then
+  show_msg "UFTC Installer" "Install failed while preparing /dev/$TARGET_DISK.\n\nSee $LOG_FILE for details."
+  poweroff -f
+fi
 
 run_with_gauge "$TARGET_DISK"
 

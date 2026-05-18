@@ -248,14 +248,8 @@ ui_progress_gauge() {
   ui_info_message "Writing image to /dev/$target_disk"
   printf "\n"
   
-  # Start the write operation in background.
-  (
-    zstd -d -c "$image_path" 2>>"$log_file" | dd of="/dev/$target_disk" bs=16M conv=fsync status=none 2>>"$log_file" &
-    local dd_pid=$!
-
-    wait $dd_pid
-  ) &
-  
+  # Start the write operation in the background and track one process.
+  zstd -d -c "$image_path" 2>>"$log_file" | dd of="/dev/$target_disk" bs=16M conv=fsync status=none 2>>"$log_file" &
   local bg_pid=$!
   
   # Keep animating until write process exits.
