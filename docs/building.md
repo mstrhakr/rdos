@@ -94,19 +94,20 @@ It wraps a Clonezilla Live base ISO, injects your built UFTC image payload, and 
 ### Requirements for the installer ISO build
 
 - `xorriso`
-- `qemu-img`
+- `qemu-img` (provided by `qemu-utils` on Debian/Ubuntu)
 - `zstd`
 - `curl`
+- `lsblk` and `findmnt` (provided by `util-linux` on Debian/Ubuntu and Fedora)
 
-Install examples:
+Install the required packages before running `build-installer-iso.sh`:
 
 ```bash
 # Debian/Ubuntu
 sudo apt-get update
-sudo apt-get install -y xorriso qemu-utils zstd curl
+sudo apt-get install -y qemu-utils xorriso zstd curl util-linux
 
 # Fedora
-sudo dnf install -y xorriso qemu-img zstd curl
+sudo dnf install -y qemu-img xorriso zstd curl util-linux
 ```
 
 ### Build commands

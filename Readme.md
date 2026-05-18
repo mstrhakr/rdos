@@ -49,11 +49,13 @@ Installer ISO dependencies:
 ```bash
 # Debian/Ubuntu
 sudo apt-get update
-sudo apt-get install -y xorriso qemu-utils zstd curl
+sudo apt-get install -y qemu-utils xorriso zstd curl util-linux
 
 # Fedora
-sudo dnf install -y xorriso qemu-img zstd curl
+sudo dnf install -y qemu-img xorriso zstd curl util-linux
 ```
+
+`qemu-img` is provided by `qemu-utils` on Debian/Ubuntu.
 
 This installer ISO boots, writes UFTC to the first non-removable disk that is not the USB boot media, then powers off so you can remove the flash drive.
 
