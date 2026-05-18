@@ -241,7 +241,7 @@ if [ "$password" = "ping" ];then
     if [[ "$server" == *"$PROTOCOL_DETECT"* ]]; then
         mtr "$(grep "full address:s:" ~/destination.rdp | sed 's/full address:s://g' | sed 's/:.*//g' | tr -d '\r' | tr -d '\n')"
     else
-        mtr $( echo "$server" | sed 's/:.*//g' )
+        mtr "$(echo "$server" | sed 's/:.*//g')"
     fi
     if (($? != 0)); then
         yad --title="Error" --text "Something went wrong, will open the ping tool with localhost as the destination instead" --button="Ok"
