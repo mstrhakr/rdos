@@ -25,12 +25,74 @@ list_wireless_interfaces() {
 
 iface="${1:-$(find_wireless_interface)}"
 
-ip link set "$iface" up >/dev/null 2>&1 || true
+resolve_cmd() {
+    local name="$1"
+
+    if command -v "$name" >/dev/null 2>&1; then
+        command -v "$name"
+        return 0
+    fi
+
+    if [ -x "/usr/sbin/$name" ]; then
+        printf '%s\n' "/usr/sbin/$name"
+        return 0
+    fi
+
+    if [ -x "/sbin/$name" ]; then
+        printf '%s\n' "/sbin/$name"
+        return 0
+    fi
+
+    return 1
+}
+
+IP_BIN="$(resolve_cmd ip || true)"
+IW_BIN="$(resolve_cmd iw || true)"
+RFKILL_BIN="$(resolve_cmd rfkill || true)"
+
+if [ -z "$IP_BIN" ]; then
+    echo "ip command not found" >&2
+    exit 1
+fi
+
+if [ -z "$IW_BIN" ]; then
+    echo "iw command not found" >&2
+    exit 1
+fi
+
+ensure_interface_ready() {
+    local iface="$1"
+
+    if [ -n "$RFKILL_BIN" ]; then
+        "$RFKILL_BIN" unblock wifi >/dev/null 2>&1 || true
+        "$RFKILL_BIN" unblock all >/dev/null 2>&1 || true
+    fi
+
+    "$IP_BIN" link set "$iface" up >/dev/null 2>&1 || true
+}
 
 scan_output=$(mktemp)
 scan_error=$(mktemp)
+scan_ok=false
 
-if ! timeout 20 iw dev "$iface" scan ap-force >"$scan_output" 2>"$scan_error"; then
+for attempt in 1 2 3; do
+    ensure_interface_ready "$iface"
+
+    if timeout 20 "$IW_BIN" dev "$iface" scan ap-force >"$scan_output" 2>"$scan_error"; then
+        scan_ok=true
+        break
+    fi
+
+    # Some adapters briefly return ENETDOWN during resume/driver init.
+    if grep -q "Network is down (-100)" "$scan_error"; then
+        sleep 2
+        continue
+    fi
+
+    break
+done
+
+if [ "$scan_ok" != "true" ]; then
     cat "$scan_error" >&2
     rm -f "$scan_output" "$scan_error"
     exit 1

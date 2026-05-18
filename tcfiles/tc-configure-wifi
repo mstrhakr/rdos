@@ -30,6 +30,29 @@ read_existing_country() {
     return 1
 }
 
+resolve_cmd() {
+    local name="$1"
+
+    if command -v "$name" >/dev/null 2>&1; then
+        command -v "$name"
+        return 0
+    fi
+
+    if [ -x "/usr/sbin/$name" ]; then
+        printf '%s\n' "/usr/sbin/$name"
+        return 0
+    fi
+
+    if [ -x "/sbin/$name" ]; then
+        printf '%s\n' "/sbin/$name"
+        return 0
+    fi
+
+    return 1
+}
+
+RFKILL_BIN="$(resolve_cmd rfkill || true)"
+
 disable_powersave() {
     local device
     local iface
@@ -48,6 +71,10 @@ install_config() {
     local config_path="/etc/wpa_supplicant/wpa_supplicant-$iface.conf"
 
     install -D -m 600 "$source_file" "$config_path"
+    if [ -n "$RFKILL_BIN" ]; then
+        "$RFKILL_BIN" unblock wifi >/dev/null 2>&1 || true
+        "$RFKILL_BIN" unblock all >/dev/null 2>&1 || true
+    fi
     ip link set "$iface" up >/dev/null 2>&1 || true
     systemctl enable --now "wpa_supplicant@$iface.service"
     disable_powersave
