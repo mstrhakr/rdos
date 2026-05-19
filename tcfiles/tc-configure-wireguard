@@ -4,6 +4,61 @@ set -euo pipefail
 
 WIREGUARD_DIR="/etc/wireguard"
 
+list_wireguard_ifaces() {
+    local config
+
+    for config in "$WIREGUARD_DIR"/wg*.conf "$WIREGUARD_DIR"/wireguard*.conf; do
+        [ -f "$config" ] || continue
+        basename "$config" .conf
+    done
+}
+
+has_wireguard_config() {
+    local iface
+
+    while IFS= read -r iface; do
+        [ -n "$iface" ] && return 0
+    done < <(list_wireguard_ifaces)
+
+    return 1
+}
+
+set_enabled_state() {
+    local requested_state="${1,,}"
+    local iface
+
+    case "$requested_state" in
+        true|1|yes|on)
+            if ! has_wireguard_config; then
+                # Force disabled when no tunnel configuration exists.
+                requested_state="false"
+            fi
+            ;;
+        false|0|no|off)
+            requested_state="false"
+            ;;
+        *)
+            echo "Expected true/false for enabled state" >&2
+            return 1
+            ;;
+    esac
+
+    while IFS= read -r iface; do
+        [ -n "$iface" ] || continue
+        if [ "$requested_state" = "true" ]; then
+            systemctl enable --now "wg-quick@$iface.service"
+        else
+            systemctl disable --now "wg-quick@$iface.service" >/dev/null 2>&1 || true
+        fi
+    done < <(list_wireguard_ifaces)
+
+    if [ "$requested_state" = "true" ]; then
+        printf '%s\n' "true"
+    else
+        printf '%s\n' "false"
+    fi
+}
+
 canonical_path() {
     local input_path="$1"
 
@@ -85,6 +140,18 @@ main() {
             [ "$#" -ge 2 ] || exit 1
             validate_usb_wireguard_source "$2"
             install_config "$2"
+            ;;
+        --set-enabled)
+            [ "$#" -eq 2 ] || exit 1
+            set_enabled_state "$2"
+            ;;
+        --has-config)
+            if has_wireguard_config; then
+                printf '%s\n' "true"
+                exit 0
+            fi
+            printf '%s\n' "false"
+            exit 1
             ;;
         *)
             exit 1

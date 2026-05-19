@@ -30,6 +30,16 @@ wireless_adapter_present() {
     return 1
 }
 
+wireguard_config_present() {
+    local config
+
+    for config in /etc/wireguard/wg*.conf /etc/wireguard/wireguard*.conf; do
+        [ -f "$config" ] && return 0
+    done
+
+    return 1
+}
+
 show_error() {
     yad --error --center --title="Configuration" --text="$1"
 }
@@ -121,6 +131,7 @@ load_config() {
     status_show_wifi="false"
     status_show_ip="false"
     status_show_wireguard="false"
+    wireguard_enabled="true"
     keylayout="us"
     exit_type="Shutdown"
     config_url=""
@@ -141,11 +152,15 @@ load_config() {
         value="${value%\"}"
 
         case "$key" in
-            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|status_overlay_enabled|status_show_datetime|status_show_battery|status_show_wifi|status_show_ip|status_show_wireguard|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns)
+            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|status_overlay_enabled|status_show_datetime|status_show_battery|status_show_wifi|status_show_ip|status_show_wireguard|wireguard_enabled|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns)
                 printf -v "$key" '%s' "$value"
                 ;;
         esac
     done < "$CONFIG_PATH"
+
+    if ! wireguard_config_present; then
+        wireguard_enabled="false"
+    fi
 }
 
 save_config() {
@@ -167,6 +182,7 @@ save_config() {
         printf 'status_show_wifi=%s\n' "$(quote_config_value "$status_show_wifi")"
         printf 'status_show_ip=%s\n' "$(quote_config_value "$status_show_ip")"
         printf 'status_show_wireguard=%s\n' "$(quote_config_value "$status_show_wireguard")"
+        printf 'wireguard_enabled=%s\n' "$(quote_config_value "$wireguard_enabled")"
         printf 'keylayout=%s\n' "$(quote_config_value "$keylayout")"
         printf 'exit_type=%s\n' "$(quote_config_value "$exit_type")"
         printf 'config_url=%s\n' "$(quote_config_value "$config_url")"
@@ -185,6 +201,32 @@ apply_network_config() {
     if ! sudo -n /usr/bin/tc-configure-network --apply-tcconfig "$CONFIG_PATH" --reload 2>&1 | tee "$log_path" >/dev/null; then
         show_warning "The network settings were saved, but the live network reload reported an error. They will still be applied on the next boot.\n\nDetails:\n$(tail -n 5 "$log_path" 2>/dev/null)"
     fi
+}
+
+apply_wireguard_config() {
+    local requested_state
+    local applied_state
+    local log_path="${HOME}/.uftc-wireguard-apply.log"
+
+    if wireguard_config_present; then
+        requested_state="$(normalize_bool "$wireguard_enabled")"
+    else
+        requested_state="false"
+    fi
+
+    if ! applied_state="$(sudo -n /usr/bin/tc-configure-wireguard --set-enabled "$requested_state" 2>"$log_path")"; then
+        show_warning "WireGuard settings were saved, but live apply failed. The selected state may not be active yet.\n\nDetails:\n$(tail -n 5 "$log_path" 2>/dev/null)"
+        wireguard_enabled="$requested_state"
+        return 1
+    fi
+
+    wireguard_enabled="$(normalize_bool "$applied_state")"
+
+    if [ "$requested_state" = "true" ] && [ "$wireguard_enabled" != "true" ]; then
+        show_warning "WireGuard was set to disabled because no WireGuard config exists on this device."
+    fi
+
+    return 0
 }
 
 network_mode_label() {
@@ -436,26 +478,54 @@ choose_settings_action() {
 edit_experience_section() {
     local output
     local status
+    local wg_available="false"
+
+    if wireguard_config_present; then
+        wg_available="true"
+    fi
 
     set +e
-    output=$(yad --form --center --width=600 --title="Device Settings | $VERSION" \
-        --text="Adjust the login, display, and audio defaults." \
-        --separator=$'\x1F' \
-        --button="Cancel":1 --button="Save":0 \
-        --field="Login Timeout in Seconds" "$login_timeout" \
-        --field="Speaker Volume" "$volume" \
-        --field="Microphone Volume" "$microphone" \
-        --field="Screen Brightness" "$brightness" \
-        --field="Screen Standby Timeout in Seconds" "$screen_timeout" \
-        --field="Low Battery Alert Threshold Percent" "$battery_low_threshold" \
-        --field="Status Overlay Enabled:CHK" "$(bool_to_checkbox "$status_overlay_enabled")" \
-        --field="Show Date/Time:CHK" "$(bool_to_checkbox "$status_show_datetime")" \
-        --field="Show Battery:CHK" "$(bool_to_checkbox "$status_show_battery")" \
-        --field="Show WiFi Status:CHK" "$(bool_to_checkbox "$status_show_wifi")" \
-        --field="Show IP Address:CHK" "$(bool_to_checkbox "$status_show_ip")" \
-        --field="Show WireGuard Status:CHK" "$(bool_to_checkbox "$status_show_wireguard")" \
-        --field="Keyboard Layout" "$keylayout" \
-        --field="Exit Type:CB" "$(build_choice_list "$exit_type" "Shutdown" "Sleep" "Restart" "Exit")")
+    if [ "$wg_available" = "true" ]; then
+        output=$(yad --form --center --width=600 --title="Device Settings | $VERSION" \
+            --text="Adjust the login, display, and audio defaults." \
+            --separator=$'\x1F' \
+            --button="Cancel":1 --button="Save":0 \
+            --field="Login Timeout in Seconds" "$login_timeout" \
+            --field="Speaker Volume" "$volume" \
+            --field="Microphone Volume" "$microphone" \
+            --field="Screen Brightness" "$brightness" \
+            --field="Screen Standby Timeout in Seconds" "$screen_timeout" \
+            --field="Low Battery Alert Threshold Percent" "$battery_low_threshold" \
+            --field="Status Overlay Enabled:CHK" "$(bool_to_checkbox "$status_overlay_enabled")" \
+            --field="Show Date/Time:CHK" "$(bool_to_checkbox "$status_show_datetime")" \
+            --field="Show Battery:CHK" "$(bool_to_checkbox "$status_show_battery")" \
+            --field="Show WiFi Status:CHK" "$(bool_to_checkbox "$status_show_wifi")" \
+            --field="Show IP Address:CHK" "$(bool_to_checkbox "$status_show_ip")" \
+            --field="Show WireGuard Status:CHK" "$(bool_to_checkbox "$status_show_wireguard")" \
+            --field="WireGuard Enabled:CHK" "$(bool_to_checkbox "$wireguard_enabled")" \
+            --field="Keyboard Layout" "$keylayout" \
+            --field="Exit Type:CB" "$(build_choice_list "$exit_type" "Shutdown" "Sleep" "Restart" "Exit")")
+    else
+        output=$(yad --form --center --width=600 --title="Device Settings | $VERSION" \
+            --text="Adjust the login, display, and audio defaults.\nWireGuard is unavailable because no config file exists in /etc/wireguard." \
+            --separator=$'\x1F' \
+            --button="Cancel":1 --button="Save":0 \
+            --field="Login Timeout in Seconds" "$login_timeout" \
+            --field="Speaker Volume" "$volume" \
+            --field="Microphone Volume" "$microphone" \
+            --field="Screen Brightness" "$brightness" \
+            --field="Screen Standby Timeout in Seconds" "$screen_timeout" \
+            --field="Low Battery Alert Threshold Percent" "$battery_low_threshold" \
+            --field="Status Overlay Enabled:CHK" "$(bool_to_checkbox "$status_overlay_enabled")" \
+            --field="Show Date/Time:CHK" "$(bool_to_checkbox "$status_show_datetime")" \
+            --field="Show Battery:CHK" "$(bool_to_checkbox "$status_show_battery")" \
+            --field="Show WiFi Status:CHK" "$(bool_to_checkbox "$status_show_wifi")" \
+            --field="Show IP Address:CHK" "$(bool_to_checkbox "$status_show_ip")" \
+            --field="Show WireGuard Status:CHK" "$(bool_to_checkbox "$status_show_wireguard")" \
+            --field="WireGuard Enabled:RO" "Disabled (no config present)" \
+            --field="Keyboard Layout" "$keylayout" \
+            --field="Exit Type:CB" "$(build_choice_list "$exit_type" "Shutdown" "Sleep" "Restart" "Exit")")
+    fi
     status=$?
     set -e
 
@@ -475,8 +545,16 @@ edit_experience_section() {
     status_show_wifi="$(normalize_bool "$(awk -F'\x1F' '{print $10}' <<<"$output")")"
     status_show_ip="$(normalize_bool "$(awk -F'\x1F' '{print $11}' <<<"$output")")"
     status_show_wireguard="$(normalize_bool "$(awk -F'\x1F' '{print $12}' <<<"$output")")"
-    keylayout="$(awk -F'\x1F' '{print $13}' <<<"$output")"
-    exit_type="$(awk -F'\x1F' '{print $14}' <<<"$output")"
+
+    if [ "$wg_available" = "true" ]; then
+        wireguard_enabled="$(normalize_bool "$(awk -F'\x1F' '{print $13}' <<<"$output")")"
+        keylayout="$(awk -F'\x1F' '{print $14}' <<<"$output")"
+        exit_type="$(awk -F'\x1F' '{print $15}' <<<"$output")"
+    else
+        wireguard_enabled="false"
+        keylayout="$(awk -F'\x1F' '{print $14}' <<<"$output")"
+        exit_type="$(awk -F'\x1F' '{print $15}' <<<"$output")"
+    fi
 
     if ! [[ "$battery_low_threshold" =~ ^[0-9]+$ ]]; then
         battery_low_threshold="20"
@@ -569,6 +647,7 @@ save_all_changes() {
 
     save_config
     apply_network_config
+    apply_wireguard_config || true
     return 0
 }
 

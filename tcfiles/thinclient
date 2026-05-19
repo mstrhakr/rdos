@@ -37,6 +37,7 @@ status_show_battery="${status_show_battery:-true}"
 status_show_wifi="${status_show_wifi:-false}"
 status_show_ip="${status_show_ip:-false}"
 status_show_wireguard="${status_show_wireguard:-false}"
+wireguard_enabled="${wireguard_enabled:-true}"
 LOADING_PID=""
 LOADING_FD=""
 STATUS_OVERLAY_PID=""
@@ -380,6 +381,23 @@ stop_ui_helpers() {
     stop_status_overlay
 }
 
+apply_wireguard_state() {
+    local requested
+
+    requested="${wireguard_enabled,,}"
+    case "$requested" in
+        1|true|yes|on)
+            requested="true"
+            ;;
+        *)
+            requested="false"
+            ;;
+    esac
+
+    # Root helper enforces disabled state when no WireGuard config exists.
+    sudo -n /usr/bin/tc-configure-wireguard --set-enabled "$requested" >/dev/null 2>&1 || true
+}
+
 trap stop_ui_helpers EXIT
 
 # Run second phase of the build if present
@@ -509,6 +527,7 @@ if [ -f ~/tcconfig ];then
     setxkbmap "$keylayout"
     xset b off
     xset dpms 0 "$screen_timeout" 0
+    apply_wireguard_state
 
 
     # Handle multiple servers
