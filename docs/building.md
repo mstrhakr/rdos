@@ -93,6 +93,31 @@ Path scopes:
 
 CI should call the same script in `ci` mode and choose a path scope per job matrix leg.
 
+## VHD build validation
+
+Use the canonical VHD validation wrapper to run `build.sh` and assert artifact shape.
+
+```bash
+chmod +x ci/vhd-build-validate.sh
+./ci/vhd-build-validate.sh --mode build --output uftc.vhd
+```
+
+What it validates:
+
+- output VHD exists
+- logical VHD size passes a minimum-byte gate
+- boot signature checks (MBR 0x55AA and `file` boot-sector report when available)
+
+Useful variants:
+
+```bash
+# Validate an existing artifact without rebuilding
+./ci/vhd-build-validate.sh --mode validate-only --output uftc.vhd
+
+# CI deterministic leg example
+./ci/vhd-build-validate.sh --mode build --output uftc.vhd --no-cache
+```
+
 ## Important post-build step
 
 The generated VHD is not fully finalized until it boots once.
