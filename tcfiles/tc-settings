@@ -380,7 +380,7 @@ choose_settings_action() {
         yad --list --center --width=760 --height=500 --title="Settings | $VERSION" \
             --image=preferences-system \
             --text="$(settings_summary)\n\nChoose an action from the list." \
-            --separator=$'\x1F' --print-all \
+            --separator=$'\x1F' \
             --button="Cancel":1 --button="Select":0 \
             --column="Section" --column="Details")
     status=$?
@@ -535,7 +535,7 @@ choose_tools_action() {
         "Back" "Return to settings" | \
         yad --list --center --width=760 --height=420 --title="Tools | $VERSION" \
             --text="Run common admin and troubleshooting tools." \
-            --separator=$'\x1F' --print-all \
+            --separator=$'\x1F' \
             --button="Close":1 --button="Select":0 \
             --column="Tool" --column="Description")
     status=$?
@@ -714,7 +714,7 @@ run_first_boot_wizard() {
                     "Cancel Setup" "Exit setup without saving" | \
                     yad --list --center --width=700 --height=320 --title="First Time Setup | $VERSION" \
                         --text="Step 2 of $first_boot_total_steps: Configure WiFi before choosing network behavior." \
-                        --separator=$'\x1F' --print-all \
+                        --separator=$'\x1F' \
                         --button="Cancel":1 --button="Select":0 \
                         --column="Action" --column="Details")
                 status=$?

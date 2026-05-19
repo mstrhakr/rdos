@@ -122,7 +122,7 @@ choose_wireless_interface() {
 
     choice=$(printf '%s\n' "${interfaces[@]}" | yad --list --center --width=400 --height=250 --title="WiFi Wizard" \
         --text="Select the wireless adapter to scan." \
-        --separator=$'\x1F' --print-all \
+        --separator=$'\x1F' \
         --button="Cancel":1 --button="Scan":0 \
         --column="Adapter") || return 1
 
@@ -296,7 +296,7 @@ while true; do
     set +e
     selection=$(printf '%s\n' "$scan_rows" | yad --list --center --width=700 --height=400 --title="WiFi Wizard" \
         --text="Select a wireless network for $iface." \
-        --separator=$'\x1F' --print-all \
+        --separator=$'\x1F' \
         --button="Manual Network":2 --button="Rescan":3 --button="Cancel":1 --button="Next":0 \
         --column="SSID" --column="Signal" --column="Security")
     status=$?
