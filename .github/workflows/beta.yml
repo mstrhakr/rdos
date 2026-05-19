@@ -93,9 +93,11 @@ jobs:
           echo "Final tag: $TAG"
 
   build-and-test:
-    name: Build & Test (for RC)
+    name: Collect Prebuilt Artifacts (for RC)
     needs: validate-version
     runs-on: [self-hosted, linux, uftc-builder]
+    env:
+      RUNNER_ARTIFACT_ROOT: /var/tmp/uftc-artifacts
     timeout-minutes: 180
     if: >-
       github.repository == 'mstrhakr/uftc' &&
@@ -103,36 +105,16 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.head_branch != 'master'
-    outputs:
-      vhd-artifact: ${{ steps.build.outputs.vhd-artifact }}
-      iso-artifact: ${{ steps.build.outputs.iso-artifact }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-
-      - name: Verify tools
+      - name: Fetch artifacts from runner storage
         run: |
-          echo "Checking build environment..."
-          docker --version
-          qemu-img --version
-          xorriso -version 2>&1 | head -1
-          zstd --version
-          echo "All tools available ✓"
-
-      - name: Run full pipeline
-        id: build
-        run: |
-          bash ./ci/pipeline.sh all --mode ci --shellcheck-severity error
-          
-          # Export artifact paths for release step
-          VHD_PATH="$(pwd)/uftc.vhd"
-          ISO_PATH="$(pwd)/uftc-installer.iso"
-          
-          echo "vhd-artifact=$VHD_PATH" >> $GITHUB_OUTPUT
-          echo "iso-artifact=$ISO_PATH" >> $GITHUB_OUTPUT
-          
-          ls -lh "$VHD_PATH" "$ISO_PATH"
+          set -euo pipefail
+          SOURCE_DIR="${RUNNER_ARTIFACT_ROOT}/${{ github.event.workflow_run.head_sha }}"
+          test -f "$SOURCE_DIR/uftc.vhd"
+          test -f "$SOURCE_DIR/uftc-installer.iso"
+          cp "$SOURCE_DIR/uftc.vhd" ./uftc.vhd
+          cp "$SOURCE_DIR/uftc-installer.iso" ./uftc-installer.iso
+          ls -lh ./uftc.vhd ./uftc-installer.iso
 
       - name: Rename artifacts with version
         id: rename

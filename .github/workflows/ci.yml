@@ -43,6 +43,8 @@ jobs:
       - self-hosted
       - linux
       - uftc-builder
+    env:
+      RUNNER_ARTIFACT_ROOT: /var/tmp/uftc-artifacts
     timeout-minutes: 180
     if: >-
       github.event_name != 'pull_request' ||
@@ -70,6 +72,15 @@ jobs:
       - name: Run full pipeline
         run: |
           bash ./ci/pipeline.sh all --mode ci --shellcheck-severity error
+
+      - name: Persist artifacts on runner
+        run: |
+          set -euo pipefail
+          TARGET_DIR="${RUNNER_ARTIFACT_ROOT}/${GITHUB_SHA}"
+          mkdir -p "$TARGET_DIR"
+          install -m 0644 uftc.vhd "$TARGET_DIR/uftc.vhd"
+          install -m 0644 uftc-installer.iso "$TARGET_DIR/uftc-installer.iso"
+          ls -lh "$TARGET_DIR/uftc.vhd" "$TARGET_DIR/uftc-installer.iso"
 
       - name: Upload VHD artifact
         uses: actions/upload-artifact@v4
