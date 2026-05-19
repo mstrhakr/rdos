@@ -105,8 +105,9 @@ chmod +x ci/vhd-build-validate.sh
 What it validates:
 
 - output VHD exists
-- logical VHD size passes a minimum-byte gate
-- boot signature checks (MBR 0x55AA and `file` boot-sector report when available)
+- physical VHD file size passes a minimum-byte gate (default 1 GiB)
+- virtual disk size passes a minimum-byte gate when `qemu-img` is available (default 12 GiB)
+- container/integrity checks (`file` format hint plus `qemu-img check` when available)
 
 Useful variants:
 
