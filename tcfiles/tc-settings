@@ -95,6 +95,7 @@ load_config() {
     microphone="100"
     brightness="50"
     screen_timeout="600"
+    battery_low_threshold="20"
     keylayout="us"
     exit_type="Shutdown"
     config_url=""
@@ -115,7 +116,7 @@ load_config() {
         value="${value%\"}"
 
         case "$key" in
-            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns)
+            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns)
                 printf -v "$key" '%s' "$value"
                 ;;
         esac
@@ -134,6 +135,7 @@ save_config() {
         printf 'microphone=%s\n' "$(quote_config_value "$microphone")"
         printf 'brightness=%s\n' "$(quote_config_value "$brightness")"
         printf 'screen_timeout=%s\n' "$(quote_config_value "$screen_timeout")"
+        printf 'battery_low_threshold=%s\n' "$(quote_config_value "$battery_low_threshold")"
         printf 'keylayout=%s\n' "$(quote_config_value "$keylayout")"
         printf 'exit_type=%s\n' "$(quote_config_value "$exit_type")"
         printf 'config_url=%s\n' "$(quote_config_value "$config_url")"
@@ -406,6 +408,7 @@ edit_experience_section() {
         --field="Microphone Volume" "$microphone" \
         --field="Screen Brightness" "$brightness" \
         --field="Screen Standby Timeout in Seconds" "$screen_timeout" \
+        --field="Low Battery Alert Threshold Percent" "$battery_low_threshold" \
         --field="Keyboard Layout" "$keylayout" \
         --field="Exit Type:CB" "$(build_choice_list "$exit_type" "Shutdown" "Sleep" "Restart" "Exit")")
     status=$?
@@ -420,8 +423,14 @@ edit_experience_section() {
     microphone="$(awk -F'\x1F' '{print $3}' <<<"$output")"
     brightness="$(awk -F'\x1F' '{print $4}' <<<"$output")"
     screen_timeout="$(awk -F'\x1F' '{print $5}' <<<"$output")"
-    keylayout="$(awk -F'\x1F' '{print $6}' <<<"$output")"
-    exit_type="$(awk -F'\x1F' '{print $7}' <<<"$output")"
+    battery_low_threshold="$(awk -F'\x1F' '{print $6}' <<<"$output")"
+    keylayout="$(awk -F'\x1F' '{print $7}' <<<"$output")"
+    exit_type="$(awk -F'\x1F' '{print $8}' <<<"$output")"
+
+    if ! [[ "$battery_low_threshold" =~ ^[0-9]+$ ]]; then
+        battery_low_threshold="20"
+    fi
+
     return 0
 }
 

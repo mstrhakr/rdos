@@ -28,10 +28,12 @@ microphone="${microphone:-100}"
 brightness="${brightness:-50}"
 screen_timeout="${screen_timeout:-600}"
 login_timeout="${login_timeout:-600}"
+battery_low_threshold="${battery_low_threshold:-20}"
 cert_policy="${cert_policy:-tofu}"
 connect_splash_timeout="${connect_splash_timeout:-12}"
 LOADING_PID=""
 LOADING_FD=""
+STATUS_OVERLAY_PID=""
 
 start_loading_splash() {
     local message="$1"
@@ -84,7 +86,140 @@ stop_loading_splash() {
     fi
 }
 
-trap stop_loading_splash EXIT
+find_battery_device() {
+    local device
+
+    for device in /sys/class/power_supply/*; do
+        [ -d "$device" ] || continue
+        if [ -r "$device/type" ] && [ "$(< "$device/type")" = "Battery" ] && [ -r "$device/capacity" ]; then
+            printf '%s\n' "$device"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+status_overlay_loop() {
+    local battery_device="$1"
+    local threshold="$2"
+    local width=320
+    local height=68
+    local screen_spec=""
+    local screen_width=1024
+    local x_offset=0
+    local fifo_path=""
+    local yad_pid=""
+    local writer_fd=""
+    local notified_low=0
+    local capacity=0
+    local status="Unknown"
+    local now=""
+
+    if ! [[ "$threshold" =~ ^[0-9]+$ ]]; then
+        threshold=20
+    fi
+
+    screen_spec="$(xrandr --current 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i ~ /^[0-9]+x[0-9]+\+[0-9]+\+[0-9]+$/){print $i; exit}}}')"
+    if [ -n "$screen_spec" ]; then
+        screen_width="${screen_spec%x*}"
+    fi
+
+    if ! [[ "$screen_width" =~ ^[0-9]+$ ]]; then
+        screen_width=1024
+    fi
+
+    x_offset=$((screen_width - width - 12))
+    if [ "$x_offset" -lt 0 ]; then
+        x_offset=0
+    fi
+
+    fifo_path="$(mktemp -u /tmp/uftc-status-overlay.XXXXXX)"
+    mkfifo "$fifo_path"
+
+    yad --progress \
+        --title="System Status" \
+        --text="Preparing status" \
+        --percentage=0 \
+        --geometry="${width}x${height}+${x_offset}+12" \
+        --no-buttons \
+        --undecorated \
+        --on-top \
+        --skip-taskbar \
+        --sticky \
+        <"$fifo_path" >/dev/null 2>&1 &
+    yad_pid=$!
+
+    exec {writer_fd}>"$fifo_path"
+
+    while kill -0 "$yad_pid" 2>/dev/null; do
+        if [ -r "$battery_device/capacity" ]; then
+            capacity="$(< "$battery_device/capacity")"
+        else
+            break
+        fi
+
+        if [ -r "$battery_device/status" ]; then
+            status="$(< "$battery_device/status")"
+        else
+            status="Unknown"
+        fi
+
+        if ! [[ "$capacity" =~ ^[0-9]+$ ]]; then
+            capacity=0
+        fi
+
+        now="$(date '+%Y-%m-%d %H:%M')"
+        printf '%s\n#%s\n' "$capacity" "${now}  Battery ${capacity}% (${status})" >&${writer_fd} || break
+
+        if [ "$capacity" -le "$threshold" ] && [ "$status" != "Charging" ]; then
+            if [ "$notified_low" -eq 0 ]; then
+                yad --warning --on-top --skip-taskbar --timeout=10 --title="Low Battery" \
+                    --text="Battery is low (${capacity}%). Please connect power." >/dev/null 2>&1 &
+                notified_low=1
+            fi
+        elif [ "$capacity" -gt "$threshold" ] || [ "$status" = "Charging" ]; then
+            notified_low=0
+        fi
+
+        sleep 30
+    done
+
+    exec {writer_fd}>&- 2>/dev/null || true
+    if [ -n "$yad_pid" ]; then
+        kill "$yad_pid" 2>/dev/null || true
+        wait "$yad_pid" 2>/dev/null || true
+    fi
+    if [ -p "$fifo_path" ]; then
+        rm -f "$fifo_path"
+    fi
+}
+
+start_status_overlay() {
+    local battery_device
+
+    if ! battery_device="$(find_battery_device)"; then
+        return 0
+    fi
+
+    status_overlay_loop "$battery_device" "$battery_low_threshold" &
+    STATUS_OVERLAY_PID=$!
+}
+
+stop_status_overlay() {
+    if [ -n "$STATUS_OVERLAY_PID" ]; then
+        kill "$STATUS_OVERLAY_PID" 2>/dev/null || true
+        wait "$STATUS_OVERLAY_PID" 2>/dev/null || true
+        STATUS_OVERLAY_PID=""
+    fi
+}
+
+stop_ui_helpers() {
+    stop_loading_splash
+    stop_status_overlay
+}
+
+trap stop_ui_helpers EXIT
 
 # Run second phase of the build if present
 if [[ -f /usr/bin/firstboot ]]; then
@@ -316,6 +451,8 @@ if [[ "$server" != "citrix" && "$server" != "moonlight" ]]; then
         loading_text="Reconnecting to remote desktop..."
     fi
 
+    start_status_overlay
+
     freerdp_args=(
         "$rdp_destination"
         /multimon
@@ -371,6 +508,8 @@ if [[ "$server" != "citrix" && "$server" != "moonlight" ]]; then
         kill "$loading_timeout_pid" >/dev/null 2>&1 || true
         stop_loading_splash
     fi
+
+    stop_status_overlay
 fi
 
 # RDP is no longer running, we diagnose why
