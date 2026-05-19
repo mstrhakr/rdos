@@ -18,18 +18,29 @@ concurrency:
 
 jobs:
   pretest:
-    name: Pretest (Hosted)
-    runs-on: ubuntu-latest
+    name: Pretest (Self-Hosted)
+    runs-on: [self-hosted, linux, uftc-builder]
     timeout-minutes: 20
+    if: >-
+      github.event_name != 'pull_request' ||
+      (
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+      )
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install pretest dependencies
+      - name: Verify pretest dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
+          set -euo pipefail
+          for cmd in bash shellcheck; do
+            if ! command -v "$cmd" >/dev/null 2>&1; then
+              echo "Missing required command: $cmd" >&2
+              exit 1
+            fi
+          done
 
       - name: Run pretest
         run: |
@@ -39,16 +50,16 @@ jobs:
   build-and-validate:
     name: Build + Validate (Self-Hosted)
     needs: pretest
-    runs-on:
-      - self-hosted
-      - linux
-      - uftc-builder
+    runs-on: [self-hosted, linux, uftc-builder]
     env:
       RUNNER_ARTIFACT_ROOT: /var/tmp/uftc-artifacts
     timeout-minutes: 180
     if: >-
       github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      (
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+      )
 
     steps:
       - name: Checkout

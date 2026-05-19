@@ -14,7 +14,7 @@ permissions:
 jobs:
   detect-version:
     name: Detect Version & Auto-Increment Patch
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, uftc-builder]
     if: >-
       github.repository == 'mstrhakr/uftc' &&
       github.event_name == 'workflow_run' &&
@@ -123,7 +123,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: [detect-version, build-and-test]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, uftc-builder]
     if: >-
       github.repository == 'mstrhakr/uftc' &&
       github.event_name == 'workflow_run' &&
