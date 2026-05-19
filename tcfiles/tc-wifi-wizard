@@ -238,7 +238,7 @@ build_scan_rows() {
         [ -n "$ssid" ] || continue
         safe_ssid="$(sanitize_ssid_for_list "$ssid")"
         scanned_ssids+=("$ssid")
-        printf '[%d] %s\n%s\n%s\n' "$index" "$safe_ssid" "$signal" "$security"
+        printf '%d\n%s\n%s\n%s\n' "$index" "$safe_ssid" "$signal" "$security"
         index=$((index + 1))
     done <<< "$scan_text"
 }
@@ -298,7 +298,7 @@ while true; do
         --text="Select a wireless network for $iface." \
         --separator=$'\x1F' \
         --button="Manual Network":2 --button="Rescan":3 --button="Cancel":1 --button="Next":0 \
-        --column="SSID" --column="Signal" --column="Security")
+        --column="ID:NUM" --column="SSID" --column="Signal" --column="Security")
     status=$?
     set -e
 
@@ -320,8 +320,12 @@ while true; do
         exit 0
     fi
 
-    selected_label="$(awk -F'\x1F' '{print $1}' <<<"$selection")"
-    selected_index="$(sed -n 's/^\[\([0-9]\+\)\].*/\1/p' <<<"$selected_label")"
+    selected_index="$(awk -F'\x1F' '{print $1}' <<<"$selection")"
+
+    if ! [[ "$selected_index" =~ ^[0-9]+$ ]]; then
+        yad --error --center --title="WiFi Wizard" --text="Unable to parse the selected WiFi network. Please rescan or enter it manually."
+        continue
+    fi
 
     if [ -z "$selected_index" ] || [ "$selected_index" -ge "${#scanned_ssids[@]}" ]; then
         yad --error --center --title="WiFi Wizard" --text="Unable to parse the selected WiFi network. Please rescan or enter it manually."
