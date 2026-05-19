@@ -398,6 +398,50 @@ apply_wireguard_state() {
     sudo -n /usr/bin/tc-configure-wireguard --set-enabled "$requested" >/dev/null 2>&1 || true
 }
 
+set_freerdp_cert_policy() {
+    local requested_policy="$1"
+    local arg
+    local filtered_args=()
+
+    for arg in "${freerdp_args[@]}"; do
+        if [[ "$arg" == /cert:* ]]; then
+            continue
+        fi
+        filtered_args+=("$arg")
+    done
+
+    freerdp_args=("${filtered_args[@]}" "/cert:${requested_policy}")
+}
+
+run_freerdp_session() {
+    local splash_text="$1"
+    local loading_timeout_pid=""
+
+    start_loading_splash "$splash_text"
+    (sleep "$connect_splash_timeout"; stop_loading_splash) &
+    loading_timeout_pid=$!
+
+    if [[ -n "$password" ]]; then
+        # Keep credentials out of process arguments when possible.
+        printf '%s\n' "$password" | WLOG_APPENDER=file WLOG_FILEAPPENDER_OUTPUT_FILE_NAME=session.log WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=. xfreerdp3 "${freerdp_args[@]}" /from-stdin
+    else
+        WLOG_APPENDER=file WLOG_FILEAPPENDER_OUTPUT_FILE_NAME=session.log WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=. xfreerdp3 "${freerdp_args[@]}"
+    fi
+
+    kill "$loading_timeout_pid" >/dev/null 2>&1 || true
+    stop_loading_splash
+}
+
+session_has_unknown_host_key_error() {
+    grep -Eiq 'certificate verification failure|unknown certificate|self-signed certificate|unable to get local issuer certificate|CERTIFICATE_VERIFY_FAILED|host key' session.log
+}
+
+prompt_trust_unknown_host_key() {
+    yad --question --center --title="Server Identity" --width=620 \
+        --button="Cancel":1 --button="Trust and Save Key":0 \
+        --text="The server identity key is not trusted yet.\n\nServer: $server\n\nIf you trust this server, choose 'Trust and Save Key' to save the key and reconnect now." >/dev/null 2>&1
+}
+
 trap stop_ui_helpers EXIT
 
 # Run second phase of the build if present
@@ -652,6 +696,9 @@ if [[ "$server" != "citrix" && "$server" != "moonlight" ]]; then
         ignore)
             freerdp_args+=(/cert:ignore)
             ;;
+        ask|prompt)
+            freerdp_args+=(/cert:deny)
+            ;;
         deny|tofu|fingerprint:*)
             freerdp_args+=("/cert:$cert_policy")
             ;;
@@ -672,21 +719,15 @@ if [[ "$server" != "citrix" && "$server" != "moonlight" ]]; then
         freerdp_args+=("${extra_params[@]}")
     fi
 
-    if [[ -n "$password" ]]; then
-        start_loading_splash "$loading_text"
-        (sleep "$connect_splash_timeout"; stop_loading_splash) &
-        loading_timeout_pid=$!
-        # Keep credentials out of process arguments when possible.
-        printf '%s\n' "$password" | WLOG_APPENDER=file WLOG_FILEAPPENDER_OUTPUT_FILE_NAME=session.log WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=. xfreerdp3 "${freerdp_args[@]}" /from-stdin
-        kill "$loading_timeout_pid" >/dev/null 2>&1 || true
-        stop_loading_splash
-    else
-        start_loading_splash "$loading_text"
-        (sleep "$connect_splash_timeout"; stop_loading_splash) &
-        loading_timeout_pid=$!
-        WLOG_APPENDER=file WLOG_FILEAPPENDER_OUTPUT_FILE_NAME=session.log WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=. xfreerdp3 "${freerdp_args[@]}"
-        kill "$loading_timeout_pid" >/dev/null 2>&1 || true
-        stop_loading_splash
+    run_freerdp_session "$loading_text"
+
+    if ! grep -Fq "BY_USER" session.log && [[ "${UFTC_CERT_PROMPTED:-0}" != "1" ]] && session_has_unknown_host_key_error; then
+        if prompt_trust_unknown_host_key; then
+            echo "User accepted unknown host key prompt, retrying with TOFU policy"
+            set_freerdp_cert_policy "tofu"
+            echo "Retry after unknown host key prompt" > session.log
+            run_freerdp_session "Saving server key and reconnecting..."
+        fi
     fi
 
     stop_status_overlay
