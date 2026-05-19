@@ -31,6 +31,12 @@ login_timeout="${login_timeout:-600}"
 battery_low_threshold="${battery_low_threshold:-20}"
 cert_policy="${cert_policy:-tofu}"
 connect_splash_timeout="${connect_splash_timeout:-12}"
+status_overlay_enabled="${status_overlay_enabled:-true}"
+status_show_datetime="${status_show_datetime:-true}"
+status_show_battery="${status_show_battery:-true}"
+status_show_wifi="${status_show_wifi:-false}"
+status_show_ip="${status_show_ip:-false}"
+status_show_wireguard="${status_show_wireguard:-false}"
 LOADING_PID=""
 LOADING_FD=""
 STATUS_OVERLAY_PID=""
@@ -100,11 +106,123 @@ find_battery_device() {
     return 1
 }
 
+is_enabled() {
+    case "${1,,}" in
+        1|true|yes|on)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+get_wifi_status() {
+    local iface=""
+    local candidate
+    local ssid=""
+
+    for candidate in /sys/class/net/*; do
+        [ -d "$candidate/wireless" ] || continue
+        iface="$(basename "$candidate")"
+        if [ -r "$candidate/operstate" ] && [ "$(< "$candidate/operstate")" = "up" ]; then
+            break
+        fi
+    done
+
+    if [ -z "$iface" ]; then
+        printf '%s\n' "WiFi n/a"
+        return 0
+    fi
+
+    if [ -r "/sys/class/net/$iface/operstate" ] && [ "$(< "/sys/class/net/$iface/operstate")" != "up" ]; then
+        printf '%s\n' "WiFi off"
+        return 0
+    fi
+
+    if command -v iwgetid >/dev/null 2>&1; then
+        ssid="$(iwgetid "$iface" -r 2>/dev/null || true)"
+    fi
+    if [ -z "$ssid" ] && command -v iw >/dev/null 2>&1; then
+        ssid="$(iw dev "$iface" link 2>/dev/null | awk -F': ' '/SSID/ {print $2; exit}')"
+    fi
+
+    if [ -n "$ssid" ]; then
+        printf '%s\n' "WiFi ${iface}:${ssid}"
+        return 0
+    fi
+
+    if [ -r "/sys/class/net/$iface/carrier" ] && [ "$(< "/sys/class/net/$iface/carrier")" = "1" ]; then
+        printf '%s\n' "WiFi ${iface}:connected"
+    else
+        printf '%s\n' "WiFi ${iface}:disconnected"
+    fi
+}
+
+get_ip_status() {
+    local route_output=""
+    local ip_addr=""
+
+    route_output="$(ip -4 route get 1.1.1.1 2>/dev/null || true)"
+    ip_addr="$(awk '/src/ {for(i=1;i<=NF;i++){if($i=="src"){print $(i+1); exit}}}' <<<"$route_output")"
+
+    if [ -z "$ip_addr" ]; then
+        ip_addr="$(hostname --all-ip-addresses 2>/dev/null | awk '{print $1}')"
+    fi
+
+    if [ -n "$ip_addr" ]; then
+        printf '%s\n' "IP $ip_addr"
+    else
+        printf '%s\n' "IP none"
+    fi
+}
+
+get_wireguard_status() {
+    local interfaces=""
+    local iface
+    local up_ifaces=""
+
+    if ! command -v wg >/dev/null 2>&1; then
+        printf '%s\n' "WG n/a"
+        return 0
+    fi
+
+    interfaces="$(wg show interfaces 2>/dev/null || true)"
+    if [ -z "$interfaces" ]; then
+        printf '%s\n' "WG down"
+        return 0
+    fi
+
+    for iface in $interfaces; do
+        if ip link show dev "$iface" 2>/dev/null | grep -q "state UP"; then
+            if [ -z "$up_ifaces" ]; then
+                up_ifaces="$iface"
+            else
+                up_ifaces="$up_ifaces,$iface"
+            fi
+        fi
+    done
+
+    if [ -n "$up_ifaces" ]; then
+        printf '%s\n' "WG up(${up_ifaces})"
+    else
+        printf '%s\n' "WG down"
+    fi
+}
+
+status_any_items_enabled() {
+    is_enabled "$status_show_datetime" || \
+    is_enabled "$status_show_battery" || \
+    is_enabled "$status_show_wifi" || \
+    is_enabled "$status_show_ip" || \
+    is_enabled "$status_show_wireguard"
+}
+
 status_overlay_loop() {
     local battery_device="$1"
     local threshold="$2"
-    local width=320
-    local height=68
+    local width=620
+    local height=80
     local screen_spec=""
     local screen_width=1024
     local x_offset=0
@@ -115,6 +233,10 @@ status_overlay_loop() {
     local capacity=0
     local status="Unknown"
     local now=""
+    local overlay_percent=0
+    local battery_text=""
+    local status_line=""
+    local status_parts=()
 
     if ! [[ "$threshold" =~ ^[0-9]+$ ]]; then
         threshold=20
@@ -153,26 +275,59 @@ status_overlay_loop() {
     exec {writer_fd}>"$fifo_path"
 
     while kill -0 "$yad_pid" 2>/dev/null; do
-        if [ -r "$battery_device/capacity" ]; then
+        if [ -n "$battery_device" ] && [ -r "$battery_device/capacity" ]; then
             capacity="$(< "$battery_device/capacity")"
         else
-            break
+            capacity=0
         fi
 
-        if [ -r "$battery_device/status" ]; then
+        if [ -n "$battery_device" ] && [ -r "$battery_device/status" ]; then
             status="$(< "$battery_device/status")"
         else
-            status="Unknown"
+            status="n/a"
         fi
 
         if ! [[ "$capacity" =~ ^[0-9]+$ ]]; then
             capacity=0
         fi
 
-        now="$(date '+%Y-%m-%d %H:%M')"
-        printf '%s\n#%s\n' "$capacity" "${now}  Battery ${capacity}% (${status})" >&${writer_fd} || break
+        if is_enabled "$status_show_battery" && [ -n "$battery_device" ]; then
+            overlay_percent="$capacity"
+            battery_text="Battery ${capacity}% (${status})"
+        else
+            overlay_percent=0
+            battery_text=""
+        fi
 
-        if [ "$capacity" -le "$threshold" ] && [ "$status" != "Charging" ]; then
+        now="$(date '+%Y-%m-%d %H:%M')"
+
+        status_parts=()
+        if is_enabled "$status_show_datetime"; then
+            status_parts+=("$now")
+        fi
+        if [ -n "$battery_text" ]; then
+            status_parts+=("$battery_text")
+        fi
+        if is_enabled "$status_show_wifi"; then
+            status_parts+=("$(get_wifi_status)")
+        fi
+        if is_enabled "$status_show_ip"; then
+            status_parts+=("$(get_ip_status)")
+        fi
+        if is_enabled "$status_show_wireguard"; then
+            status_parts+=("$(get_wireguard_status)")
+        fi
+
+        if [ "${#status_parts[@]}" -gt 0 ]; then
+            status_line="$(printf ' | %s' "${status_parts[@]}")"
+            status_line="${status_line# | }"
+        else
+            status_line="$now"
+        fi
+
+        printf '%s\n#%s\n' "$overlay_percent" "$status_line" >&${writer_fd} || break
+
+        if is_enabled "$status_show_battery" && [ -n "$battery_device" ] && [ "$capacity" -le "$threshold" ] && [ "$status" != "Charging" ]; then
             if [ "$notified_low" -eq 0 ]; then
                 yad --warning --on-top --skip-taskbar --timeout=10 --title="Low Battery" \
                     --text="Battery is low (${capacity}%). Please connect power." >/dev/null 2>&1 &
@@ -196,11 +351,17 @@ status_overlay_loop() {
 }
 
 start_status_overlay() {
-    local battery_device
+    local battery_device=""
 
-    if ! battery_device="$(find_battery_device)"; then
+    if ! is_enabled "$status_overlay_enabled"; then
         return 0
     fi
+
+    if ! status_any_items_enabled; then
+        return 0
+    fi
+
+    battery_device="$(find_battery_device || true)"
 
     status_overlay_loop "$battery_device" "$battery_low_threshold" &
     STATUS_OVERLAY_PID=$!

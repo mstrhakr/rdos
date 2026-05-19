@@ -81,6 +81,25 @@ quote_config_value() {
     printf '"%s"' "$value"
 }
 
+normalize_bool() {
+    case "${1,,}" in
+        1|true|yes|on)
+            printf '%s\n' "true"
+            ;;
+        *)
+            printf '%s\n' "false"
+            ;;
+    esac
+}
+
+bool_to_checkbox() {
+    if [ "$(normalize_bool "$1")" = "true" ]; then
+        printf '%s\n' "TRUE"
+    else
+        printf '%s\n' "FALSE"
+    fi
+}
+
 load_config() {
     local key
     local value
@@ -96,6 +115,12 @@ load_config() {
     brightness="50"
     screen_timeout="600"
     battery_low_threshold="20"
+    status_overlay_enabled="true"
+    status_show_datetime="true"
+    status_show_battery="true"
+    status_show_wifi="false"
+    status_show_ip="false"
+    status_show_wireguard="false"
     keylayout="us"
     exit_type="Shutdown"
     config_url=""
@@ -116,7 +141,7 @@ load_config() {
         value="${value%\"}"
 
         case "$key" in
-            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns)
+            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|status_overlay_enabled|status_show_datetime|status_show_battery|status_show_wifi|status_show_ip|status_show_wireguard|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns)
                 printf -v "$key" '%s' "$value"
                 ;;
         esac
@@ -136,6 +161,12 @@ save_config() {
         printf 'brightness=%s\n' "$(quote_config_value "$brightness")"
         printf 'screen_timeout=%s\n' "$(quote_config_value "$screen_timeout")"
         printf 'battery_low_threshold=%s\n' "$(quote_config_value "$battery_low_threshold")"
+        printf 'status_overlay_enabled=%s\n' "$(quote_config_value "$status_overlay_enabled")"
+        printf 'status_show_datetime=%s\n' "$(quote_config_value "$status_show_datetime")"
+        printf 'status_show_battery=%s\n' "$(quote_config_value "$status_show_battery")"
+        printf 'status_show_wifi=%s\n' "$(quote_config_value "$status_show_wifi")"
+        printf 'status_show_ip=%s\n' "$(quote_config_value "$status_show_ip")"
+        printf 'status_show_wireguard=%s\n' "$(quote_config_value "$status_show_wireguard")"
         printf 'keylayout=%s\n' "$(quote_config_value "$keylayout")"
         printf 'exit_type=%s\n' "$(quote_config_value "$exit_type")"
         printf 'config_url=%s\n' "$(quote_config_value "$config_url")"
@@ -174,6 +205,7 @@ selected_interface_label() {
 
 settings_summary() {
     local network_summary
+    local status_summary
 
     if [ "$network_mode" = "static" ]; then
         network_summary="Static on ${network_interface:-unset}: ${static_address:-unset}/${static_prefix:-unset}"
@@ -181,10 +213,17 @@ settings_summary() {
         network_summary="Automatic (DHCP)"
     fi
 
+    if [ "$(normalize_bool "$status_overlay_enabled")" = "true" ]; then
+        status_summary="Enabled"
+    else
+        status_summary="Disabled"
+    fi
+
     cat <<EOF
 Connection: ${server:-Not configured}
 Domain: ${domain:-Not set}
 Network: $network_summary
+Status overlay: $status_summary
 Keyboard: ${keylayout:-us}
 Exit action: ${exit_type:-Shutdown}
 Helpdesk: ${helpdesk:-the helpdesk}
@@ -409,6 +448,12 @@ edit_experience_section() {
         --field="Screen Brightness" "$brightness" \
         --field="Screen Standby Timeout in Seconds" "$screen_timeout" \
         --field="Low Battery Alert Threshold Percent" "$battery_low_threshold" \
+        --field="Status Overlay Enabled:CHK" "$(bool_to_checkbox "$status_overlay_enabled")" \
+        --field="Show Date/Time:CHK" "$(bool_to_checkbox "$status_show_datetime")" \
+        --field="Show Battery:CHK" "$(bool_to_checkbox "$status_show_battery")" \
+        --field="Show WiFi Status:CHK" "$(bool_to_checkbox "$status_show_wifi")" \
+        --field="Show IP Address:CHK" "$(bool_to_checkbox "$status_show_ip")" \
+        --field="Show WireGuard Status:CHK" "$(bool_to_checkbox "$status_show_wireguard")" \
         --field="Keyboard Layout" "$keylayout" \
         --field="Exit Type:CB" "$(build_choice_list "$exit_type" "Shutdown" "Sleep" "Restart" "Exit")")
     status=$?
@@ -424,8 +469,14 @@ edit_experience_section() {
     brightness="$(awk -F'\x1F' '{print $4}' <<<"$output")"
     screen_timeout="$(awk -F'\x1F' '{print $5}' <<<"$output")"
     battery_low_threshold="$(awk -F'\x1F' '{print $6}' <<<"$output")"
-    keylayout="$(awk -F'\x1F' '{print $7}' <<<"$output")"
-    exit_type="$(awk -F'\x1F' '{print $8}' <<<"$output")"
+    status_overlay_enabled="$(normalize_bool "$(awk -F'\x1F' '{print $7}' <<<"$output")")"
+    status_show_datetime="$(normalize_bool "$(awk -F'\x1F' '{print $8}' <<<"$output")")"
+    status_show_battery="$(normalize_bool "$(awk -F'\x1F' '{print $9}' <<<"$output")")"
+    status_show_wifi="$(normalize_bool "$(awk -F'\x1F' '{print $10}' <<<"$output")")"
+    status_show_ip="$(normalize_bool "$(awk -F'\x1F' '{print $11}' <<<"$output")")"
+    status_show_wireguard="$(normalize_bool "$(awk -F'\x1F' '{print $12}' <<<"$output")")"
+    keylayout="$(awk -F'\x1F' '{print $13}' <<<"$output")"
+    exit_type="$(awk -F'\x1F' '{print $14}' <<<"$output")"
 
     if ! [[ "$battery_low_threshold" =~ ^[0-9]+$ ]]; then
         battery_low_threshold="20"
