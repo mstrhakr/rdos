@@ -185,6 +185,38 @@ Useful variant:
 ./ci/iso-build-validate.sh --mode validate-only --output-iso uftc-installer.iso
 ```
 
+## Orchestrated pipeline
+
+If you want one command that represents your full flow, use the pipeline runner:
+
+```bash
+chmod +x ci/pipeline.sh
+./ci/pipeline.sh all
+```
+
+Step model:
+
+- `pretest`
+- `build-img`
+- `img-test`
+- `build-iso`
+- `iso-test`
+
+Dependency behavior:
+
+- running a late step with defaults runs prior steps automatically
+- use `--no-deps` to run only one step
+
+Examples:
+
+```bash
+# Run through ISO test with dependencies (same as full flow)
+./ci/pipeline.sh iso-test
+
+# Run only image validation
+./ci/pipeline.sh img-test --no-deps --output-vhd uftc.vhd
+```
+
 ### Requirements for the installer ISO build
 
 - `xorriso`
