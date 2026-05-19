@@ -251,6 +251,110 @@ Self-hosted job behavior:
 
 If your runner uses different labels, update `runs-on` in `.github/workflows/ci.yml`.
 
+## GitHub Actions Release Workflow
+
+The repository includes a release automation workflow at `.github/workflows/release.yml` that:
+
+1. Triggers on every push to `master` (or manually via `workflow_dispatch`)
+2. Detects version from the `Version` file (major.minor format, e.g., `2.3`)
+3. Auto-increments patch number if `Version` file hasn't changed since last tag
+4. Creates a git tag (e.g., `v2.3.0`, `v2.3.1`)
+5. Builds full pipeline on self-hosted runner
+6. Creates a GitHub Release with artifacts
+
+### Version file format
+
+The `Version` file contains only major.minor (e.g., `2.3`). Patch number is managed automatically.
+
+### Release numbering logic
+
+- If `Version` file changed: reset patch to 0 (e.g., `2.3.0` → `2.4.0`)
+- If `Version` file unchanged: increment patch (e.g., `2.3.0` → `2.3.1`)
+- First release ever: starts at `v{major}.{minor}.0`
+- Stable release numbering only considers stable tags (`vX.Y.Z`) and ignores RC tags (`vX.Y.Z-rc.N`)
+
+Examples:
+
+```text
+Scenario 1: Version 2.3 → 2.4
+Last tag: v2.3.5
+Version file changed: 2.3 → 2.4
+Next tag: v2.4.0 (patch reset)
+
+Scenario 2: Version unchanged at 2.3
+Last tag: v2.3.5
+Version file unchanged: still 2.3
+Next tag: v2.3.6 (patch incremented)
+```
+
+### Release artifacts
+
+Each release includes:
+
+- `uftc.vhd` (14GB bootable disk image)
+- `uftc-installer.iso` (Clonezilla-based installer)
+
+### Triggering a release manually
+
+```bash
+git push origin master
+# or workflow_dispatch from GitHub Actions UI
+```
+
+The workflow will automatically:
+
+1. Detect or increment the version
+2. Build via the self-hosted runner
+3. Create the release tag and GitHub Release
+
+## Beta / RC Release Workflow
+
+Pre-release builds are created automatically on pull requests to `master`.
+
+### RC Release Requirements
+
+When creating a PR:
+
+1. **Version file must be at least one minor version newer than master**
+   - Master is at `2.3` → PR must be `2.4` or higher
+   - This ensures RC versions are always newer than stable
+
+2. **PR must contain a valid Version bump** compared to master (see rule 1)
+
+### RC Release Numbering
+
+Each PR push creates an incremented RC version:
+
+- First PR push with version `2.4`: `v2.4.0-rc.1`
+- Second push (Version unchanged): `v2.4.0-rc.2`
+- Third push: `v2.4.0-rc.3`
+- etc.
+
+If you bump Version to `2.5` in the PR, next RC starts at `v2.5.0-rc.1`.
+
+The RC workflow runs on each PR update (`synchronize`), so pushes that do not touch `Version` still produce incremented RC builds while the PR version remains valid.
+
+### RC Release Artifacts
+
+RC releases include versioned artifacts:
+
+- `uftc-2.4.0-rc.1.vhd` (14GB bootable disk image)
+- `uftc-installer-2.4.0-rc.1.iso` (Clonezilla-based installer)
+
+RC releases are marked as **pre-release** on GitHub and do not show up in stable release listings.
+
+### Merge to Stable Release
+
+When the PR is merged to `master`:
+
+1. The Version file (e.g., `2.4`) is now on master
+2. Next push to master automatically triggers `release.yml`
+3. A stable release is created: `v2.4.0`
+4. Artifacts are named: `uftc-2.4.0.vhd`, `uftc-installer-2.4.0.iso`
+5. Subsequent master pushes (without Version changes) increment: `v2.4.1`, `v2.4.2`, etc.
+
+## Installer ISO Build Requirements
+
 ### Requirements for the installer ISO build
 
 - `xorriso`

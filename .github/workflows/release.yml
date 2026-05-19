@@ -1,0 +1,167 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  detect-version:
+    name: Detect Version & Auto-Increment Patch
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Version & Patch Number
+        id: version
+        run: |
+          # Read major.minor from Version file
+          VERSION_FILE=$(cat Version | tr -d '\n' | tr -d '\r')
+          echo "version_base=$VERSION_FILE"
+
+          # Only consider stable tags (vX.Y.Z), not RC tags.
+          LAST_TAG=$(git tag -l "v*" --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || echo "")
+          echo "last_tag=$LAST_TAG"
+
+          # If no tags exist, start at patch 0
+          if [[ -z "$LAST_TAG" ]]; then
+            PATCH=0
+            echo "First release, starting at patch 0"
+          else
+            # Extract major.minor from last tag (e.g., v2.3.5 -> 2.3)
+            LAST_MAJOR_MINOR=$(echo "$LAST_TAG" | sed 's/^v//' | cut -d. -f1-2)
+
+            # Check if Version file changed (major.minor different from last tag)
+            if [[ "$VERSION_FILE" == "$LAST_MAJOR_MINOR" ]]; then
+              # Version unchanged, increment patch
+              LAST_PATCH=$(echo "$LAST_TAG" | rev | cut -d. -f1 | rev)
+              PATCH=$((LAST_PATCH + 1))
+              echo "Version unchanged (${VERSION_FILE}), incrementing patch to $PATCH"
+            else
+              # Version changed, reset patch to 0
+              PATCH=0
+              echo "Version changed (${VERSION_FILE}), resetting patch to 0"
+            fi
+          fi
+          
+          TAG="v${VERSION_FILE}.${PATCH}"
+                    if git rev-parse "$TAG" >/dev/null 2>&1; then
+                      echo "Tag $TAG already exists; this run would duplicate a release tag."
+                      exit 1
+                    fi
+
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=${VERSION_FILE}.${PATCH}" >> $GITHUB_OUTPUT
+          echo "Final tag: $TAG"
+
+  build-and-test:
+    name: Build & Test (for Release)
+    needs: detect-version
+    runs-on: [self-hosted, linux, uftc-builder]
+    timeout-minutes: 180
+    if: github.repository == 'mstrhakr/uftc' && github.ref == 'refs/heads/master'
+    outputs:
+      vhd-artifact: ${{ steps.build.outputs.vhd-artifact }}
+      iso-artifact: ${{ steps.build.outputs.iso-artifact }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tools
+        run: |
+          echo "Checking build environment..."
+          docker --version
+          qemu-img --version
+          xorriso -version 2>&1 | head -1
+          zstd --version
+          echo "All tools available ✓"
+
+      - name: Run full pipeline
+        id: build
+        run: |
+          bash ./ci/pipeline.sh all --mode ci --shellcheck-severity error
+          
+          # Export artifact paths for release step
+          VHD_PATH="$(pwd)/uftc.vhd"
+          ISO_PATH="$(pwd)/uftc-installer.iso"
+          
+          echo "vhd-artifact=$VHD_PATH" >> $GITHUB_OUTPUT
+          echo "iso-artifact=$ISO_PATH" >> $GITHUB_OUTPUT
+          
+          ls -lh "$VHD_PATH" "$ISO_PATH"
+
+      - name: Rename artifacts with version
+        id: rename
+        run: |
+          VERSION="${{ needs.detect-version.outputs.version }}"
+          VHD_VERSIONED="uftc-${VERSION}.vhd"
+          ISO_VERSIONED="uftc-installer-${VERSION}.iso"
+          
+          mv uftc.vhd "$VHD_VERSIONED"
+          mv uftc-installer.iso "$ISO_VERSIONED"
+          
+          echo "vhd-versioned=$VHD_VERSIONED" >> $GITHUB_OUTPUT
+          echo "iso-versioned=$ISO_VERSIONED" >> $GITHUB_OUTPUT
+          
+          ls -lh "$VHD_VERSIONED" "$ISO_VERSIONED"
+
+      - name: Upload versioned artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: uftc-release-${{ needs.detect-version.outputs.version }}
+          path: |
+            uftc-*.vhd
+            uftc-installer-*.iso
+          retention-days: 30
+
+  create-release:
+    name: Create GitHub Release
+    needs: [detect-version, build-and-test]
+    runs-on: ubuntu-latest
+    if: github.repository == 'mstrhakr/uftc' && github.ref == 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: uftc-release-${{ needs.detect-version.outputs.version }}
+          path: ./release-artifacts
+
+      - name: Create git tag
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          TAG="${{ needs.detect-version.outputs.tag }}"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.detect-version.outputs.tag }}
+          name: Release ${{ needs.detect-version.outputs.version }}
+          body: |
+            UFTC Release ${{ needs.detect-version.outputs.version }}
+            
+            - **VHD**: uftc-${{ needs.detect-version.outputs.version }}.vhd (14GB bootable disk image)
+            - **Installer ISO**: uftc-installer-${{ needs.detect-version.outputs.version }}.iso (Clonezilla-based installer)
+            
+            See [docs/building.md](docs/building.md) and [Readme.md](Readme.md) for deployment instructions.
+          files: |
+            release-artifacts/uftc-*.vhd
+            release-artifacts/uftc-installer-*.iso
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

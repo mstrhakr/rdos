@@ -1,0 +1,192 @@
+name: Beta Release (RC)
+
+on:
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  validate-version:
+    name: Validate & Detect RC Version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      rc_number: ${{ steps.version.outputs.rc_number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch master branch for comparison
+        run: |
+          git fetch origin master:master
+
+      - name: Validate PR Version vs Master
+        id: version
+        run: |
+          # Read PR Version file
+          PR_VERSION=$(cat Version | tr -d '\n' | tr -d '\r')
+          echo "pr_version=$PR_VERSION"
+          
+          # Read master Version file
+          MASTER_VERSION=$(git show master:Version | tr -d '\n' | tr -d '\r')
+          echo "master_version=$MASTER_VERSION"
+          
+          # Parse major.minor for comparison
+          PR_MAJOR=$(echo "$PR_VERSION" | cut -d. -f1)
+          PR_MINOR=$(echo "$PR_VERSION" | cut -d. -f2)
+          MASTER_MAJOR=$(echo "$MASTER_VERSION" | cut -d. -f1)
+          MASTER_MINOR=$(echo "$MASTER_VERSION" | cut -d. -f2)
+          
+          # Calculate minimum required version (master + 1 minor)
+          MIN_REQUIRED_MINOR=$((MASTER_MINOR + 1))
+          
+          echo "PR: ${PR_MAJOR}.${PR_MINOR}, Master: ${MASTER_MAJOR}.${MASTER_MINOR}"
+          echo "Required: ${MASTER_MAJOR}.${MIN_REQUIRED_MINOR} or higher"
+          
+          # Validation: PR must be at least one minor newer than master
+          if [[ "$PR_MAJOR" -lt "$MASTER_MAJOR" ]]; then
+            echo "❌ PR version major is older than master"
+            exit 1
+          elif [[ "$PR_MAJOR" -eq "$MASTER_MAJOR" ]] && [[ "$PR_MINOR" -lt "$MIN_REQUIRED_MINOR" ]]; then
+            echo "❌ PR version must be at least one minor newer than master"
+            exit 1
+          fi
+          
+          echo "✓ Version validation passed: ${PR_VERSION} >= ${MASTER_MAJOR}.${MIN_REQUIRED_MINOR}"
+
+          BASE_VERSION="${PR_VERSION}.0"
+          
+          # Find last RC tag for this version
+          LAST_RC_TAG=$(git tag -l "v${BASE_VERSION}-rc.*" --sort=-version:refname | head -1 || echo "")
+          echo "last_rc_tag=$LAST_RC_TAG"
+          
+          # Determine next RC number
+          if [[ -z "$LAST_RC_TAG" ]]; then
+            RC_NUMBER=1
+            echo "First RC for ${PR_VERSION}, starting at rc.1"
+          else
+            # Extract RC number from tag (e.g., v2.4.0-rc.2 -> 2)
+            LAST_RC=$(echo "$LAST_RC_TAG" | rev | cut -d. -f1 | rev)
+            RC_NUMBER=$((LAST_RC + 1))
+            echo "Incrementing RC from ${LAST_RC} to ${RC_NUMBER}"
+          fi
+          
+          TAG="v${BASE_VERSION}-rc.${RC_NUMBER}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=${BASE_VERSION}" >> $GITHUB_OUTPUT
+          echo "rc_number=$RC_NUMBER" >> $GITHUB_OUTPUT
+          echo "Final tag: $TAG"
+
+  build-and-test:
+    name: Build & Test (for RC)
+    needs: validate-version
+    runs-on: [self-hosted, linux, uftc-builder]
+    timeout-minutes: 180
+    if: github.repository == 'mstrhakr/uftc'
+    outputs:
+      vhd-artifact: ${{ steps.build.outputs.vhd-artifact }}
+      iso-artifact: ${{ steps.build.outputs.iso-artifact }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tools
+        run: |
+          echo "Checking build environment..."
+          docker --version
+          qemu-img --version
+          xorriso -version 2>&1 | head -1
+          zstd --version
+          echo "All tools available ✓"
+
+      - name: Run full pipeline
+        id: build
+        run: |
+          bash ./ci/pipeline.sh all --mode ci --shellcheck-severity error
+          
+          # Export artifact paths for release step
+          VHD_PATH="$(pwd)/uftc.vhd"
+          ISO_PATH="$(pwd)/uftc-installer.iso"
+          
+          echo "vhd-artifact=$VHD_PATH" >> $GITHUB_OUTPUT
+          echo "iso-artifact=$ISO_PATH" >> $GITHUB_OUTPUT
+          
+          ls -lh "$VHD_PATH" "$ISO_PATH"
+
+      - name: Rename artifacts with version
+        id: rename
+        run: |
+          VERSION="${{ needs.validate-version.outputs.version }}"
+          RC_NUMBER="${{ needs.validate-version.outputs.rc_number }}"
+          
+          VHD_VERSIONED="uftc-${VERSION}-rc.${RC_NUMBER}.vhd"
+          ISO_VERSIONED="uftc-installer-${VERSION}-rc.${RC_NUMBER}.iso"
+          
+          mv uftc.vhd "$VHD_VERSIONED"
+          mv uftc-installer.iso "$ISO_VERSIONED"
+          
+          echo "vhd-versioned=$VHD_VERSIONED" >> $GITHUB_OUTPUT
+          echo "iso-versioned=$ISO_VERSIONED" >> $GITHUB_OUTPUT
+          
+          ls -lh "$VHD_VERSIONED" "$ISO_VERSIONED"
+
+      - name: Upload RC artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: uftc-rc-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}
+          path: |
+            uftc-*.vhd
+            uftc-installer-*.iso
+          retention-days: 30
+
+  create-rc-release:
+    name: Create RC GitHub Release
+    needs: [validate-version, build-and-test]
+    runs-on: ubuntu-latest
+    if: github.repository == 'mstrhakr/uftc'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: uftc-rc-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}
+          path: ./rc-artifacts
+
+      - name: Create git tag
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          TAG="${{ needs.validate-version.outputs.tag }}"
+          git tag -a "$TAG" -m "Release Candidate $TAG"
+          git push origin "$TAG"
+
+      - name: Create GitHub RC Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.validate-version.outputs.tag }}
+          name: RC ${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}
+          body: |
+            Release Candidate: **${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}**
+            
+            This is a pre-release build for testing and validation.
+            
+            - **VHD**: uftc-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}.vhd (14GB bootable disk image)
+            - **Installer ISO**: uftc-installer-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}.iso (Clonezilla-based installer)
+            
+            When this PR is merged to master, a stable release will be automatically generated.
+            
+            See [docs/building.md](docs/building.md) and [Readme.md](Readme.md) for deployment instructions.
+          files: |
+            rc-artifacts/uftc-*.vhd
+            rc-artifacts/uftc-installer-*.iso
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
