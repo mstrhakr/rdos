@@ -369,14 +369,14 @@ choose_settings_action() {
 
     set +e
     menu_output=$(printf '%s\n' \
-        "Connection|$connection_detail" \
-        "Network|$network_detail" \
-        "WiFi|Scan and connect wireless" \
-        "Device|Login, display, audio, keyboard" \
-        "Support|Helpdesk and admin password" \
-        "Tools|Terminal and diagnostics" \
-        "Save Changes|Write tcconfig and apply network" \
-        "Save and Exit|Write tcconfig and close settings" | \
+        "Connection" "$connection_detail" \
+        "Network" "$network_detail" \
+        "WiFi" "Scan and connect wireless" \
+        "Device" "Login, display, audio, keyboard" \
+        "Support" "Helpdesk and admin password" \
+        "Tools" "Terminal and diagnostics" \
+        "Save Changes" "Write tcconfig and apply network" \
+        "Save and Exit" "Write tcconfig and close settings" | \
         yad --list --center --width=760 --height=500 --title="Settings | $VERSION" \
             --image=preferences-system \
             --text="$(settings_summary)\n\nChoose an action from the list." \
@@ -527,12 +527,12 @@ choose_tools_action() {
 
     set +e
     menu_output=$(printf '%s\n' \
-        "Terminal|Open a shell session" \
-        "Ping/Trace|Run an mtr test" \
-        "Network Info|View local and public network details" \
-        "WiFi Wizard|Scan and connect wireless" \
-        "Import USB Config|Import tcconfig and WiFi from USB" \
-        "Back|Return to settings" | \
+        "Terminal" "Open a shell session" \
+        "Ping/Trace" "Run an mtr test" \
+        "Network Info" "View local and public network details" \
+        "WiFi Wizard" "Scan and connect wireless" \
+        "Import USB Config" "Import tcconfig and WiFi from USB" \
+        "Back" "Return to settings" | \
         yad --list --center --width=760 --height=420 --title="Tools | $VERSION" \
             --text="Run common admin and troubleshooting tools." \
             --separator=$'\x1F' --print-all \
@@ -709,9 +709,9 @@ run_first_boot_wizard() {
             wifi)
                 set +e
                 output=$(printf '%s\n' \
-                    "Set Up WiFi|Scan and connect to a wireless network" \
-                    "Skip for Now|Continue without configuring WiFi" \
-                    "Cancel Setup|Exit setup without saving" | \
+                    "Set Up WiFi" "Scan and connect to a wireless network" \
+                    "Skip for Now" "Continue without configuring WiFi" \
+                    "Cancel Setup" "Exit setup without saving" | \
                     yad --list --center --width=700 --height=320 --title="First Time Setup | $VERSION" \
                         --text="Step 2 of $first_boot_total_steps: Configure WiFi before choosing network behavior." \
                         --separator=$'\x1F' --print-all \

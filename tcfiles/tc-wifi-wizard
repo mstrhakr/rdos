@@ -238,7 +238,7 @@ build_scan_rows() {
         [ -n "$ssid" ] || continue
         safe_ssid="$(sanitize_ssid_for_list "$ssid")"
         scanned_ssids+=("$ssid")
-        printf '[%d] %s|%s|%s\n' "$index" "$safe_ssid" "$signal" "$security"
+        printf '[%d] %s\n%s\n%s\n' "$index" "$safe_ssid" "$signal" "$security"
         index=$((index + 1))
     done <<< "$scan_text"
 }
