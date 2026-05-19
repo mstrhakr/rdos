@@ -161,6 +161,30 @@ It wraps a Clonezilla Live base ISO, injects your built UFTC image payload, and 
 3. writes UFTC to that disk
 4. powers off automatically
 
+## ISO build validation
+
+Use the ISO validation wrapper after VHD validation to build and verify installer media.
+
+```bash
+chmod +x ci/iso-build-validate.sh
+./ci/iso-build-validate.sh --mode build --input-vhd uftc.vhd --output-iso uftc-installer.iso
+```
+
+What it validates:
+
+- output ISO exists and passes a minimum-size gate
+- ISO format (`ISO 9660`) when `file` is available
+- required payload path (`/uftc/uftc.img.zst`) exists in ISO
+- BIOS/UEFI boot assets are present (`/syslinux/isolinux.bin` and `BOOTx64.EFI`)
+- compressed payload integrity via `zstd -t`
+
+Useful variant:
+
+```bash
+# Validate an existing ISO without rebuilding
+./ci/iso-build-validate.sh --mode validate-only --output-iso uftc-installer.iso
+```
+
 ### Requirements for the installer ISO build
 
 - `xorriso`
