@@ -64,6 +64,35 @@ If the build succeeds, you should get:
 
 - `uftc.vhd`
 
+## Preflight validation
+
+Run preflight validation before image builds to catch script, line-ending, permission, and tooling issues early.
+
+```bash
+chmod +x ci/preflight-validate.sh
+./ci/preflight-validate.sh --mode local --path preflight
+```
+
+ShellCheck defaults are tuned for signal over noise:
+
+- `local` mode fails on ShellCheck `error`
+- `ci` mode fails on ShellCheck `warning` and above
+
+Override severity if needed:
+
+```bash
+./ci/preflight-validate.sh --mode ci --path preflight --shellcheck-severity error
+```
+
+Path scopes:
+
+- `preflight`: structural checks only, tool checks are advisory in local mode
+- `vhd`: validates structural checks and requires VHD-path tooling
+- `iso`: validates structural checks and requires ISO-path tooling
+- `all`: validates structural checks and requires both tooling sets
+
+CI should call the same script in `ci` mode and choose a path scope per job matrix leg.
+
 ## Important post-build step
 
 The generated VHD is not fully finalized until it boots once.
