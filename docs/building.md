@@ -215,7 +215,41 @@ Examples:
 
 # Run only image validation
 ./ci/pipeline.sh img-test --no-deps --output-vhd uftc.vhd
+
+# Override shellcheck threshold for pretest
+./ci/pipeline.sh pretest --mode ci --shellcheck-severity error
 ```
+
+## GitHub Actions CI
+
+The repository includes a workflow at `.github/workflows/ci.yml` with two jobs:
+
+- `pretest` on `ubuntu-latest` (hosted)
+- `build-and-validate` on a self-hosted Linux runner
+
+The self-hosted job expects runner labels:
+
+- `self-hosted`
+- `linux`
+- `uftc-builder`
+
+Runner requirements for `build-and-validate`:
+
+- Docker
+- shellcheck
+- xorriso
+- qemu-img (`qemu-utils`)
+- zstd
+- curl
+- util-linux (`lsblk`, `findmnt`)
+
+Self-hosted job behavior:
+
+- runs `bash ./ci/pipeline.sh all --mode ci --shellcheck-severity error`
+- uploads `uftc.vhd` and `uftc-installer.iso` as artifacts
+- skips untrusted fork PRs by default
+
+If your runner uses different labels, update `runs-on` in `.github/workflows/ci.yml`.
 
 ### Requirements for the installer ISO build
 

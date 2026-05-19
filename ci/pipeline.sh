@@ -8,6 +8,7 @@ cd "$REPO_ROOT"
 TARGET_STEP="all"
 WITH_DEPS=1
 RUN_MODE="local"
+SHELLCHECK_SEVERITY=""
 
 OUTPUT_VHD="uftc.vhd"
 OUTPUT_ISO="uftc-installer.iso"
@@ -30,6 +31,9 @@ Targets:
 
 Options:
   --mode MODE          local (default) or ci (passed to preflight)
+  --shellcheck-severity LEVEL
+                       Optional override for preflight shellcheck threshold
+                       (error|warning|info|style)
   --no-deps            Run only selected target without earlier steps
   --with-deps          Run selected target with prerequisite steps (default)
   --output-vhd PATH    VHD artifact path (default: uftc.vhd)
@@ -65,6 +69,11 @@ while [[ $# -gt 0 ]]; do
     --mode)
       [[ $# -lt 2 ]] && { echo "Missing value for --mode" >&2; exit 1; }
       RUN_MODE="$2"
+      shift 2
+      ;;
+    --shellcheck-severity)
+      [[ $# -lt 2 ]] && { echo "Missing value for --shellcheck-severity" >&2; exit 1; }
+      SHELLCHECK_SEVERITY="$2"
       shift 2
       ;;
     --no-deps)
@@ -120,8 +129,13 @@ log() {
 }
 
 run_pretest() {
+  local args=(--mode "$RUN_MODE" --path preflight)
+  if [[ -n "$SHELLCHECK_SEVERITY" ]]; then
+    args+=(--shellcheck-severity "$SHELLCHECK_SEVERITY")
+  fi
+
   log "Step pretest: running preflight validation"
-  bash ./ci/preflight-validate.sh --mode "$RUN_MODE" --path preflight
+  bash ./ci/preflight-validate.sh "${args[@]}"
 }
 
 run_build_img() {
