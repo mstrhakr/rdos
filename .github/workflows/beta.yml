@@ -1,9 +1,11 @@
 name: Beta Release (RC)
 
 on:
-  pull_request:
-    branches:
-      - master
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
 
 permissions:
   contents: write
@@ -13,6 +15,12 @@ jobs:
   validate-version:
     name: Validate & Detect RC Version
     runs-on: ubuntu-latest
+    if: >-
+      github.repository == 'mstrhakr/uftc' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_branch != 'master'
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
@@ -21,6 +29,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Fetch master branch for comparison
         run: |
@@ -88,12 +97,19 @@ jobs:
     needs: validate-version
     runs-on: [self-hosted, linux, uftc-builder]
     timeout-minutes: 180
-    if: github.repository == 'mstrhakr/uftc'
+    if: >-
+      github.repository == 'mstrhakr/uftc' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_branch != 'master'
     outputs:
       vhd-artifact: ${{ steps.build.outputs.vhd-artifact }}
       iso-artifact: ${{ steps.build.outputs.iso-artifact }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Verify tools
         run: |
@@ -148,9 +164,16 @@ jobs:
     name: Create RC GitHub Release
     needs: [validate-version, build-and-test]
     runs-on: ubuntu-latest
-    if: github.repository == 'mstrhakr/uftc'
+    if: >-
+      github.repository == 'mstrhakr/uftc' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_branch != 'master'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
