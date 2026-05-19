@@ -42,7 +42,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     install -d -m 755 /etc/apt/keyrings && \
     wget -qO /tmp/xanmod-archive.key https://dl.xanmod.org/archive.key && \
     echo "$XANMOD_ARCHIVE_SHA256  /tmp/xanmod-archive.key" | sha256sum -c - && \
-    test "$(gpg --show-keys --with-colons /tmp/xanmod-archive.key | awk -F: '$1==\"fpr\"{print $10; exit}')" = "$XANMOD_ARCHIVE_FINGERPRINT" && \
+    test "$(gpg --show-keys --with-colons /tmp/xanmod-archive.key | awk -F: '$1=="fpr"{print $10; exit}')" = "$XANMOD_ARCHIVE_FINGERPRINT" && \
     gpg --dearmor -o /etc/apt/keyrings/xanmod-archive-keyring.gpg /tmp/xanmod-archive.key && \
     rm -f /tmp/xanmod-archive.key && \
     echo 'deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' > /etc/apt/sources.list.d/xanmod-release.list && \
