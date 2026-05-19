@@ -1,0 +1,95 @@
+#!/bin/bash
+
+set -euo pipefail
+
+WIREGUARD_DIR="/etc/wireguard"
+
+canonical_path() {
+    local input_path="$1"
+
+    if command -v realpath >/dev/null 2>&1; then
+        realpath -m -- "$input_path"
+        return 0
+    fi
+
+    if readlink -f -- "$input_path" >/dev/null 2>&1; then
+        readlink -f -- "$input_path"
+        return 0
+    fi
+
+    printf '%s\n' "$input_path"
+}
+
+validate_usb_wireguard_source() {
+    local source_file="$1"
+    local resolved
+    local dev
+    local disk
+    local tran
+
+    resolved="$(canonical_path "$source_file")"
+
+    case "$(basename "$resolved")" in
+        wg*.conf|wireguard*.conf) ;;
+        *)
+            echo "WireGuard configs must be named like wg0.conf" >&2
+            return 1
+            ;;
+    esac
+
+    if [ ! -f "$resolved" ]; then
+        echo "WireGuard source file does not exist: $resolved" >&2
+        return 1
+    fi
+
+    dev=$(lsblk -o NAME,MOUNTPOINT -n -p 2>/dev/null | \
+        awk -v target="$(dirname "$resolved")" '
+            $2 != "" && index(target, $2) == 1 && length($2) > length(best) {
+                best = $2; dev = $1
+            }
+            END { print dev }
+        ')
+
+    if [ -z "$dev" ]; then
+        echo "Could not determine device for path: $resolved" >&2
+        return 1
+    fi
+
+    disk=$(lsblk -n -o PKNAME "$dev" 2>/dev/null | head -1)
+    [ -z "$disk" ] && disk="$(basename "$dev")"
+    tran=$(lsblk -d -n -o TRAN "/dev/$disk" 2>/dev/null | head -1)
+
+    if [ "$tran" != "usb" ]; then
+        echo "Source file is not on a USB device (transport: ${tran:-unknown})" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+install_config() {
+    local source_file="$1"
+    local iface
+    local config_path
+
+    iface="$(basename "$source_file" .conf)"
+    config_path="$WIREGUARD_DIR/$iface.conf"
+
+    install -D -m 600 "$source_file" "$config_path"
+    systemctl enable --now "wg-quick@$iface.service"
+}
+
+main() {
+    case "${1:-}" in
+        --from-usb-drive)
+            [ "$#" -ge 2 ] || exit 1
+            validate_usb_wireguard_source "$2"
+            install_config "$2"
+            ;;
+        *)
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

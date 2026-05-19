@@ -154,6 +154,12 @@ network={
 }
 ```
 
+### WireGuard VPN
+
+WireGuard tunnel configs can be imported from USB drives through the same USB import flow as the other runtime configs.
+Name the tunnel file like `wg0.conf` and place it on the USB drive root, then use the Import USB Config tool or let the thin client auto-detect it at startup.
+WireGuard import is USB-only for now; there is no remote URL configuration path yet.
+
 ### Manual configuration
 
 If the thinclient is not preconfigured on the boot partition it will automatically open a multi-step first boot wizard.

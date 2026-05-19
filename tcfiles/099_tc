@@ -8,3 +8,4 @@ thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wifi --configure * * *
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wifi --disable-powersave
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-scan-wifi *
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wifi --from-usb-drive *
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wireguard --from-usb-drive *

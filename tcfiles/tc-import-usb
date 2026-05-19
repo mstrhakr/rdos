@@ -3,6 +3,7 @@ set -euo pipefail
 
 TCCONFIG_DEST="${HOME}/tcconfig"
 OVERRIDE_DEST="${HOME}/tcconfig_override"
+WIREGUARD_DEST_DIR="/etc/wireguard"
 VERSION="$(< /tcversion)"
 DEFAULT_ADMINPASS="uftc"
 
@@ -17,10 +18,50 @@ find_usb_mounts() {
     done
 }
 
+wireguard_configs_on_mount() {
+    local mnt="$1"
+    local config
+
+    for config in "$mnt"/wg*.conf "$mnt"/wireguard*.conf; do
+        [[ -f "$config" ]] || continue
+        printf '%s\n' "$config"
+    done
+}
+
+wireguard_config_destination() {
+    local source_file="$1"
+
+    printf '%s/%s' "$WIREGUARD_DEST_DIR" "$(basename "$source_file")"
+}
+
+wireguard_config_needs_import() {
+    local source_file="$1"
+    local destination
+
+    destination="$(wireguard_config_destination "$source_file")"
+
+    if [[ ! -f "$destination" ]]; then
+        return 0
+    fi
+
+    ! cmp -s "$source_file" "$destination"
+}
+
+wireguard_preview() {
+    local path="$1"
+
+    sed \
+        -e 's/^[[:space:]]*PrivateKey[[:space:]]*=.*/PrivateKey = (hidden)/I' \
+        -e 's/^[[:space:]]*PresharedKey[[:space:]]*=.*/PresharedKey = (hidden)/I' \
+        "$path"
+}
+
 # Returns 0 if any USB drive has importable files not already applied, 1 otherwise.
 # Used by thinclient --scan to decide whether to show the wizard.
 scan_mode() {
     local mnt
+    local wg_config
+
     while IFS= read -r mnt; do
         if [[ -f "$mnt/tcconfig" ]]; then
             # Don't re-offer if the drive content is identical to what's already installed
@@ -30,7 +71,12 @@ scan_mode() {
                 return 0
             fi
         fi
+
         [[ -f "$mnt/wpa_supplicant.conf" || -f "$mnt/tcconfig_override" ]] && return 0
+
+        while IFS= read -r wg_config; do
+            wireguard_config_needs_import "$wg_config" && return 0
+        done < <(wireguard_configs_on_mount "$mnt")
     done < <(find_usb_mounts)
     return 1
 }
@@ -92,14 +138,30 @@ preview_tcconfig() {
 import_from_drive() {
     local mnt="$1"
     local import_tc=0 import_wpa=0 import_override=0
+    local -a import_wireguard_configs=()
     local found_items="" preview_text=""
+    local wg_config
 
     if [[ -f "$mnt/tcconfig" ]];            then import_tc=1;       found_items+="  • tcconfig (main configuration)\n"; fi
     if [[ -f "$mnt/tcconfig_override" ]];   then import_override=1; found_items+="  • tcconfig_override (local overrides)\n"; fi
     if [[ -f "$mnt/wpa_supplicant.conf" ]]; then import_wpa=1;      found_items+="  • wpa_supplicant.conf (WiFi credentials)\n"; fi
 
+    while IFS= read -r wg_config; do
+        if wireguard_config_needs_import "$wg_config"; then
+            import_wireguard_configs+=("$wg_config")
+            found_items+="  • $(basename "$wg_config") (WireGuard tunnel)\n"
+        fi
+    done < <(wireguard_configs_on_mount "$mnt")
+
     if ((import_tc)); then
         preview_text="\nConfig preview:\n$(preview_tcconfig "$mnt/tcconfig")\n"
+    fi
+
+    if (( ${#import_wireguard_configs[@]} > 0 )); then
+        preview_text+="\nWireGuard preview:\n"
+        for wg_config in "${import_wireguard_configs[@]}"; do
+            preview_text+="\n$(basename "$wg_config"):\n$(wireguard_preview "$wg_config")\n"
+        done
     fi
 
     yad --question --center --width=640 --title="Import Config | $VERSION" \
@@ -123,6 +185,13 @@ import_from_drive() {
         fi
     fi
 
+    for wg_config in "${import_wireguard_configs[@]}"; do
+        if ! sudo -n /usr/bin/tc-configure-wireguard --from-usb-drive "$wg_config" 2>/dev/null; then
+            yad --warning --center --title="Import Config" \
+                --text="WireGuard config $(basename "$wg_config") could not be imported.\nCheck that it is a valid WireGuard tunnel config." 2>/dev/null || true
+        fi
+    done
+
     yad --info --center --title="Import Config | $VERSION" \
         --text="Configuration imported successfully.\nRemove the USB drive — the new settings will take effect immediately." \
         --button="OK":0 2>/dev/null || true
@@ -133,16 +202,25 @@ import_from_drive() {
 interactive_mode() {
     local -a drives=()
     local mnt
+    local wg_config
 
     while IFS= read -r mnt; do
         if [[ -f "$mnt/tcconfig" || -f "$mnt/wpa_supplicant.conf" || -f "$mnt/tcconfig_override" ]]; then
             drives+=("$mnt")
+            continue
         fi
+
+        while IFS= read -r wg_config; do
+            if wireguard_config_needs_import "$wg_config"; then
+                drives+=("$mnt")
+                break
+            fi
+        done < <(wireguard_configs_on_mount "$mnt")
     done < <(find_usb_mounts)
 
     if [[ ${#drives[@]} -eq 0 ]]; then
         yad --info --center --title="Import Config | $VERSION" \
-            --text="No USB drives with configuration files were found.\n\nInsert a USB drive containing a 'tcconfig' or 'wpa_supplicant.conf' file and try again." \
+            --text="No USB drives with configuration files were found.\n\nInsert a USB drive containing a 'tcconfig', 'wpa_supplicant.conf', or 'wg*.conf' file and try again." \
             --button="OK":0 2>/dev/null || true
         return 1
     fi

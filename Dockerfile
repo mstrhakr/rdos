@@ -16,7 +16,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         xterm xinit x11-xserver-utils \
         fvwm yad light \
         freerdp3-x11 \
-        wpasupplicant iw rfkill net-tools ethtool \
+        wpasupplicant iw rfkill net-tools ethtool wireguard-tools \
         systemd-resolved \
         polkitd mingetty \
         pulseaudio pamixer \
@@ -75,6 +75,7 @@ COPY tcfiles/tc-settings /usr/bin/tc-settings
 COPY tcfiles/tc-import-usb /usr/bin/tc-import-usb
 COPY tcfiles/tc-configure-network /usr/bin/tc-configure-network
 COPY tcfiles/tc-configure-wifi /usr/bin/tc-configure-wifi
+COPY tcfiles/tc-configure-wireguard /usr/bin/tc-configure-wireguard
 COPY tcfiles/tc-scan-wifi /usr/bin/tc-scan-wifi
 COPY tcfiles/tc-wifi-wizard /usr/bin/tc-wifi-wizard
 COPY tcfiles/set-hostname /usr/bin/set-hostname
@@ -88,6 +89,7 @@ RUN chmod +x \
     /usr/bin/tc-import-usb \
     /usr/bin/tc-configure-network \
     /usr/bin/tc-configure-wifi \
+    /usr/bin/tc-configure-wireguard \
     /usr/bin/tc-scan-wifi \
     /usr/bin/tc-wifi-wizard \
     /usr/bin/set-hostname \
