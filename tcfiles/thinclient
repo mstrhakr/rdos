@@ -29,6 +29,62 @@ brightness="${brightness:-50}"
 screen_timeout="${screen_timeout:-600}"
 login_timeout="${login_timeout:-600}"
 cert_policy="${cert_policy:-tofu}"
+connect_splash_timeout="${connect_splash_timeout:-12}"
+LOADING_PID=""
+LOADING_FD=""
+
+start_loading_splash() {
+    local message="$1"
+    local fifo
+    local overlay_width="1280"
+    local overlay_height="720"
+    local screen_size
+
+    stop_loading_splash
+
+    if command -v xrandr >/dev/null 2>&1; then
+        screen_size="$(xrandr 2>/dev/null | awk '/\*/ {print $1; exit}')"
+        if [[ "$screen_size" =~ ^[0-9]+x[0-9]+$ ]]; then
+            overlay_width="${screen_size%x*}"
+            overlay_height="${screen_size#*x}"
+        fi
+    fi
+
+    fifo=$(mktemp -u)
+    mkfifo "$fifo"
+    yad --progress --on-top --undecorated --skip-taskbar --no-buttons --pulsate \
+        --borders=0 --mouse \
+        --width="$overlay_width" --height="$overlay_height" --posx=0 --posy=0 \
+        --title="Loading" --text="\n\nLoading...\n\n$message" <"$fifo" >/dev/null 2>&1 &
+    LOADING_PID=$!
+
+    # If the fullscreen-style overlay fails to start, fall back to compact centered spinner.
+    sleep 0.1
+    if ! kill -0 "$LOADING_PID" >/dev/null 2>&1; then
+        yad --progress --center --on-top --undecorated --skip-taskbar --no-buttons --pulsate \
+            --width=460 --title="Loading" --text="$message" <"$fifo" >/dev/null 2>&1 &
+        LOADING_PID=$!
+    fi
+
+    exec {LOADING_FD}>"$fifo"
+    rm -f "$fifo"
+    printf '0\n' >&$LOADING_FD || true
+}
+
+stop_loading_splash() {
+    if [[ -n "$LOADING_FD" ]]; then
+        exec {LOADING_FD}>&-
+        LOADING_FD=""
+    fi
+
+    if [[ -n "$LOADING_PID" ]]; then
+        kill "$LOADING_PID" >/dev/null 2>&1 || true
+        wait "$LOADING_PID" >/dev/null 2>&1 || true
+        LOADING_PID=""
+    fi
+}
+
+trap stop_loading_splash EXIT
 
 # Run second phase of the build if present
 if [[ -f /usr/bin/firstboot ]]; then
@@ -255,6 +311,11 @@ fi
 # We passed all the UI's and now try to launch RDP
 echo "Start of session" > session.log
 if [[ "$server" != "citrix" && "$server" != "moonlight" ]]; then
+    loading_text="Connecting to remote desktop..."
+    if [[ "${UFTC_RECONNECTING:-0}" == "1" ]]; then
+        loading_text="Reconnecting to remote desktop..."
+    fi
+
     freerdp_args=(
         "$rdp_destination"
         /multimon
@@ -295,10 +356,20 @@ if [[ "$server" != "citrix" && "$server" != "moonlight" ]]; then
     fi
 
     if [[ -n "$password" ]]; then
+        start_loading_splash "$loading_text"
+        (sleep "$connect_splash_timeout"; stop_loading_splash) &
+        loading_timeout_pid=$!
         # Keep credentials out of process arguments when possible.
         printf '%s\n' "$password" | WLOG_APPENDER=file WLOG_FILEAPPENDER_OUTPUT_FILE_NAME=session.log WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=. xfreerdp3 "${freerdp_args[@]}" /from-stdin
+        kill "$loading_timeout_pid" >/dev/null 2>&1 || true
+        stop_loading_splash
     else
+        start_loading_splash "$loading_text"
+        (sleep "$connect_splash_timeout"; stop_loading_splash) &
+        loading_timeout_pid=$!
         WLOG_APPENDER=file WLOG_FILEAPPENDER_OUTPUT_FILE_NAME=session.log WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=. xfreerdp3 "${freerdp_args[@]}"
+        kill "$loading_timeout_pid" >/dev/null 2>&1 || true
+        stop_loading_splash
     fi
 fi
 
@@ -331,4 +402,8 @@ fi
 
 # Restart the application, this will fetch updated configs and return us to the login screen
 password=""
-$0 "$@" &
+if [[ "$user_signout" == "true" ]]; then
+    UFTC_RECONNECTING=0 $0 "$@" &
+else
+    UFTC_RECONNECTING=1 $0 "$@" &
+fi

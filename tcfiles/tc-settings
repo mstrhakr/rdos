@@ -268,6 +268,7 @@ edit_network_section() {
     local selected_interface
     local configure_wifi
     local interface_choices
+    local apply_now="false"
 
     interface_choices="$(build_interface_choices "$(selected_interface_label)")"
 
@@ -276,7 +277,7 @@ edit_network_section() {
         output=$(yad --form --center --width=600 --title="Network Settings | $VERSION" \
             --text="Choose how this device should obtain its network settings." \
             --separator=$'\x1F' \
-            --button="Cancel":1 --button="Save":0 \
+            --button="Cancel":1 --button="Save":0 --button="Save + Apply Now":10 \
             --field="Addressing:CB" "$(build_choice_list "$(network_mode_label)" "Automatic (DHCP)" "Static IPv4")" \
             --field="Interface:CB" "$interface_choices" \
             --field="Open WiFi Wizard after saving:CHK" "FALSE")
@@ -284,15 +285,19 @@ edit_network_section() {
         output=$(yad --form --center --width=600 --title="Network Settings | $VERSION" \
             --text="Choose how this device should obtain its network settings." \
             --separator=$'\x1F' \
-            --button="Cancel":1 --button="Save":0 \
+            --button="Cancel":1 --button="Save":0 --button="Save + Apply Now":10 \
             --field="Addressing:CB" "$(build_choice_list "$(network_mode_label)" "Automatic (DHCP)" "Static IPv4")" \
             --field="Interface:CB" "$interface_choices")
     fi
     status=$?
     set -e
 
-    if ((status != 0)); then
+    if ((status != 0 && status != 10)); then
         return 1
+    fi
+
+    if ((status == 10)); then
+        apply_now="true"
     fi
 
     selected_mode="$(awk -F'\x1F' '{print $1}' <<<"$output")"
@@ -325,7 +330,66 @@ edit_network_section() {
         /usr/bin/tc-wifi-wizard || true
     fi
 
+    if [ "$apply_now" = "true" ]; then
+        save_config
+        apply_network_config
+        yad --info --center --title="Network Settings | $VERSION" --text="Network settings were saved and applied."
+    fi
+
     return 0
+}
+
+run_wifi_settings() {
+    if wireless_adapter_present; then
+        /usr/bin/tc-wifi-wizard || true
+    else
+        show_warning "No wireless adapter was detected on this device."
+    fi
+}
+
+choose_settings_action() {
+    local menu_output
+    local status
+    local network_detail
+    local connection_detail
+
+    if [ "$network_mode" = "static" ]; then
+        network_detail="Static on ${network_interface:-unset}"
+    else
+        network_detail="Automatic (DHCP)"
+    fi
+
+    if [ -n "$server" ]; then
+        connection_detail="$server"
+    else
+        connection_detail="Not configured"
+    fi
+
+    set +e
+    menu_output=$(printf '%s\n' \
+        "Connection|$connection_detail" \
+        "Network|$network_detail" \
+        "WiFi|Scan and connect wireless" \
+        "Device|Login, display, audio, keyboard" \
+        "Support|Helpdesk and admin password" \
+        "Tools|Terminal and diagnostics" \
+        "Save Changes|Write tcconfig and apply network" \
+        "Save and Exit|Write tcconfig and close settings" | \
+        yad --list --center --width=760 --height=500 --title="Settings | $VERSION" \
+            --image=preferences-system \
+            --text="$(settings_summary)\n\nChoose an action from the list." \
+            --separator=$'\x1F' --print-all \
+            --button="Cancel":1 --button="Select":0 \
+            --column="Section" --column="Details")
+    status=$?
+    set -e
+
+    if ((status != 0)); then
+        printf '__CANCEL__\n'
+        return 0
+    fi
+
+    printf '%s\n' "$(awk -F'\x1F' '{print $1}' <<<"$menu_output")"
 }
 
 edit_experience_section() {
@@ -437,45 +501,73 @@ run_ping_tool() {
     xterm -bg black -fg white -hold -e /bin/bash -lc "mtr $quoted_target"
 }
 
-edit_tools_section() {
+save_all_changes() {
+    if [ -z "$server" ]; then
+        show_error "A server name or mode is required before saving."
+        return 1
+    fi
+
+    save_config
+    apply_network_config
+    return 0
+}
+
+choose_tools_action() {
+    local menu_output
     local status
 
-    while true; do
-        set +e
-        yad --info --center --width=620 --title="Tools | $VERSION" \
-            --text="Run common admin tools from here instead of using hidden password shortcuts." \
-            --button="Back":2 --button="Close":1 --button="Terminal":10 --button="Ping/Trace":11 --button="Network Info":12 --button="WiFi Wizard":13 --button="Import USB Config":14 >/dev/null
-        status=$?
-        set -e
+    set +e
+    menu_output=$(printf '%s\n' \
+        "Terminal|Open a shell session" \
+        "Ping/Trace|Run an mtr test" \
+        "Network Info|View local and public network details" \
+        "WiFi Wizard|Scan and connect wireless" \
+        "Import USB Config|Import tcconfig and WiFi from USB" \
+        "Back|Return to settings" | \
+        yad --list --center --width=760 --height=420 --title="Tools | $VERSION" \
+            --text="Run common admin and troubleshooting tools." \
+            --separator=$'\x1F' --print-all \
+            --button="Close":1 --button="Select":0 \
+            --column="Tool" --column="Description")
+    status=$?
+    set -e
 
-        case "$status" in
-            10)
+    if ((status != 0)); then
+        printf '__CANCEL__\n'
+        return 0
+    fi
+
+    printf '%s\n' "$(awk -F'\x1F' '{print $1}' <<<"$menu_output")"
+}
+
+edit_tools_section() {
+    local action
+
+    while true; do
+        action="$(choose_tools_action)"
+
+        case "$action" in
+            "Terminal")
                 run_terminal_tool
                 ;;
-            11)
+            "Ping/Trace")
                 run_ping_tool || true
                 ;;
-            12)
+            "Network Info")
                 show_network_info || true
                 ;;
-            13)
+            "WiFi Wizard")
                 if wireless_adapter_present; then
                     /usr/bin/tc-wifi-wizard || true
                 else
                     show_warning "No wireless adapter was detected on this device."
                 fi
                 ;;
-            14)
+            "Import USB Config")
                 /usr/bin/tc-import-usb --interactive || true
                 ;;
-            2)
-                return 2
-                ;;
-            1)
+            "Back"|"__CANCEL__")
                 return 1
-                ;;
-            0)
-                return 0
                 ;;
         esac
     done
@@ -483,6 +575,7 @@ edit_tools_section() {
 
 run_settings_page() {
     local status
+    local action
 
     load_config
 
@@ -510,46 +603,38 @@ run_settings_page() {
     fi
 
     while true; do
-        set +e
-        yad --form --center --width=620 --title="Settings | $VERSION" \
-            --image=preferences-system \
-            --text="$(settings_summary)\n\nChoose a section to edit." \
-            --button="Connection":10 \
-            --button="Network":11 \
-            --button="Device":12 \
-            --button="Support":13 \
-            --button="Tools":14 \
-            --button="Save and Exit":0 \
-            --button="Cancel":1 >/dev/null
-        status=$?
-        set -e
+        action="$(choose_settings_action)"
 
-        case "$status" in
-            0)
-                if [ -z "$server" ]; then
-                    show_error "A server name or mode is required before saving."
-                    continue
+        case "$action" in
+            "Save Changes")
+                if save_all_changes; then
+                    yad --info --center --title="Settings | $VERSION" --text="Settings were saved and applied."
                 fi
-                save_config
-                apply_network_config
-                return 0
                 ;;
-            1)
+            "Save and Exit")
+                if save_all_changes; then
+                    return 0
+                fi
+                ;;
+            "__CANCEL__")
                 return 1
                 ;;
-            10)
+            "Connection")
                 edit_connection_section || true
                 ;;
-            11)
+            "Network")
                 edit_network_section || true
                 ;;
-            12)
+            "WiFi")
+                run_wifi_settings
+                ;;
+            "Device")
                 edit_experience_section || true
                 ;;
-            13)
+            "Support")
                 edit_support_section || true
                 ;;
-            14)
+            "Tools")
                 edit_tools_section || true
                 ;;
         esac
@@ -614,19 +699,30 @@ run_first_boot_wizard() {
                 ;;
             wifi)
                 set +e
-                yad --question --center --width=620 --title="First Time Setup | $VERSION" \
-                    --button="Skip":1 --button="Set Up WiFi":0 --button="Cancel":2 \
-                    --text="Step 2 of $first_boot_total_steps: Configure WiFi before choosing how this device uses the network.\n\nThe WiFi wizard will scan for available networks, help you connect, and return here when it is done." >/dev/null
+                output=$(printf '%s\n' \
+                    "Set Up WiFi|Scan and connect to a wireless network" \
+                    "Skip for Now|Continue without configuring WiFi" \
+                    "Cancel Setup|Exit setup without saving" | \
+                    yad --list --center --width=700 --height=320 --title="First Time Setup | $VERSION" \
+                        --text="Step 2 of $first_boot_total_steps: Configure WiFi before choosing network behavior." \
+                        --separator=$'\x1F' --print-all \
+                        --button="Cancel":1 --button="Select":0 \
+                        --column="Action" --column="Details")
                 status=$?
                 set -e
 
-                if ((status == 2)); then
+                if ((status != 0)); then
                     return 1
                 fi
 
-                if ((status == 0)); then
-                    /usr/bin/tc-wifi-wizard || true
-                fi
+                case "$(awk -F'\x1F' '{print $1}' <<<"$output")" in
+                    "Set Up WiFi")
+                        /usr/bin/tc-wifi-wizard || true
+                        ;;
+                    "Cancel Setup")
+                        return 1
+                        ;;
+                esac
 
                 page="network"
                 ;;

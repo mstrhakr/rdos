@@ -42,6 +42,9 @@ start_progress() {
     local text="$2"
     local fifo
 
+    # Ensure no previous progress dialog is left behind.
+    finish_progress 0
+
     fifo=$(mktemp -u)
     mkfifo "$fifo"
     yad --progress --center --on-top --width=460 --title="$title" --text="$text" --percentage=0 <"$fifo" >/dev/null 2>&1 &
@@ -68,13 +71,14 @@ finish_progress() {
     local hold_seconds="${1:-1}"
 
     if [ -n "$PROGRESS_FD" ]; then
-        printf '100\n' >&$PROGRESS_FD
+        printf '100\n' >&$PROGRESS_FD || true
         sleep "$hold_seconds"
         exec {PROGRESS_FD}>&-
         PROGRESS_FD=""
     fi
 
     if [ -n "$PROGRESS_PID" ]; then
+        kill "$PROGRESS_PID" >/dev/null 2>&1 || true
         wait "$PROGRESS_PID" >/dev/null 2>&1 || true
         PROGRESS_PID=""
     fi
@@ -132,6 +136,14 @@ show_scan_progress() {
     start_progress "$title" "Scanning for WiFi networks on $iface..."
 }
 
+show_configure_progress() {
+    local iface="$1"
+    local ssid="$2"
+    local title="WiFi Wizard"
+
+    start_progress "$title" "Applying WiFi settings for $ssid on $iface..."
+}
+
 prompt_manual_network() {
     local output
     local status
@@ -187,8 +199,10 @@ show_success() {
     local iface="$1"
     local address
     local attempts=0
+    local max_attempts=15
 
-    while [ "$attempts" -lt 15 ]; do
+    while [ "$attempts" -lt "$max_attempts" ]; do
+        update_progress 96 "Waiting for DHCP lease (${attempts}/${max_attempts})"
         address=$(ip -4 -o addr show dev "$iface" | awk '{print $4}' | head -n 1)
         if [ -n "$address" ]; then
             yad --info --center --title="WiFi Wizard" --text="Connected to $network_ssid on $iface.\nIPv4 address: $address"
@@ -198,7 +212,7 @@ show_success() {
         sleep 1
     done
 
-    yad --info --center --title="WiFi Wizard" --text="WiFi settings were saved for $network_ssid on $iface.\nThe connection may take a few more seconds to complete."
+    yad --info --center --title="WiFi Wizard" --text="WiFi settings were saved for $network_ssid on $iface.\nDHCP has not assigned an IPv4 address yet.\nThe connection may take a bit longer on this network."
 }
 
 sanitize_ssid_for_list() {
@@ -339,8 +353,8 @@ if [ -z "$network_ssid" ]; then
     exit 1
 fi
 
-show_scan_progress "$iface"
-update_progress 25 "Saving WiFi settings"
+show_configure_progress "$iface" "$network_ssid"
+update_progress 20 "Saving WiFi profile"
 
 if ! configured_iface=$(printf '%s\n' "$network_password" | run_privileged /usr/bin/tc-configure-wifi --configure "$iface" "$network_ssid" "$network_hidden"); then
     finish_progress 0
@@ -348,7 +362,7 @@ if ! configured_iface=$(printf '%s\n' "$network_password" | run_privileged /usr/
     exit 1
 fi
 
-update_progress 70 "Waiting for the connection"
+update_progress 70 "Applying wireless settings"
+update_progress 95 "Finalizing"
+finish_progress 0
 show_success "$configured_iface"
-update_progress 100 "Connected"
-finish_progress 1
