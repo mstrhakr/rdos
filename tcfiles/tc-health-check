@@ -1,0 +1,68 @@
+#!/bin/bash
+# tc-health-check — Verify the current boot slot is healthy and commit it.
+# Called by thinclient shortly after the desktop session starts.
+# On success: sets grubenv boot_tries=99 (committed) and writes the slot version.
+# On failure: leaves boot_tries as-is so GRUB rolls back on the next reboot.
+set -euo pipefail
+
+GRUBENV="/boot/grub/grubenv"
+LOG_TAG="tc-health"
+
+log()  { logger -t "$LOG_TAG" "$*"; echo "[$LOG_TAG] $*"; }
+warn() { logger -t "$LOG_TAG" "WARNING: $*"; echo "[$LOG_TAG] WARNING: $*" >&2; }
+
+# ---------------------------------------------------------------------------
+# Only meaningful on A/B images
+# ---------------------------------------------------------------------------
+if [[ ! -f "$GRUBENV" ]]; then
+    exit 0
+fi
+
+CURRENT_SLOT=$(grub-editenv "$GRUBENV" list 2>/dev/null | awk -F= '/^current_slot=/{print $2}')
+if [[ "$CURRENT_SLOT" != "a" && "$CURRENT_SLOT" != "b" ]]; then
+    exit 0
+fi
+
+BOOT_TRIES=$(grub-editenv "$GRUBENV" list 2>/dev/null | awk -F= '/^boot_tries=/{print $2}')
+if [[ "$BOOT_TRIES" == "99" ]]; then
+    # Already committed — nothing to do.
+    exit 0
+fi
+
+log "Running health check for slot $CURRENT_SLOT (boot_tries=${BOOT_TRIES:-?})"
+
+# ---------------------------------------------------------------------------
+# Health checks
+# ---------------------------------------------------------------------------
+PASS=true
+
+# Network reachability
+if ! ping -c 2 -W 5 1.1.1.1 >/dev/null 2>&1; then
+    if ! ping -c 2 -W 5 8.8.8.8 >/dev/null 2>&1; then
+        warn "Network unreachable (ping failed)"
+        PASS=false
+    fi
+fi
+
+# RDP client binary present and executable
+if [[ ! -x /usr/bin/xfreerdp3 ]]; then
+    warn "xfreerdp3 binary missing or not executable"
+    PASS=false
+fi
+
+# ---------------------------------------------------------------------------
+# Commit or leave for GRUB rollback
+# ---------------------------------------------------------------------------
+if [[ "$PASS" == "true" ]]; then
+    log "Health check passed — committing slot $CURRENT_SLOT"
+    grub-editenv "$GRUBENV" set boot_tries=99
+
+    # Write slot version to ESP for tc-ota-updater to compare
+    if [[ -f /tcversion ]]; then
+        mkdir -p /boot/slots
+        cp /tcversion "/boot/slots/${CURRENT_SLOT}-version"
+    fi
+else
+    warn "Health check FAILED — boot_tries left at $BOOT_TRIES (GRUB will roll back after 3 attempts)"
+    exit 1
+fi
