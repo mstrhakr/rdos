@@ -126,6 +126,7 @@ check_cmd() {
 
 shell_files=(
   build.sh
+  build-ab-disk.sh
   build-installer-iso.sh
   d2vm
   setup-build-deps.sh
@@ -157,6 +158,7 @@ strict_mode_files=(
 
 exec_files=(
   build.sh
+  build-ab-disk.sh
   build-installer-iso.sh
   d2vm
 )
