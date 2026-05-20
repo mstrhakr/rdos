@@ -144,7 +144,6 @@ COPY tcfiles/.fvwm /home/thinclient/.fvwm
 COPY tcfiles/bashrc /home/thinclient/.bashrc
 COPY tcfiles/xinitrc /home/thinclient/.xinitrc
 COPY Version /tcversion
-COPY tcconfig_override* /home/thinclient/
 
 # Block stock files from being tampered with to harden even more
 RUN chown -R root:thinclient /home/thinclient/ && chmod 1775 /home/thinclient/
