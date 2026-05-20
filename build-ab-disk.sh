@@ -48,15 +48,27 @@ die() { echo "[build-ab-disk] FATAL: $*" >&2; exit 1; }
 wait_for_loop_partition() {
     local loop_dev="$1"
     local part_num="$2"
-    local timeout_sec="${3:-15}"
+    local timeout_sec="${3:-30}"
     local part_dev="${loop_dev}p${part_num}"
     local i
+
+    # Force partition table re-read upfront using all available tools
+    partprobe "$loop_dev" 2>/dev/null || true
+    if command -v partx >/dev/null 2>&1; then
+        partx -a "$loop_dev" 2>/dev/null || partx -u "$loop_dev" 2>/dev/null || true
+    fi
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm settle 2>/dev/null || true
+    fi
 
     for ((i=0; i<timeout_sec; i++)); do
         if [[ -b "$part_dev" ]]; then
             return 0
         fi
         partprobe "$loop_dev" 2>/dev/null || true
+        if command -v partx >/dev/null 2>&1; then
+            partx -u "$loop_dev" 2>/dev/null || true
+        fi
         if command -v udevadm >/dev/null 2>&1; then
             udevadm settle 2>/dev/null || true
         fi
@@ -124,6 +136,7 @@ sgdisk \
     "$OUTPUT_DISK"
 
 AB_LOOP=$(losetup --find --show --partscan "$OUTPUT_DISK")
+command -v partx >/dev/null 2>&1 && partx -a "$AB_LOOP" 2>/dev/null || true
 for part in 2 3 4 5; do
     wait_for_loop_partition "$AB_LOOP" "$part" || die "Partition node ${AB_LOOP}p${part} did not appear in time"
 done
@@ -144,6 +157,7 @@ mount "${AB_LOOP}p5" "$WORK_DIR/recovery"
 # ---------------------------------------------------------------------------
 log "Mounting production VHD: $PROD_VHD"
 VHD_LOOP=$(losetup --find --show --partscan "$PROD_VHD")
+command -v partx >/dev/null 2>&1 && partx -a "$VHD_LOOP" 2>/dev/null || true
 wait_for_loop_partition "$VHD_LOOP" 1 || die "Partition node ${VHD_LOOP}p1 did not appear in time"
 wait_for_loop_partition "$VHD_LOOP" 2 || die "Partition node ${VHD_LOOP}p2 did not appear in time"
 
@@ -181,6 +195,7 @@ losetup -d "$VHD_LOOP"; VHD_LOOP=""
 # ---------------------------------------------------------------------------
 log "Mounting recovery VHD: $RECOVERY_VHD"
 REC_LOOP=$(losetup --find --show --partscan "$RECOVERY_VHD")
+command -v partx >/dev/null 2>&1 && partx -a "$REC_LOOP" 2>/dev/null || true
 wait_for_loop_partition "$REC_LOOP" 1 || die "Partition node ${REC_LOOP}p1 did not appear in time"
 wait_for_loop_partition "$REC_LOOP" 2 || die "Partition node ${REC_LOOP}p2 did not appear in time"
 
