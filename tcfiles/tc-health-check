@@ -35,19 +35,24 @@ log "Running health check for slot $CURRENT_SLOT (boot_tries=${BOOT_TRIES:-?})"
 # Health checks
 # ---------------------------------------------------------------------------
 PASS=true
+EXPECTED_ROOT_LABEL="ROOT_$(echo "$CURRENT_SLOT" | tr '[:lower:]' '[:upper:]')"
+ACTIVE_ROOT_LABEL="$(findmnt -no LABEL / 2>/dev/null || true)"
 
-# Network reachability
-if ! ping -c 2 -W 5 1.1.1.1 >/dev/null 2>&1; then
-    if ! ping -c 2 -W 5 8.8.8.8 >/dev/null 2>&1; then
-        warn "Network unreachable (ping failed)"
-        PASS=false
-    fi
+# Verify we actually booted the slot GRUB selected.
+if [[ "$ACTIVE_ROOT_LABEL" != "$EXPECTED_ROOT_LABEL" ]]; then
+    warn "Active root label '$ACTIVE_ROOT_LABEL' does not match expected slot label '$EXPECTED_ROOT_LABEL'"
+    PASS=false
 fi
 
 # RDP client binary present and executable
 if [[ ! -x /usr/bin/xfreerdp3 ]]; then
     warn "xfreerdp3 binary missing or not executable"
     PASS=false
+fi
+
+# Surface missing routing for diagnostics, but do not roll back healthy offline devices.
+if ! ip route show default >/dev/null 2>&1 || [[ -z "$(ip route show default 2>/dev/null)" ]]; then
+    warn "No default route detected during health check"
 fi
 
 # ---------------------------------------------------------------------------
