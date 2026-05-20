@@ -42,6 +42,8 @@ NO_STAGING=0
 NO_CACHE=0
 STAGING_DIR=""
 AUTO_STAGING_DIR=""
+BUILD_AB=0
+OUTPUT_AB="uftc-ab.img"
 
 usage() {
 	cat <<'EOF'
@@ -61,6 +63,11 @@ Options:
 
 Any arguments after -- are passed directly to d2vm convert.
 EOF
+}
+
+usage_ab_note() {
+	echo "  --ab                     Also build recovery image and assemble A/B disk (uftc-ab.img)"
+	echo "  --output-ab PATH         Output A/B disk path (default: uftc-ab.img)"
 }
 D2VM_ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -108,6 +115,18 @@ while [[ $# -gt 0 ]]; do
 		-h|--help)
 			usage
 			exit 0
+			;;
+		--ab)
+			BUILD_AB=1
+			shift
+			;;
+		--output-ab)
+			if [[ $# -lt 2 ]]; then
+				echo "Missing value for $1" >&2
+				exit 1
+			fi
+			OUTPUT_AB="$2"
+			shift 2
 			;;
 		--)
 			shift
@@ -173,3 +192,43 @@ else
 fi
 
 log_phase "Build complete: $OUTPUT_VHD"
+
+# ---------------------------------------------------------------------------
+# A/B disk assembly (optional, enabled with --ab)
+# ---------------------------------------------------------------------------
+if [[ "$BUILD_AB" == "1" ]]; then
+	RECOVERY_VHD="recovery.vhd"
+	RECOVERY_IMAGE_NAME="uftc-recovery"
+
+	if [[ -f "$RECOVERY_VHD" ]] && [[ "$FORCE_OVERWRITE" != "1" ]]; then
+		log_phase "Reusing existing recovery VHD: $RECOVERY_VHD (use --force to rebuild)"
+	else
+		log_phase "Building recovery Docker image ($RECOVERY_IMAGE_NAME)"
+		DOCKER_RECOVERY_ARGS=()
+		if [[ "$NO_CACHE" == "1" ]]; then
+			DOCKER_RECOVERY_ARGS+=("--no-cache")
+		fi
+		sudo docker build "${DOCKER_RECOVERY_ARGS[@]}" -f Dockerfile.recovery . -t "$RECOVERY_IMAGE_NAME"
+
+		if [[ -f "$RECOVERY_VHD" ]]; then
+			rm -f "$RECOVERY_VHD"
+		fi
+
+		run_with_heartbeat "Converting recovery image to VHD via d2vm" \
+			sudo ./d2vm convert "${RECOVERY_IMAGE_NAME}:latest" -o "$RECOVERY_VHD" \
+			    --bootloader grub --boot-size 200 --size 2G --network-manager none
+	fi
+
+	if [[ -f "$OUTPUT_AB" ]] && [[ "$FORCE_OVERWRITE" != "1" ]]; then
+		log_phase "Removing existing A/B disk: $OUTPUT_AB"
+		rm -f "$OUTPUT_AB"
+	fi
+
+	run_with_heartbeat "Assembling A/B+Recovery disk" \
+		sudo ./build-ab-disk.sh \
+		    --prod-vhd "$OUTPUT_VHD" \
+		    --recovery-vhd "$RECOVERY_VHD" \
+		    --output "$OUTPUT_AB"
+
+	log_phase "A/B disk ready: $OUTPUT_AB"
+fi

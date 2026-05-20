@@ -12,6 +12,7 @@ CLONEZILLA_ISO_URL="${CLONEZILLA_ISO_URL:-$CLONEZILLA_ISO_URL_DEFAULT}"
 CLONEZILLA_ISO_SHA256="${CLONEZILLA_ISO_SHA256:-}"
 CLONEZILLA_ALLOW_UNVERIFIED="${CLONEZILLA_ALLOW_UNVERIFIED:-1}"
 INPUT_VHD="${INPUT_VHD:-uftc.vhd}"
+INPUT_DISK="${INPUT_DISK:-}"
 OUTPUT_ISO="${OUTPUT_ISO:-uftc-installer.iso}"
 DEFAULT_WORKDIR=".installer-work"
 WORKDIR="${WORKDIR:-$DEFAULT_WORKDIR}"
@@ -44,6 +45,7 @@ Options:
       --build-arg ARG              Pass one argument to build.sh (repeatable)
       --no-cache                   Build without Docker cache (alias for --build-arg --no-cache)
       --input-vhd PATH             Input VHD path (default: uftc.vhd)
+     --input-disk PATH            Input raw disk image (A/B layout); skips qemu-img conversion
       --output-iso PATH            Output ISO path (default: uftc-installer.iso)
       --workdir PATH               Working directory for intermediate files
       --staging-dir PATH           Run ISO build work in PATH, then move final ISO to --output-iso
@@ -92,6 +94,15 @@ while [[ $# -gt 0 ]]; do
       INPUT_VHD="$2"
       shift 2
       ;;
+      --input-disk)
+        if [[ $# -lt 2 ]]; then
+          echo "Missing value for $1" >&2
+          exit 1
+        fi
+        INPUT_DISK="$2"
+        SKIP_BUILD=1
+        shift 2
+        ;;
     --output-iso)
       if [[ $# -lt 2 ]]; then
         echo "Missing value for $1" >&2
@@ -276,6 +287,19 @@ if [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_VHD" != "$STAGING_DIR/$(basename "$INPU
   INPUT_VHD="$staged_input_vhd"
 fi
 
+  if [[ -n "$INPUT_DISK" ]]; then
+    if [[ ! -f "$INPUT_DISK" ]]; then
+      echo "Input disk not found: $INPUT_DISK" >&2
+      exit 1
+    fi
+    if [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_DISK" != "$STAGING_DIR/$(basename "$INPUT_DISK")" ]]; then
+      staged_input_disk="$STAGING_DIR/$(basename "$INPUT_DISK")"
+      log_phase "Copying input disk to staging area"
+      cp -f "$INPUT_DISK" "$staged_input_disk"
+      INPUT_DISK="$staged_input_disk"
+    fi
+  fi
+
 mkdir -p "$WORKDIR"
 mkdir -p "$(dirname "$BASE_ISO")"
 
@@ -328,6 +352,10 @@ mkdir -p "$ISO_ROOT/uftc"
 
 log_phase "Converting $INPUT_VHD to raw image"
 qemu-img convert -f vpc -O raw "$INPUT_VHD" "$RAW_IMAGE"
+if [[ -n "$INPUT_DISK" ]]; then
+  log_phase "Using raw A/B disk image directly: $INPUT_DISK"
+  cp "$INPUT_DISK" "$RAW_IMAGE"
+fi
 
 log_phase "Compressing installer payload (zstd level ${ZSTD_LEVEL}, threads: all)"
 zstd -T0 "-${ZSTD_LEVEL}" -f "$RAW_IMAGE" -o "$COMPRESSED_IMAGE"
