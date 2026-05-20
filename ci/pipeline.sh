@@ -26,6 +26,7 @@ Targets:
   pretest    Run preflight validation only
   build-img  Build image artifact only (build.sh)
   img-test   Validate image artifact only
+  ab-test    Validate A/B disk artifact only
   build-iso  Build installer ISO only (build-installer-iso.sh)
   iso-test   Validate installer ISO only
   all        Run full sequence (default)
@@ -55,7 +56,7 @@ EOF
 
 if [[ $# -gt 0 ]]; then
   case "$1" in
-    pretest|build-img|img-test|build-iso|iso-test|all)
+    pretest|build-img|img-test|ab-test|build-iso|iso-test|all)
       TARGET_STEP="$1"
       shift
       ;;
@@ -160,6 +161,11 @@ run_img_test() {
   bash ./ci/vhd-build-validate.sh --mode validate-only --output "$OUTPUT_VHD"
 }
 
+run_ab_test() {
+  log "Step ab-test: validating A/B disk artifact"
+  bash ./ci/ab-disk-validate.sh --output "$OUTPUT_AB"
+}
+
 run_build_iso() {
   local args=(--skip-build --input-disk "$OUTPUT_AB" --output-iso "$OUTPUT_ISO")
   [[ "$NO_CACHE" == "1" ]] && args+=(--no-cache)
@@ -175,7 +181,7 @@ run_iso_test() {
   bash ./ci/iso-build-validate.sh --mode validate-only --output-iso "$OUTPUT_ISO"
 }
 
-steps=(pretest build-img img-test build-iso iso-test)
+steps=(pretest build-img img-test ab-test build-iso iso-test)
 target_index=-1
 
 if [[ "$TARGET_STEP" == "all" ]]; then
@@ -201,6 +207,7 @@ run_step() {
     pretest) run_pretest ;;
     build-img) run_build_img ;;
     img-test) run_img_test ;;
+    ab-test) run_ab_test ;;
     build-iso) run_build_iso ;;
     iso-test) run_iso_test ;;
     *)
