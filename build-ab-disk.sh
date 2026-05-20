@@ -45,6 +45,27 @@ cd "$SCRIPT_DIR"
 log() { echo "[build-ab-disk] $*"; }
 die() { echo "[build-ab-disk] FATAL: $*" >&2; exit 1; }
 
+wait_for_loop_partition() {
+    local loop_dev="$1"
+    local part_num="$2"
+    local timeout_sec="${3:-15}"
+    local part_dev="${loop_dev}p${part_num}"
+    local i
+
+    for ((i=0; i<timeout_sec; i++)); do
+        if [[ -b "$part_dev" ]]; then
+            return 0
+        fi
+        partprobe "$loop_dev" 2>/dev/null || true
+        if command -v udevadm >/dev/null 2>&1; then
+            udevadm settle 2>/dev/null || true
+        fi
+        sleep 1
+    done
+
+    return 1
+}
+
 # ---------------------------------------------------------------------------
 # Dependency check
 # ---------------------------------------------------------------------------
@@ -93,21 +114,19 @@ log "Partitioning with GPT"
 # Clear any existing partition table
 sgdisk --zap-all "$OUTPUT_DISK"
 
-# p1: BIOS boot (1 MB, type ef02)
-sgdisk -n 1:2048:+1M     -t 1:ef02 -c 1:BIOSBOOT  "$OUTPUT_DISK"
-# p2: EFI System / ESP (4 GB, type ef00)
-sgdisk -n 2:0:+4G         -t 2:ef00 -c 2:ESP        "$OUTPUT_DISK"
-# p3: ROOT_A (12 GB)
-sgdisk -n 3:0:+12G        -t 3:8300 -c 3:ROOT_A     "$OUTPUT_DISK"
-# p4: ROOT_B (12 GB)
-sgdisk -n 4:0:+12G        -t 4:8300 -c 4:ROOT_B     "$OUTPUT_DISK"
-# p5: RECOVERY (rest, ~3 GB)
-sgdisk -n 5:0:0           -t 5:8300 -c 5:RECOVERY   "$OUTPUT_DISK"
+# Create all partitions in one write to avoid repeated "old partition table" warnings.
+sgdisk \
+    -n 1:2048:+1M  -t 1:ef02 -c 1:BIOSBOOT \
+    -n 2:0:+4G     -t 2:ef00 -c 2:ESP \
+    -n 3:0:+12G    -t 3:8300 -c 3:ROOT_A \
+    -n 4:0:+12G    -t 4:8300 -c 4:ROOT_B \
+    -n 5:0:0       -t 5:8300 -c 5:RECOVERY \
+    "$OUTPUT_DISK"
 
 AB_LOOP=$(losetup --find --show --partscan "$OUTPUT_DISK")
-# Some kernels need a moment for /dev/loopXpY to appear
-partprobe "$AB_LOOP" 2>/dev/null || true
-sleep 1
+for part in 2 3 4 5; do
+    wait_for_loop_partition "$AB_LOOP" "$part" || die "Partition node ${AB_LOOP}p${part} did not appear in time"
+done
 
 log "Formatting partitions"
 mkfs.fat -F32 -n ESP      "${AB_LOOP}p2"
@@ -125,8 +144,8 @@ mount "${AB_LOOP}p5" "$WORK_DIR/recovery"
 # ---------------------------------------------------------------------------
 log "Mounting production VHD: $PROD_VHD"
 VHD_LOOP=$(losetup --find --show --partscan "$PROD_VHD")
-partprobe "$VHD_LOOP" 2>/dev/null || true
-sleep 1
+wait_for_loop_partition "$VHD_LOOP" 1 || die "Partition node ${VHD_LOOP}p1 did not appear in time"
+wait_for_loop_partition "$VHD_LOOP" 2 || die "Partition node ${VHD_LOOP}p2 did not appear in time"
 
 mount -o ro "${VHD_LOOP}p1" "$WORK_DIR/vhd_boot"
 mount -o ro "${VHD_LOOP}p2" "$WORK_DIR/vhd_root"
@@ -162,8 +181,8 @@ losetup -d "$VHD_LOOP"; VHD_LOOP=""
 # ---------------------------------------------------------------------------
 log "Mounting recovery VHD: $RECOVERY_VHD"
 REC_LOOP=$(losetup --find --show --partscan "$RECOVERY_VHD")
-partprobe "$REC_LOOP" 2>/dev/null || true
-sleep 1
+wait_for_loop_partition "$REC_LOOP" 1 || die "Partition node ${REC_LOOP}p1 did not appear in time"
+wait_for_loop_partition "$REC_LOOP" 2 || die "Partition node ${REC_LOOP}p2 did not appear in time"
 
 mount -o ro "${REC_LOOP}p1" "$WORK_DIR/rec_boot"
 mount -o ro "${REC_LOOP}p2" "$WORK_DIR/rec_root"
