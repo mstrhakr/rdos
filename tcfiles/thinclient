@@ -398,16 +398,28 @@ apply_wireguard_state() {
     sudo -n /usr/bin/tc-configure-wireguard --set-enabled "$requested" >/dev/null 2>&1 || true
 }
 
+prepare_freerdp_store() {
+    export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+    mkdir -p "$XDG_CONFIG_HOME/freerdp" >/dev/null 2>&1 || true
+}
+
 set_freerdp_cert_policy() {
     local requested_policy="$1"
     local arg
     local filtered_args=()
 
     for arg in "${freerdp_args[@]}"; do
-        if [[ "$arg" == /cert:* ]]; then
-            continue
-        fi
-        filtered_args+=("$arg")
+        case "$arg" in
+            /cert:*|/cert-deny|/cert-ignore|/cert-name:*|/cert-tofu|/cert-fingerprint:*|/cert-fingerprint:*)
+                continue
+                ;;
+            --cert-deny|--cert-ignore|--cert-tofu|--ignore-certificate|--certificate-name|--certificate-name:*)
+                continue
+                ;;
+            *)
+                filtered_args+=("$arg")
+                ;;
+        esac
     done
 
     freerdp_args=("${filtered_args[@]}" "/cert:${requested_policy}")
@@ -417,6 +429,7 @@ run_freerdp_session() {
     local splash_text="$1"
     local loading_timeout_pid=""
 
+    : > session.log
     start_loading_splash "$splash_text"
     (sleep "$connect_splash_timeout"; stop_loading_splash) &
     loading_timeout_pid=$!
@@ -676,6 +689,7 @@ if [[ "$server" != "citrix" && "$server" != "moonlight" ]]; then
     fi
 
     start_status_overlay
+    prepare_freerdp_store
 
     freerdp_args=(
         "$rdp_destination"
@@ -692,18 +706,19 @@ if [[ "$server" != "citrix" && "$server" != "moonlight" ]]; then
         "/client-hostname:$hostname"
     )
 
+    selected_cert_policy="tofu"
     case "$cert_policy" in
         ignore)
-            freerdp_args+=(/cert:ignore)
+            selected_cert_policy="ignore"
             ;;
         ask|prompt)
-            freerdp_args+=(/cert:deny)
+            selected_cert_policy="deny"
             ;;
         deny|tofu|fingerprint:*)
-            freerdp_args+=("/cert:$cert_policy")
+            selected_cert_policy="$cert_policy"
             ;;
         *)
-            freerdp_args+=(/cert:tofu)
+            selected_cert_policy="tofu"
             ;;
     esac
 
@@ -719,16 +734,30 @@ if [[ "$server" != "citrix" && "$server" != "moonlight" ]]; then
         freerdp_args+=("${extra_params[@]}")
     fi
 
-    run_freerdp_session "$loading_text"
+    # Ensure configured cert policy wins over any legacy cert flags in advanced parameters.
+    set_freerdp_cert_policy "$selected_cert_policy"
 
-    if ! grep -Fq "BY_USER" session.log && [[ "${UFTC_CERT_PROMPTED:-0}" != "1" ]] && session_has_unknown_host_key_error; then
-        if prompt_trust_unknown_host_key; then
-            echo "User accepted unknown host key prompt, retrying with TOFU policy"
-            set_freerdp_cert_policy "tofu"
-            echo "Retry after unknown host key prompt" > session.log
-            run_freerdp_session "Saving server key and reconnecting..."
+    cert_prompted="false"
+    while true; do
+        run_freerdp_session "$loading_text"
+
+        if grep -Fq "BY_USER" session.log; then
+            break
         fi
-    fi
+
+        if [ "$cert_prompted" != "true" ] && session_has_unknown_host_key_error; then
+            if prompt_trust_unknown_host_key; then
+                cert_prompted="true"
+                UFTC_CERT_PROMPTED=1
+                echo "User accepted unknown host key prompt, retrying with TOFU policy"
+                set_freerdp_cert_policy "tofu"
+                loading_text="Saving server key and reconnecting..."
+                continue
+            fi
+        fi
+
+        break
+    done
 
     stop_status_overlay
 fi
