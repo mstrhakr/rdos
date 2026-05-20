@@ -6,3 +6,4 @@ tcconfig*
 *.AppImage
 .installer-work
 *.iso
+*.img
