@@ -38,13 +38,21 @@ On Windows, line endings are a common source of failures for shell scripts. This
 
 ## Build steps
 
-Before local builds or runner provisioning, install the full host-side dependency set:
+Before local builds or runner provisioning, install dependencies first:
 
 ```bash
 bash ./setup-build-deps.sh
 ```
 
 From Windows, use `setup-build-deps.cmd` to invoke the same helper through WSL.
+
+Then install static passwordless sudo rules (optional, but useful for CI and repeated local builds):
+
+```bash
+./setup-build-sudoers.sh
+```
+
+Keeping dependencies and sudoers setup separate lets you choose whether to enter sudo manually during builds or allow only the static build commands without prompts.
 
 From your Linux or WSL shell in the repo root:
 
@@ -60,7 +68,7 @@ chmod +x setup-build-sudoers.sh
 ./setup-build-sudoers.sh
 ```
 
-This creates `/etc/sudoers.d/uftc-build-nopasswd` for the current Linux user and allows passwordless sudo only for the local `docker` binary and this repo's `d2vm` wrapper.
+This creates `/etc/sudoers.d/uftc-build-nopasswd` for the current Linux user and allows passwordless sudo only for static build commands (`docker build`, this repo's `d2vm convert`, and `build-ab-disk.sh`).
 
 To remove the rule later:
 
