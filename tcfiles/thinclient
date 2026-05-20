@@ -481,7 +481,7 @@ if [[ $hostname == "thinclient" || -f ~/dynamic_hostname ]]; then
     fi
 
     if [[ "$hostname" != "$newhost" ]]; then
-        sudo set-hostname "$newhost"
+        sudo -n /usr/bin/set-hostname "$newhost"
         hostname=$newhost
     fi
 fi

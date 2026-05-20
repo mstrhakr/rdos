@@ -1,18 +1,16 @@
 # Limit passwordless maintenance to the thinclient user and expected command shapes.
-thinclient ALL=(root) NOPASSWD: /usr/bin/set-hostname *
+thinclient ALL=(root) NOPASSWD: /usr/bin/set-hostname
 thinclient ALL=(root) NOPASSWD: /usr/bin/firstboot
 thinclient ALL=(root) NOPASSWD: /usr/bin/auto-maintenance
-thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-network --apply-tcconfig * --reload
-thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-network --apply-tcconfig *
-thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wifi --configure * * *
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-network --apply-tcconfig /home/thinclient/tcconfig --reload
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-network --apply-tcconfig /home/thinclient/tcconfig
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wifi
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wifi --disable-powersave
-thinclient ALL=(root) NOPASSWD: /usr/bin/tc-scan-wifi *
-thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wifi --from-usb-drive *
-thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wireguard --from-usb-drive *
-thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wireguard --set-enabled *
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-scan-wifi
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wireguard
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-ota-updater
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-ota-updater --manual
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-ota-configure-timer
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-health-check
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-ota-rollback
-thinclient ALL=(root) NOPASSWD: /usr/bin/grub-editenv /boot/grub/grubenv *
+thinclient ALL=(root) NOPASSWD: /usr/bin/grub-editenv

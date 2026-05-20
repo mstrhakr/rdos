@@ -75,21 +75,17 @@ if [[ ! -f "$BUILD_AB_DISK_PATH" ]]; then
   exit 1
 fi
 
-escape_for_sudoers() {
-  printf '%s' "$1" | sed 's/ /\\ /g'
-}
-
-DOCKER_ESC="$(escape_for_sudoers "$DOCKER_BIN")"
-D2VM_ESC="$(escape_for_sudoers "$D2VM_PATH")"
-BUILD_AB_DISK_ESC="$(escape_for_sudoers "$BUILD_AB_DISK_PATH")"
-
 tmp_file="$(mktemp)"
 trap 'rm -f "$tmp_file"' EXIT
 
 cat >"$tmp_file" <<EOF
 # Managed by setup-build-sudoers.sh for UFTC local build helpers.
 # Remove with: ./setup-build-sudoers.sh --remove
-$TARGET_USER ALL=(root) NOPASSWD: $DOCKER_ESC *, $D2VM_ESC *, $BUILD_AB_DISK_ESC *
+# Only exact pipeline commands are authorized.
+$TARGET_USER ALL=(root) NOPASSWD: $DOCKER_BIN build . -t *
+$TARGET_USER ALL=(root) NOPASSWD: $DOCKER_BIN build --no-cache . -t *
+$TARGET_USER ALL=(root) NOPASSWD: $D2VM_PATH convert * -o * --bootloader grub --boot-size * --size * --network-manager none *
+$TARGET_USER ALL=(root) NOPASSWD: $BUILD_AB_DISK_PATH --prod-vhd * --recovery-vhd * --output *
 EOF
 
 sudo install -m 0440 "$tmp_file" "$SUDOERS_FILE"
@@ -98,6 +94,7 @@ sudo visudo -cf "$SUDOERS_FILE" >/dev/null
 echo "Installed sudoers rule: $SUDOERS_FILE"
 echo "User: $TARGET_USER"
 echo "Allowed commands without password:"
-echo "  $DOCKER_BIN"
-echo "  $D2VM_PATH"
-echo "  $BUILD_AB_DISK_PATH"
+echo "  $DOCKER_BIN build . -t <image>"
+echo "  $DOCKER_BIN build --no-cache . -t <image>"
+echo "  $D2VM_PATH convert <image> -o <output> --bootloader grub --boot-size <size> --size <size> --network-manager none [extra args]"
+echo "  $BUILD_AB_DISK_PATH --prod-vhd <path> --recovery-vhd <path> --output <path>"
