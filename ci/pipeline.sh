@@ -178,7 +178,7 @@ run_build_iso() {
 
 run_iso_test() {
   log "Step iso-test: validating installer ISO artifact"
-  bash ./ci/iso-build-validate.sh --mode validate-only --output-iso "$OUTPUT_ISO"
+  bash ./ci/iso-build-validate.sh --mode validate-only --payload-layout ab --output-iso "$OUTPUT_ISO"
 }
 
 steps=(pretest build-img img-test ab-test build-iso iso-test)
