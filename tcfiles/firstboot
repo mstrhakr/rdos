@@ -1,6 +1,31 @@
 #!/bin/bash
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# Slot detection — honours A/B layout when grubenv is present
+# ---------------------------------------------------------------------------
+detect_active_slot() {
+	local grubenv="/boot/grub/grubenv"
+	if [[ -f "$grubenv" ]]; then
+		local slot
+		slot=$(grub-editenv "$grubenv" list 2>/dev/null | awk -F= '/^current_slot=/{print $2}')
+		if [[ "$slot" == "a" || "$slot" == "b" ]]; then
+			echo "$slot"
+			return 0
+		fi
+	fi
+	# Not an A/B image — return empty string so callers skip slot-specific logic
+	echo ""
+}
+
+ACTIVE_SLOT="$(detect_active_slot)"
+
+# Idempotency: if this slot has already completed firstboot, skip everything.
+if [[ -n "$ACTIVE_SLOT" ]] && [[ -f "/boot/slots/${ACTIVE_SLOT}-init-done" ]]; then
+	echo "Slot ${ACTIVE_SLOT} firstboot already complete, nothing to do."
+	exit 0
+fi
+
 XANMOD_PACKAGE="linux-xanmod-lts-x64v1"
 XANMOD_KEY_SHA256="ed26eb39330fd296cd037b8229adccea0197b21989ec0a1ad4f4f74f5a41c7a7"
 XANMOD_KEY_FINGERPRINT="D38D7D1DA1349567ADED882D86F7D09EE734E623"
@@ -46,4 +71,11 @@ fi
 refresh_initramfs
 setcap cap_net_raw+ep /usr/bin/mtr-packet
 set-hostname thinclient
+
+# Write slot init marker so subsequent boots are skipped
+if [[ -n "$ACTIVE_SLOT" ]]; then
+	mkdir -p /boot/slots
+	touch "/boot/slots/${ACTIVE_SLOT}-init-done"
+fi
+
 rm "$0" && systemctl poweroff
