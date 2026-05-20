@@ -38,6 +38,14 @@ On Windows, line endings are a common source of failures for shell scripts. This
 
 ## Build steps
 
+Before local builds or runner provisioning, install the full host-side dependency set:
+
+```bash
+bash ./setup-build-deps.sh
+```
+
+From Windows, use `setup-build-deps.cmd` to invoke the same helper through WSL.
+
 From your Linux or WSL shell in the repo root:
 
 ```bash
@@ -88,8 +96,8 @@ Path scopes:
 
 - `preflight`: structural checks only, tool checks are advisory in local mode
 - `vhd`: validates structural checks and requires VHD-path tooling
-- `iso`: validates structural checks and requires ISO-path tooling
-- `all`: validates structural checks and requires both tooling sets
+- `iso`: validates structural checks and requires A/B assembly plus ISO-path tooling
+- `all`: validates structural checks and requires VHD, A/B assembly, and ISO tooling
 
 CI should call the same script in `ci` mode and choose a path scope per job matrix leg.
 
@@ -237,11 +245,17 @@ Runner requirements for `build-and-validate`:
 
 - Docker
 - shellcheck
+- sgdisk (`gdisk` on Debian/Ubuntu)
+- mkfs.fat (`dosfstools` on Debian/Ubuntu)
+- mkfs.ext4 (`e2fsprogs` on Debian/Ubuntu)
+- rsync
+- grub-install / grub-editenv (`grub-pc-bin`, `grub-efi-amd64-bin`, `grub-common` on Debian/Ubuntu)
+- util-linux (`losetup`, `lsblk`, `findmnt`, `blkid`)
+- partprobe (`parted` on Debian/Ubuntu and Fedora)
 - xorriso
 - qemu-img (`qemu-utils`)
 - zstd
 - curl
-- util-linux (`lsblk`, `findmnt`)
 
 Self-hosted job behavior:
 
@@ -368,10 +382,16 @@ Install the required packages before running `build-installer-iso.sh`:
 ```bash
 # Debian/Ubuntu
 sudo apt-get update
-sudo apt-get install -y qemu-utils xorriso zstd curl util-linux
+sudo apt-get install -y docker.io shellcheck qemu-utils xorriso zstd curl util-linux parted gdisk dosfstools rsync grub-pc-bin grub-efi-amd64-bin grub-common e2fsprogs file
 
 # Fedora
-sudo dnf install -y qemu-img xorriso zstd curl util-linux
+sudo dnf install -y moby-engine ShellCheck qemu-img xorriso zstd curl util-linux parted gdisk dosfstools rsync grub2-pc-modules grub2-efi-x64-modules grub2-tools-extra e2fsprogs file
+```
+
+Or use the helper:
+
+```bash
+bash ./setup-build-deps.sh
 ```
 
 ### Build commands

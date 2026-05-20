@@ -45,6 +45,18 @@ On Windows, line endings are a common source of shell-script failures. This repo
 
 If you are approaching this repo as a developer, see [docs/building.md](docs/building.md) for a step by step explanation of what gets built and how to package a basic installer ISO.
 
+To install the full host-side build dependency set for local builds, WSL, or self-hosted runners:
+
+```bash
+bash ./setup-build-deps.sh
+```
+
+From Windows, you can invoke the same helper through WSL with:
+
+```cmd
+setup-build-deps.cmd
+```
+
 ```bash
 ./build.sh
 ```
@@ -60,10 +72,10 @@ Installer ISO dependencies:
 ```bash
 # Debian/Ubuntu
 sudo apt-get update
-sudo apt-get install -y qemu-utils xorriso zstd curl util-linux
+sudo apt-get install -y docker.io shellcheck qemu-utils xorriso zstd curl util-linux parted gdisk dosfstools rsync grub-pc-bin grub-efi-amd64-bin grub-common e2fsprogs file
 
 # Fedora
-sudo dnf install -y qemu-img xorriso zstd curl util-linux
+sudo dnf install -y moby-engine ShellCheck qemu-img xorriso zstd curl util-linux parted gdisk dosfstools rsync grub2-pc-modules grub2-efi-x64-modules grub2-tools-extra e2fsprogs file
 ```
 
 `qemu-img` is provided by `qemu-utils` on Debian/Ubuntu.

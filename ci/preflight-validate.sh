@@ -128,6 +128,7 @@ shell_files=(
   build.sh
   build-installer-iso.sh
   d2vm
+  setup-build-deps.sh
   setup-build-sudoers.sh
   tcfiles/auto-maintenance.debian
   tcfiles/firstboot
@@ -164,6 +165,19 @@ required_vhd_cmds=(
   docker
 )
 
+required_ab_cmds=(
+  sgdisk
+  mkfs.fat
+  mkfs.ext4
+  rsync
+  losetup
+  grub-install
+  grub-editenv
+  qemu-img
+  blkid
+  partprobe
+)
+
 required_iso_cmds=(
   xorriso
   qemu-img
@@ -179,18 +193,18 @@ optional_cmds=()
 case "$PATH_SCOPE" in
   preflight)
     selected_cmds=()
-    optional_cmds=("${required_vhd_cmds[@]}" "${required_iso_cmds[@]}")
+    optional_cmds=("${required_vhd_cmds[@]}" "${required_ab_cmds[@]}" "${required_iso_cmds[@]}")
     ;;
   vhd)
     selected_cmds=("${required_vhd_cmds[@]}")
-    optional_cmds=("${required_iso_cmds[@]}")
+    optional_cmds=("${required_ab_cmds[@]}" "${required_iso_cmds[@]}")
     ;;
   iso)
-    selected_cmds=("${required_iso_cmds[@]}")
+    selected_cmds=("${required_ab_cmds[@]}" "${required_iso_cmds[@]}")
     optional_cmds=("${required_vhd_cmds[@]}")
     ;;
   all)
-    selected_cmds=("${required_vhd_cmds[@]}" "${required_iso_cmds[@]}")
+    selected_cmds=("${required_vhd_cmds[@]}" "${required_ab_cmds[@]}" "${required_iso_cmds[@]}")
     optional_cmds=()
     ;;
 esac

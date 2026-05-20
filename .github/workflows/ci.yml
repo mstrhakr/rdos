@@ -68,7 +68,7 @@ jobs:
       - name: Verify runner toolchain
         run: |
           set -euo pipefail
-          for cmd in bash docker xorriso qemu-img zstd curl lsblk findmnt shellcheck; do
+          for cmd in bash docker xorriso qemu-img zstd curl lsblk findmnt shellcheck sgdisk mkfs.fat mkfs.ext4 rsync losetup grub-install grub-editenv blkid partprobe; do
             if ! command -v "$cmd" >/dev/null 2>&1; then
               echo "Missing required command: $cmd" >&2
               exit 1
