@@ -182,6 +182,7 @@ install_with_apt() {
     grub-common
     grub-efi-amd64-bin
     grub-pc-bin
+    kpartx
     parted
     qemu-utils
     rsync
@@ -250,6 +251,7 @@ install_with_dnf() {
     grub2-efi-x64-modules
     grub2-pc-modules
     grub2-tools-extra
+    kpartx
     parted
     qemu-img
     rsync

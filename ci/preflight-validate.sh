@@ -173,6 +173,7 @@ required_ab_cmds=(
   mkfs.ext4
   rsync
   losetup
+  kpartx
   grub-install
   grub-editenv
   qemu-img

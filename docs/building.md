@@ -259,6 +259,7 @@ Runner requirements for `build-and-validate`:
 - rsync
 - grub-install / grub-editenv (`grub-pc-bin`, `grub-efi-amd64-bin`, `grub-common` on Debian/Ubuntu)
 - util-linux (`losetup`, `lsblk`, `findmnt`, `blkid`)
+- kpartx
 - partprobe (`parted` on Debian/Ubuntu and Fedora)
 - xorriso
 - qemu-img (`qemu-utils`)

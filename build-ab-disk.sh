@@ -45,29 +45,16 @@ cd "$SCRIPT_DIR"
 log() { echo "[build-ab-disk] $*"; }
 die() { echo "[build-ab-disk] FATAL: $*" >&2; exit 1; }
 
-wait_for_loop_partition() {
-    local loop_dev="$1"
-    local part_num="$2"
-    local timeout_sec="${3:-30}"
-    local part_dev="${loop_dev}p${part_num}"
+PARTITION_TOOL="partscan"
+
+wait_for_block_device() {
+    local dev_path="$1"
+    local timeout_sec="${2:-30}"
     local i
 
-    # Force partition table re-read upfront using all available tools
-    partprobe "$loop_dev" 2>/dev/null || true
-    if command -v partx >/dev/null 2>&1; then
-        partx -a "$loop_dev" 2>/dev/null || partx -u "$loop_dev" 2>/dev/null || true
-    fi
-    if command -v udevadm >/dev/null 2>&1; then
-        udevadm settle 2>/dev/null || true
-    fi
-
     for ((i=0; i<timeout_sec; i++)); do
-        if [[ -b "$part_dev" ]]; then
+        if [[ -b "$dev_path" ]]; then
             return 0
-        fi
-        partprobe "$loop_dev" 2>/dev/null || true
-        if command -v partx >/dev/null 2>&1; then
-            partx -u "$loop_dev" 2>/dev/null || true
         fi
         if command -v udevadm >/dev/null 2>&1; then
             udevadm settle 2>/dev/null || true
@@ -76,6 +63,35 @@ wait_for_loop_partition() {
     done
 
     return 1
+}
+
+prepare_loop_partitions() {
+    local loop_dev="$1"
+
+    if command -v kpartx >/dev/null 2>&1; then
+        kpartx -as "$loop_dev" >/dev/null 2>&1 || kpartx -a "$loop_dev" >/dev/null 2>&1 || true
+        PARTITION_TOOL="kpartx"
+        return 0
+    fi
+
+    partprobe "$loop_dev" 2>/dev/null || true
+    if command -v partx >/dev/null 2>&1; then
+        partx -a "$loop_dev" 2>/dev/null || partx -u "$loop_dev" 2>/dev/null || true
+    fi
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm settle 2>/dev/null || true
+    fi
+}
+
+partition_device() {
+    local loop_dev="$1"
+    local part_num="$2"
+
+    if [[ "$PARTITION_TOOL" == "kpartx" ]]; then
+        printf '/dev/mapper/%s' "$(basename "$loop_dev")p${part_num}"
+    else
+        printf '%sp%s' "$loop_dev" "$part_num"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -105,6 +121,11 @@ cleanup() {
                root_a root_b recovery esp vhd_boot vhd_root rec_boot rec_root; do
         umount -l "$WORK_DIR/$mp" 2>/dev/null || true
     done
+    if [[ "$PARTITION_TOOL" == "kpartx" ]]; then
+        [[ -n "$AB_LOOP"  ]] && kpartx -d "$AB_LOOP"  >/dev/null 2>&1 || true
+        [[ -n "$VHD_LOOP" ]] && kpartx -d "$VHD_LOOP" >/dev/null 2>&1 || true
+        [[ -n "$REC_LOOP" ]] && kpartx -d "$REC_LOOP" >/dev/null 2>&1 || true
+    fi
     [[ -n "$AB_LOOP"  ]] && losetup -d "$AB_LOOP"  2>/dev/null || true
     [[ -n "$VHD_LOOP" ]] && losetup -d "$VHD_LOOP" 2>/dev/null || true
     [[ -n "$REC_LOOP" ]] && losetup -d "$REC_LOOP" 2>/dev/null || true
@@ -136,20 +157,21 @@ sgdisk \
     "$OUTPUT_DISK"
 
 AB_LOOP=$(losetup --find --show --partscan "$OUTPUT_DISK")
-command -v partx >/dev/null 2>&1 && partx -a "$AB_LOOP" 2>/dev/null || true
+prepare_loop_partitions "$AB_LOOP"
 for part in 2 3 4 5; do
-    wait_for_loop_partition "$AB_LOOP" "$part" || die "Partition node ${AB_LOOP}p${part} did not appear in time"
+    part_dev="$(partition_device "$AB_LOOP" "$part")"
+    wait_for_block_device "$part_dev" 30 || die "Partition node $part_dev did not appear in time"
 done
 
 log "Formatting partitions"
-mkfs.fat -F32 -n ESP      "${AB_LOOP}p2"
-mkfs.ext4 -q -L ROOT_A    "${AB_LOOP}p3"
-mkfs.ext4 -q -L ROOT_B    "${AB_LOOP}p4"
-mkfs.ext4 -q -L RECOVERY  "${AB_LOOP}p5"
+mkfs.fat -F32 -n ESP      "$(partition_device "$AB_LOOP" 2)"
+mkfs.ext4 -q -L ROOT_A    "$(partition_device "$AB_LOOP" 3)"
+mkfs.ext4 -q -L ROOT_B    "$(partition_device "$AB_LOOP" 4)"
+mkfs.ext4 -q -L RECOVERY  "$(partition_device "$AB_LOOP" 5)"
 
-mount "${AB_LOOP}p2" "$WORK_DIR/esp"
-mount "${AB_LOOP}p3" "$WORK_DIR/root_a"
-mount "${AB_LOOP}p5" "$WORK_DIR/recovery"
+mount "$(partition_device "$AB_LOOP" 2)" "$WORK_DIR/esp"
+mount "$(partition_device "$AB_LOOP" 3)" "$WORK_DIR/root_a"
+mount "$(partition_device "$AB_LOOP" 5)" "$WORK_DIR/recovery"
 
 # ---------------------------------------------------------------------------
 # Extract production VHD (d2vm output)
@@ -157,12 +179,14 @@ mount "${AB_LOOP}p5" "$WORK_DIR/recovery"
 # ---------------------------------------------------------------------------
 log "Mounting production VHD: $PROD_VHD"
 VHD_LOOP=$(losetup --find --show --partscan "$PROD_VHD")
-command -v partx >/dev/null 2>&1 && partx -a "$VHD_LOOP" 2>/dev/null || true
-wait_for_loop_partition "$VHD_LOOP" 1 || die "Partition node ${VHD_LOOP}p1 did not appear in time"
-wait_for_loop_partition "$VHD_LOOP" 2 || die "Partition node ${VHD_LOOP}p2 did not appear in time"
+prepare_loop_partitions "$VHD_LOOP"
+part_dev="$(partition_device "$VHD_LOOP" 1)"
+wait_for_block_device "$part_dev" 30 || die "Partition node $part_dev did not appear in time"
+part_dev="$(partition_device "$VHD_LOOP" 2)"
+wait_for_block_device "$part_dev" 30 || die "Partition node $part_dev did not appear in time"
 
-mount -o ro "${VHD_LOOP}p1" "$WORK_DIR/vhd_boot"
-mount -o ro "${VHD_LOOP}p2" "$WORK_DIR/vhd_root"
+mount -o ro "$(partition_device "$VHD_LOOP" 1)" "$WORK_DIR/vhd_boot"
+mount -o ro "$(partition_device "$VHD_LOOP" 2)" "$WORK_DIR/vhd_root"
 
 log "Copying production root filesystem into ROOT_A"
 rsync -aAX \
@@ -187,6 +211,9 @@ cp "$PROD_INITRD"  "$WORK_DIR/esp/initrd-a.img"
 
 umount "$WORK_DIR/vhd_root"
 umount "$WORK_DIR/vhd_boot"
+if [[ "$PARTITION_TOOL" == "kpartx" ]]; then
+    kpartx -d "$VHD_LOOP" >/dev/null 2>&1 || true
+fi
 losetup -d "$VHD_LOOP"; VHD_LOOP=""
 
 # ---------------------------------------------------------------------------
@@ -195,12 +222,14 @@ losetup -d "$VHD_LOOP"; VHD_LOOP=""
 # ---------------------------------------------------------------------------
 log "Mounting recovery VHD: $RECOVERY_VHD"
 REC_LOOP=$(losetup --find --show --partscan "$RECOVERY_VHD")
-command -v partx >/dev/null 2>&1 && partx -a "$REC_LOOP" 2>/dev/null || true
-wait_for_loop_partition "$REC_LOOP" 1 || die "Partition node ${REC_LOOP}p1 did not appear in time"
-wait_for_loop_partition "$REC_LOOP" 2 || die "Partition node ${REC_LOOP}p2 did not appear in time"
+prepare_loop_partitions "$REC_LOOP"
+part_dev="$(partition_device "$REC_LOOP" 1)"
+wait_for_block_device "$part_dev" 30 || die "Partition node $part_dev did not appear in time"
+part_dev="$(partition_device "$REC_LOOP" 2)"
+wait_for_block_device "$part_dev" 30 || die "Partition node $part_dev did not appear in time"
 
-mount -o ro "${REC_LOOP}p1" "$WORK_DIR/rec_boot"
-mount -o ro "${REC_LOOP}p2" "$WORK_DIR/rec_root"
+mount -o ro "$(partition_device "$REC_LOOP" 1)" "$WORK_DIR/rec_boot"
+mount -o ro "$(partition_device "$REC_LOOP" 2)" "$WORK_DIR/rec_root"
 
 log "Copying recovery root filesystem into RECOVERY"
 rsync -aAX \
@@ -224,6 +253,9 @@ cp "$REC_INITRD"  "$WORK_DIR/recovery/boot/initrd.img"
 
 umount "$WORK_DIR/rec_root"
 umount "$WORK_DIR/rec_boot"
+if [[ "$PARTITION_TOOL" == "kpartx" ]]; then
+    kpartx -d "$REC_LOOP" >/dev/null 2>&1 || true
+fi
 losetup -d "$REC_LOOP"; REC_LOOP=""
 
 # ---------------------------------------------------------------------------
@@ -363,6 +395,10 @@ umount "$WORK_DIR/root_a/boot"
 umount "$WORK_DIR/recovery"
 umount "$WORK_DIR/root_a"
 umount "$WORK_DIR/esp"
+
+if [[ "$PARTITION_TOOL" == "kpartx" ]]; then
+    kpartx -d "$AB_LOOP" >/dev/null 2>&1 || true
+fi
 
 losetup -d "$AB_LOOP"; AB_LOOP=""
 
