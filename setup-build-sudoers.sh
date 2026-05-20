@@ -69,12 +69,19 @@ if [[ ! -f "$D2VM_PATH" ]]; then
   exit 1
 fi
 
+BUILD_AB_DISK_PATH="$SCRIPT_DIR/build-ab-disk.sh"
+if [[ ! -f "$BUILD_AB_DISK_PATH" ]]; then
+  echo "Expected A/B assembly script not found at: $BUILD_AB_DISK_PATH" >&2
+  exit 1
+fi
+
 escape_for_sudoers() {
   printf '%s' "$1" | sed 's/ /\\ /g'
 }
 
 DOCKER_ESC="$(escape_for_sudoers "$DOCKER_BIN")"
 D2VM_ESC="$(escape_for_sudoers "$D2VM_PATH")"
+BUILD_AB_DISK_ESC="$(escape_for_sudoers "$BUILD_AB_DISK_PATH")"
 
 tmp_file="$(mktemp)"
 trap 'rm -f "$tmp_file"' EXIT
@@ -82,7 +89,7 @@ trap 'rm -f "$tmp_file"' EXIT
 cat >"$tmp_file" <<EOF
 # Managed by setup-build-sudoers.sh for UFTC local build helpers.
 # Remove with: ./setup-build-sudoers.sh --remove
-$TARGET_USER ALL=(root) NOPASSWD: $DOCKER_ESC *, $D2VM_ESC *
+$TARGET_USER ALL=(root) NOPASSWD: $DOCKER_ESC *, $D2VM_ESC *, $BUILD_AB_DISK_ESC *
 EOF
 
 sudo install -m 0440 "$tmp_file" "$SUDOERS_FILE"
@@ -93,3 +100,4 @@ echo "User: $TARGET_USER"
 echo "Allowed commands without password:"
 echo "  $DOCKER_BIN"
 echo "  $D2VM_PATH"
+echo "  $BUILD_AB_DISK_PATH"
