@@ -468,7 +468,7 @@ edit_updates_section() {
 
     case "$status" in
         2)
-            sudo -n /usr/bin/tc-ota-updater &
+            sudo -n /usr/bin/tc-ota-updater --manual &
             yad --info --center --title="System Updates" --text="Update check started in the background."
             return 0
             ;;
@@ -830,12 +830,12 @@ run_settings_page() {
             "Tools")
                 edit_tools_section || true
                 ;;
+            "System Updates")
+                edit_updates_section || true
+                ;;
         esac
     done
 }
-                "System Updates")
-                    edit_updates_section || true
-                    ;;
 
 run_first_boot_wizard() {
     local page="welcome"
