@@ -1,0 +1,32 @@
+#!/bin/bash
+set -euo pipefail
+
+CONFIG_FILE="/home/thinclient/tcconfig"
+OVERRIDE_DIR="/etc/systemd/system/tc-ota-updater.timer.d"
+OVERRIDE_FILE="${OVERRIDE_DIR}/override.conf"
+DEFAULT_WINDOW="02:00"
+maintenance_window="$DEFAULT_WINDOW"
+
+if [[ -f "$CONFIG_FILE" ]]; then
+    value="$(awk -F= '/^maintenance_window=/{print $2; exit}' "$CONFIG_FILE" 2>/dev/null || true)"
+    value="${value#\"}"
+    value="${value%\"}"
+    if [[ -n "$value" ]]; then
+        maintenance_window="$value"
+    fi
+fi
+
+if [[ ! "$maintenance_window" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+    echo "[tc-ota-configure-timer] Invalid maintenance_window '$maintenance_window', using $DEFAULT_WINDOW" >&2
+    maintenance_window="$DEFAULT_WINDOW"
+fi
+
+install -d -m 755 "$OVERRIDE_DIR"
+cat > "$OVERRIDE_FILE" <<EOF
+[Timer]
+OnCalendar=
+OnCalendar=*-*-* ${maintenance_window}:00
+EOF
+
+systemctl daemon-reload
+systemctl restart tc-ota-updater.timer

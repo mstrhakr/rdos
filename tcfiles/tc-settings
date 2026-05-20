@@ -207,6 +207,17 @@ apply_network_config() {
     fi
 }
 
+apply_ota_timer_config() {
+    local log_path="${HOME}/.uftc-ota-timer-apply.log"
+
+    if ! sudo -n /usr/bin/tc-ota-configure-timer 2>&1 | tee "$log_path" >/dev/null; then
+        show_warning "Update settings were saved, but the OTA schedule could not be refreshed immediately. The new time will be used after the next boot.\n\nDetails:\n$(tail -n 5 "$log_path" 2>/dev/null)"
+        return 1
+    fi
+
+    return 0
+}
+
 apply_wireguard_config() {
     local requested_state
     local applied_state
@@ -700,6 +711,7 @@ save_all_changes() {
     fi
 
     save_config
+    apply_ota_timer_config || true
     apply_network_config
     apply_wireguard_config || true
     return 0
@@ -1033,6 +1045,7 @@ run_first_boot_wizard() {
                 fi
 
                 save_config
+                apply_ota_timer_config || true
                 apply_network_config
                 return 0
                 ;;

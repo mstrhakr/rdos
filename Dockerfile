@@ -83,6 +83,7 @@ COPY tcfiles/set-hostname /usr/bin/set-hostname
 COPY tcfiles/auto-maintenance.debian /usr/bin/auto-maintenance
 COPY tcfiles/firstboot /usr/bin/firstboot
 COPY tcfiles/tc-ota-updater /usr/bin/tc-ota-updater
+COPY tcfiles/tc-ota-configure-timer /usr/bin/tc-ota-configure-timer
 COPY tcfiles/tc-health-check /usr/bin/tc-health-check
 COPY tcfiles/tc-ota-rollback /usr/bin/tc-ota-rollback
 COPY tcfiles/099_tc /etc/sudoers.d/099_tc
@@ -101,6 +102,7 @@ RUN chmod +x \
         /usr/bin/auto-maintenance \
         /usr/bin/firstboot \
         /usr/bin/tc-ota-updater \
+        /usr/bin/tc-ota-configure-timer \
         /usr/bin/tc-health-check \
         /usr/bin/tc-ota-rollback
 # Allow mtr to send raw ICMP packets without root (capability survives into the final image)
