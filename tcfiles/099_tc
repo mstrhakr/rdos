@@ -10,3 +10,7 @@ thinclient ALL=(root) NOPASSWD: /usr/bin/tc-scan-wifi *
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wifi --from-usb-drive *
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wireguard --from-usb-drive *
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wireguard --set-enabled *
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-ota-updater
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-health-check
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-ota-rollback
+thinclient ALL=(root) NOPASSWD: /usr/bin/grub-editenv /boot/grub/grubenv *

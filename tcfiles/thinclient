@@ -462,6 +462,11 @@ if [[ -f /usr/bin/firstboot ]]; then
     xterm -bg black -fg white -hold -e /bin/bash -lc 'sudo -n /usr/bin/firstboot || { echo; echo "First boot failed before the image could finish setup."; echo "Review the messages above for the exact package or setup step that failed."; exit 1; }'
 fi
 
+# Verify boot slot health and commit if healthy (A/B images only, no-op on single-slot)
+if [[ -f /usr/bin/tc-health-check ]]; then
+    sudo -n /usr/bin/tc-health-check &>/dev/null &
+fi
+
 # Rename thinclient
 hostname=$(< /etc/hostname)
 if [[ $hostname == "thinclient" || -f ~/dynamic_hostname ]]; then

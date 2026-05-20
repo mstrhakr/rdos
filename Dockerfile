@@ -27,7 +27,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         ffmpeg \
         enca nano udiskie mc mtr \
         adwaita-icon-theme-legacy libfuse2 \
-        libcap2-bin
+    libcap2-bin \
+    grub-common
 
 # Disable audible terminal/system bell where possible.
 RUN printf '%s\n' 'blacklist pcspkr' 'install pcspkr /bin/false' > /etc/modprobe.d/nobeep.conf && \
@@ -80,6 +81,10 @@ COPY tcfiles/tc-scan-wifi /usr/bin/tc-scan-wifi
 COPY tcfiles/tc-wifi-wizard /usr/bin/tc-wifi-wizard
 COPY tcfiles/set-hostname /usr/bin/set-hostname
 COPY tcfiles/auto-maintenance.debian /usr/bin/auto-maintenance
+COPY tcfiles/firstboot /usr/bin/firstboot
+COPY tcfiles/tc-ota-updater /usr/bin/tc-ota-updater
+COPY tcfiles/tc-health-check /usr/bin/tc-health-check
+COPY tcfiles/tc-ota-rollback /usr/bin/tc-ota-rollback
 COPY tcfiles/099_tc /etc/sudoers.d/099_tc
 COPY tcfiles/usb-access.rules /etc/udev/rules.d/usb-access.rules
 RUN chown root:root /etc/sudoers.d/099_tc && chmod 440 /etc/sudoers.d/099_tc
@@ -93,7 +98,11 @@ RUN chmod +x \
     /usr/bin/tc-scan-wifi \
     /usr/bin/tc-wifi-wizard \
     /usr/bin/set-hostname \
-    /usr/bin/auto-maintenance
+        /usr/bin/auto-maintenance \
+        /usr/bin/firstboot \
+        /usr/bin/tc-ota-updater \
+        /usr/bin/tc-health-check \
+        /usr/bin/tc-ota-rollback
 # Allow mtr to send raw ICMP packets without root (capability survives into the final image)
 RUN setcap cap_net_raw+ep /usr/bin/mtr-packet
 
@@ -112,6 +121,10 @@ RUN systemctl enable tc-networkconfig.service
 
 COPY tcfiles/tc-wifipower.service /etc/systemd/system/tc-wifipower.service
 RUN systemctl enable tc-wifipower.service
+
+COPY tcfiles/tc-ota-updater.service /etc/systemd/system/tc-ota-updater.service
+COPY tcfiles/tc-ota-updater.timer /etc/systemd/system/tc-ota-updater.timer
+RUN systemctl enable tc-ota-updater.timer
 
 COPY tcfiles/dhcp.network /etc/systemd/network/dhcp.network
 COPY tcfiles/systemd-resolved.conf /etc/tmpfiles.d/systemd-resolved.conf

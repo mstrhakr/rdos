@@ -141,6 +141,8 @@ load_config() {
     static_prefix="24"
     static_gateway=""
     static_dns=""
+    auto_update_enabled="true"
+    maintenance_window="02:00"
 
     [ -f "$CONFIG_PATH" ] || return 0
 
@@ -152,7 +154,7 @@ load_config() {
         value="${value%\"}"
 
         case "$key" in
-            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|status_overlay_enabled|status_show_datetime|status_show_battery|status_show_wifi|status_show_ip|status_show_wireguard|wireguard_enabled|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns)
+            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|status_overlay_enabled|status_show_datetime|status_show_battery|status_show_wifi|status_show_ip|status_show_wireguard|wireguard_enabled|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns|auto_update_enabled|maintenance_window)
                 printf -v "$key" '%s' "$value"
                 ;;
         esac
@@ -192,6 +194,8 @@ save_config() {
         printf 'static_prefix=%s\n' "$(quote_config_value "$static_prefix")"
         printf 'static_gateway=%s\n' "$(quote_config_value "$static_gateway")"
         printf 'static_dns=%s\n' "$(quote_config_value "$static_dns")"
+        printf 'auto_update_enabled=%s\n' "$(quote_config_value "$auto_update_enabled")"
+        printf 'maintenance_window=%s\n' "$(quote_config_value "$maintenance_window")"
     } > "$CONFIG_PATH"
 }
 
@@ -430,6 +434,55 @@ run_wifi_settings() {
     fi
 }
 
+edit_updates_section() {
+    local output
+    local status
+    local current_slot inactive_slot current_ver inactive_ver
+
+    current_slot=""
+    if [[ -f /boot/grub/grubenv ]]; then
+        current_slot="$(grub-editenv /boot/grub/grubenv list 2>/dev/null | awk -F= '/^current_slot/{print $2}')"
+    fi
+
+    if [[ "$current_slot" = "a" ]]; then
+        inactive_slot="b"
+    else
+        inactive_slot="a"
+    fi
+
+    current_ver="$(cat "/boot/slots/${current_slot}-version" 2>/dev/null || echo "unknown")"
+    inactive_ver="$(cat "/boot/slots/${inactive_slot}-version" 2>/dev/null || echo "none")"
+
+    set +e
+    output=$(yad --form --center --width=560 --title="System Updates | $VERSION" \
+        --text="Current slot: <b>${current_slot:-none}</b>  ($current_ver)\nInactive slot: <b>${inactive_slot}</b>  ($inactive_ver)" \
+        --separator=$'\x1F' \
+        --button="Cancel":1 \
+        --button="Check for Updates":2 \
+        --button="Roll Back Slot":3 \
+        --button="Save":0 \
+        --field="Automatic Updates Enabled:CHK" "$(bool_to_checkbox "$auto_update_enabled")" \
+        --field="Maintenance Window (HH:MM)" "$maintenance_window")
+    status=$?
+    set -e
+
+    case "$status" in
+        2)
+            sudo -n /usr/bin/tc-ota-updater &
+            yad --info --center --title="System Updates" --text="Update check started in the background."
+            return 0
+            ;;
+        3)
+            sudo -n /usr/bin/tc-ota-rollback
+            return 0
+            ;;
+        0)
+            auto_update_enabled="$(normalize_bool "$(printf '%s' "$output" | cut -d$'\x1F' -f1)")"
+            maintenance_window="$(printf '%s' "$output" | cut -d$'\x1F' -f2)"
+            ;;
+    esac
+}
+
 choose_settings_action() {
     local menu_output
     local status
@@ -456,6 +509,7 @@ choose_settings_action() {
         "Device" "Login, display, audio, keyboard" \
         "Support" "Helpdesk and admin password" \
         "Tools" "Terminal and diagnostics" \
+        "System Updates" "OTA updates and slot management" \
         "Save Changes" "Write tcconfig and apply network" \
         "Save and Exit" "Write tcconfig and close settings" | \
         yad --list --center --width=760 --height=500 --title="Settings | $VERSION" \
@@ -779,6 +833,9 @@ run_settings_page() {
         esac
     done
 }
+                "System Updates")
+                    edit_updates_section || true
+                    ;;
 
 run_first_boot_wizard() {
     local page="welcome"
