@@ -129,16 +129,24 @@ shell_files=(
   build-installer-iso.sh
   d2vm
   setup-build-sudoers.sh
+  tcfiles/auto-maintenance.debian
   tcfiles/firstboot
-  tcfiles/thinclient
   tcfiles/installer-install.sh
-  tcfiles/tc-configure-network
-  tcfiles/tc-configure-wifi
-  tcfiles/tc-scan-wifi
-  tcfiles/tc-settings
-  tcfiles/tc-wifi-wizard
-  tcfiles/tc-installer-ui.sh
+  tcfiles/recovery
+  tcfiles/set-hostname
+  tcfiles/thinclient
 )
+
+shopt -s nullglob
+for file in tcfiles/tc-*; do
+  case "$file" in
+    *.service|*.timer)
+      continue
+      ;;
+  esac
+  shell_files+=("$file")
+done
+shopt -u nullglob
 
 strict_mode_files=(
   build.sh
