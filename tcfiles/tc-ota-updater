@@ -14,10 +14,23 @@ STAGING_FILE="$STAGING_DIR/uftc-ota.img.zst"
 STAGING_PARTIAL="${STAGING_FILE}.partial"
 LOG_TAG="tc-ota"
 REQUIRED_FREE_KB=$((5 * 1024 * 1024))   # 5 GB minimum free in STAGING_DIR
+MANUAL_CHECK=false
 
 log()  { logger -t "$LOG_TAG" "$*"; echo "[$LOG_TAG] $*"; }
 warn() { logger -t "$LOG_TAG" "WARNING: $*"; echo "[$LOG_TAG] WARNING: $*" >&2; }
 die()  { logger -t "$LOG_TAG" "ERROR: $*";   echo "[$LOG_TAG] ERROR: $*"   >&2; exit 1; }
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --manual)
+            MANUAL_CHECK=true
+            shift
+            ;;
+        *)
+            die "Unknown argument: $1"
+            ;;
+    esac
+done
 
 # ---------------------------------------------------------------------------
 # Read user config (auto_update_enabled, maintenance_window)
@@ -28,7 +41,7 @@ if [[ -f "$CONFIG_FILE" ]]; then
     [[ -n "$val" ]] && auto_update_enabled="$val"
 fi
 
-if [[ "${auto_update_enabled,,}" != "true" && "${auto_update_enabled,,}" != "1" ]]; then
+if [[ "$MANUAL_CHECK" != "true" ]] && [[ "${auto_update_enabled,,}" != "true" && "${auto_update_enabled,,}" != "1" ]]; then
     log "Auto-update disabled in config, exiting."
     exit 0
 fi
@@ -61,15 +74,22 @@ if [[ "$PENDING" == "true" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Read the currently installed version for the inactive slot
+# Read the currently running version and the inactive slot version
 # ---------------------------------------------------------------------------
-SLOT_VERSION_FILE="/boot/slots/${INACTIVE_SLOT}-version"
-LOCAL_VERSION=""
-if [[ -f "$SLOT_VERSION_FILE" ]]; then
-    LOCAL_VERSION=$(cat "$SLOT_VERSION_FILE" | tr -d '[:space:]')
+ACTIVE_VERSION=""
+INACTIVE_VERSION=""
+
+if [[ -f /tcversion ]]; then
+    ACTIVE_VERSION=$(tr -d '[:space:]' < /tcversion)
+elif [[ -f "/boot/slots/${CURRENT_SLOT}-version" ]]; then
+    ACTIVE_VERSION=$(tr -d '[:space:]' < "/boot/slots/${CURRENT_SLOT}-version")
 fi
 
-log "Current slot: $CURRENT_SLOT | Inactive slot: $INACTIVE_SLOT (${LOCAL_VERSION:-never installed})"
+if [[ -f "/boot/slots/${INACTIVE_SLOT}-version" ]]; then
+    INACTIVE_VERSION=$(tr -d '[:space:]' < "/boot/slots/${INACTIVE_SLOT}-version")
+fi
+
+log "Current slot: $CURRENT_SLOT (${ACTIVE_VERSION:-unknown}) | Inactive slot: $INACTIVE_SLOT (${INACTIVE_VERSION:-never installed})"
 
 # ---------------------------------------------------------------------------
 # Query GitHub API for the latest release
@@ -122,12 +142,12 @@ version_gt() {
     [[ "$(printf '%s\n' "$1" "$2" | sort -V | head -1)" != "$1" ]]
 }
 
-if ! version_gt "$REMOTE_VERSION" "${LOCAL_VERSION:-0.0.0}"; then
-    log "No update available ($REMOTE_VERSION <= ${LOCAL_VERSION:-none}), exiting."
+if ! version_gt "$REMOTE_VERSION" "${ACTIVE_VERSION:-0.0.0}"; then
+    log "No update available ($REMOTE_VERSION <= ${ACTIVE_VERSION:-none}), exiting."
     exit 0
 fi
 
-log "Update available: ${LOCAL_VERSION:-none} → $REMOTE_VERSION"
+log "Update available: ${ACTIVE_VERSION:-none} → $REMOTE_VERSION"
 
 # ---------------------------------------------------------------------------
 # Find the OTA image download URL
