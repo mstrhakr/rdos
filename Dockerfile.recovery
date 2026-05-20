@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+# Recovery OS for UFTC A/B slot switching.
+# Built via d2vm the same way as the production image.
+# The recovery script runs as PID 1 via GRUB: init=/usr/bin/recovery
+FROM alpine:3.20
+
+RUN apk add --no-cache \
+    bash \
+    zstd \
+    e2fsprogs \
+    e2fsprogs-extra \
+    grub \
+    util-linux \
+    coreutils \
+    blkid \
+    findutils
+
+COPY tcfiles/recovery /usr/bin/recovery
+RUN chmod +x /usr/bin/recovery
