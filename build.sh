@@ -7,6 +7,9 @@ export DOCKER_BUILDKIT=1
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+D2VM_WRAPPER="$SCRIPT_DIR/d2vm"
+BUILD_AB_DISK_SCRIPT="$SCRIPT_DIR/build-ab-disk.sh"
+
 log_phase() {
 	printf '\n[%s] %s\n' "$(date +'%H:%M:%S')" "$1"
 }
@@ -177,7 +180,7 @@ if [[ -n "$STAGING_DIR" ]]; then
 	(
 		cd "$STAGING_DIR"
 		run_with_heartbeat "Converting Docker image to VHD via d2vm" \
-			sudo "$SCRIPT_DIR/d2vm" convert "${IMAGE_NAME}:latest" -o "$staged_output_name" --bootloader grub --boot-size 4000 --size 14G --network-manager none "${D2VM_ARGS[@]}"
+			sudo "$D2VM_WRAPPER" convert "${IMAGE_NAME}:latest" -o "$staged_output_name" --bootloader grub --boot-size 4000 --size 14G --network-manager none "${D2VM_ARGS[@]}"
 	)
 
 	log_phase "Copying staged VHD to destination: $OUTPUT_VHD"
@@ -188,7 +191,7 @@ if [[ -n "$STAGING_DIR" ]]; then
 	fi
 else
 	run_with_heartbeat "Converting Docker image to VHD via d2vm" \
-		sudo ./d2vm convert "${IMAGE_NAME}:latest" -o "$OUTPUT_VHD" --bootloader grub --boot-size 4000 --size 14G --network-manager none "${D2VM_ARGS[@]}"
+		sudo "$D2VM_WRAPPER" convert "${IMAGE_NAME}:latest" -o "$OUTPUT_VHD" --bootloader grub --boot-size 4000 --size 14G --network-manager none "${D2VM_ARGS[@]}"
 fi
 
 log_phase "Build complete: $OUTPUT_VHD"
@@ -215,7 +218,7 @@ if [[ "$BUILD_AB" == "1" ]]; then
 		fi
 
 		run_with_heartbeat "Converting recovery image to VHD via d2vm" \
-			sudo ./d2vm convert "${RECOVERY_IMAGE_NAME}:latest" -o "$RECOVERY_VHD" \
+			sudo "$D2VM_WRAPPER" convert "${RECOVERY_IMAGE_NAME}:latest" -o "$RECOVERY_VHD" \
 			    --bootloader grub --boot-size 200 --size 2G --network-manager none
 	fi
 
@@ -225,7 +228,7 @@ if [[ "$BUILD_AB" == "1" ]]; then
 	fi
 
 	run_with_heartbeat "Assembling A/B+Recovery disk" \
-		sudo ./build-ab-disk.sh \
+		sudo "$BUILD_AB_DISK_SCRIPT" \
 		    --prod-vhd "$OUTPUT_VHD" \
 		    --recovery-vhd "$RECOVERY_VHD" \
 		    --output "$OUTPUT_AB"
