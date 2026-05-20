@@ -40,7 +40,7 @@ Builds a Clonezilla-based unattended installer ISO for UFTC.
 By default, this script builds a fresh VHD first by invoking ./build.sh.
 
 Options:
-      --skip-build                 Skip invoking build.sh and use existing --input-vhd
+      --skip-build                 Skip invoking build.sh and use existing --input-vhd/--input-disk
       --build-script PATH          Path to build script (default: ./build.sh)
       --build-arg ARG              Pass one argument to build.sh (repeatable)
       --no-cache                   Build without Docker cache (alias for --build-arg --no-cache)
@@ -205,7 +205,6 @@ need_cmd() {
 }
 
 need_cmd xorriso
-need_cmd qemu-img
 need_cmd zstd
 need_cmd curl
 need_cmd lsblk
@@ -271,34 +270,41 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
   "$BUILD_SCRIPT" --output "$build_output_vhd" --force "${BUILD_SCRIPT_ARGS[@]}"
   INPUT_VHD="$build_output_vhd"
 else
-  log_phase "Skipping VHD build; using existing $INPUT_VHD"
+  if [[ -n "$INPUT_DISK" ]]; then
+    log_phase "Skipping VHD build; using existing raw disk $INPUT_DISK"
+  else
+    log_phase "Skipping VHD build; using existing $INPUT_VHD"
+  fi
 fi
 
-if [[ ! -f "$INPUT_VHD" ]]; then
-  echo "Input VHD not found: $INPUT_VHD" >&2
-  echo "Re-run without --skip-build, or set --input-vhd to an existing file." >&2
-  exit 1
+if [[ -n "$INPUT_DISK" ]]; then
+  if [[ ! -f "$INPUT_DISK" ]]; then
+    echo "Input disk not found: $INPUT_DISK" >&2
+    exit 1
+  fi
+else
+  need_cmd qemu-img
+
+  if [[ ! -f "$INPUT_VHD" ]]; then
+    echo "Input VHD not found: $INPUT_VHD" >&2
+    echo "Re-run without --skip-build, or set --input-vhd to an existing file." >&2
+    exit 1
+  fi
 fi
 
-if [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_VHD" != "$STAGING_DIR/$(basename "$INPUT_VHD")" ]]; then
+if [[ -z "$INPUT_DISK" ]] && [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_VHD" != "$STAGING_DIR/$(basename "$INPUT_VHD")" ]]; then
   staged_input_vhd="$STAGING_DIR/$(basename "$INPUT_VHD")"
   log_phase "Copying input VHD to staging area"
   cp -f "$INPUT_VHD" "$staged_input_vhd"
   INPUT_VHD="$staged_input_vhd"
 fi
 
-  if [[ -n "$INPUT_DISK" ]]; then
-    if [[ ! -f "$INPUT_DISK" ]]; then
-      echo "Input disk not found: $INPUT_DISK" >&2
-      exit 1
-    fi
-    if [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_DISK" != "$STAGING_DIR/$(basename "$INPUT_DISK")" ]]; then
-      staged_input_disk="$STAGING_DIR/$(basename "$INPUT_DISK")"
-      log_phase "Copying input disk to staging area"
-      cp -f "$INPUT_DISK" "$staged_input_disk"
-      INPUT_DISK="$staged_input_disk"
-    fi
-  fi
+if [[ -n "$INPUT_DISK" ]] && [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_DISK" != "$STAGING_DIR/$(basename "$INPUT_DISK")" ]]; then
+  staged_input_disk="$STAGING_DIR/$(basename "$INPUT_DISK")"
+  log_phase "Copying input disk to staging area"
+  cp -f "$INPUT_DISK" "$staged_input_disk"
+  INPUT_DISK="$staged_input_disk"
+fi
 
 mkdir -p "$WORKDIR"
 mkdir -p "$(dirname "$BASE_ISO")"
@@ -350,11 +356,12 @@ done
 
 mkdir -p "$ISO_ROOT/uftc"
 
-log_phase "Converting $INPUT_VHD to raw image"
-qemu-img convert -f vpc -O raw "$INPUT_VHD" "$RAW_IMAGE"
 if [[ -n "$INPUT_DISK" ]]; then
   log_phase "Using raw A/B disk image directly: $INPUT_DISK"
   cp "$INPUT_DISK" "$RAW_IMAGE"
+else
+  log_phase "Converting $INPUT_VHD to raw image"
+  qemu-img convert -f vpc -O raw "$INPUT_VHD" "$RAW_IMAGE"
 fi
 
 log_phase "Compressing installer payload (zstd level ${ZSTD_LEVEL}, threads: all)"
