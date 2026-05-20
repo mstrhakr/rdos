@@ -11,6 +11,7 @@ RUN_MODE="local"
 SHELLCHECK_SEVERITY=""
 
 OUTPUT_VHD="uftc.vhd"
+OUTPUT_AB="uftc-ab.img"
 OUTPUT_ISO="uftc-installer.iso"
 
 NO_CACHE=0
@@ -37,6 +38,7 @@ Options:
   --no-deps            Run only selected target without earlier steps
   --with-deps          Run selected target with prerequisite steps (default)
   --output-vhd PATH    VHD artifact path (default: uftc.vhd)
+  --output-ab PATH     A/B disk artifact path (default: uftc-ab.img)
   --output-iso PATH    ISO artifact path (default: uftc-installer.iso)
   --no-cache           Pass no-cache to build scripts
   --no-staging         Pass no-staging to build scripts
@@ -47,7 +49,7 @@ Examples:
   ./ci/pipeline.sh all
   ./ci/pipeline.sh iso-test
   ./ci/pipeline.sh iso-test --no-deps
-  ./ci/pipeline.sh build-iso --with-deps --output-vhd uftc.vhd --output-iso uftc-installer.iso
+  ./ci/pipeline.sh build-iso --with-deps --output-vhd uftc.vhd --output-ab uftc-ab.img --output-iso uftc-installer.iso
 EOF
 }
 
@@ -87,6 +89,11 @@ while [[ $# -gt 0 ]]; do
     --output-vhd)
       [[ $# -lt 2 ]] && { echo "Missing value for --output-vhd" >&2; exit 1; }
       OUTPUT_VHD="$2"
+      shift 2
+      ;;
+    --output-ab)
+      [[ $# -lt 2 ]] && { echo "Missing value for --output-ab" >&2; exit 1; }
+      OUTPUT_AB="$2"
       shift 2
       ;;
     --output-iso)
@@ -139,12 +146,12 @@ run_pretest() {
 }
 
 run_build_img() {
-  local args=(--output "$OUTPUT_VHD" --force)
+  local args=(--output "$OUTPUT_VHD" --output-ab "$OUTPUT_AB" --ab --force)
   [[ "$NO_CACHE" == "1" ]] && args+=(--no-cache)
   [[ "$NO_STAGING" == "1" ]] && args+=(--no-staging)
   [[ -n "$STAGING_DIR" ]] && args+=(--staging-dir "$STAGING_DIR")
 
-  log "Step build-img: building VHD artifact"
+  log "Step build-img: building VHD and A/B disk artifacts"
   bash ./build.sh "${args[@]}"
 }
 
@@ -154,12 +161,12 @@ run_img_test() {
 }
 
 run_build_iso() {
-  local args=(--skip-build --input-vhd "$OUTPUT_VHD" --output-iso "$OUTPUT_ISO")
+  local args=(--skip-build --input-disk "$OUTPUT_AB" --output-iso "$OUTPUT_ISO")
   [[ "$NO_CACHE" == "1" ]] && args+=(--no-cache)
   [[ "$NO_STAGING" == "1" ]] && args+=(--no-staging)
   [[ -n "$STAGING_DIR" ]] && args+=(--staging-dir "$STAGING_DIR")
 
-  log "Step build-iso: building installer ISO artifact"
+  log "Step build-iso: building installer ISO from A/B disk artifact"
   bash ./build-installer-iso.sh "${args[@]}"
 }
 
