@@ -1,0 +1,13 @@
+[Unit]
+Description=UFTC OTA Update Timer
+Documentation=https://github.com/mstrhakr/uftc
+ConditionACPower=true
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+RandomizedDelaySec=1800
+Persistent=false
+Unit=tc-ota-updater.service
+
+[Install]
+WantedBy=timers.target

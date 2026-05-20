@@ -1,0 +1,14 @@
+[Unit]
+Description=UFTC OTA Update Client
+Documentation=https://github.com/mstrhakr/uftc
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/boot/grub/grubenv
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/tc-ota-updater
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tc-ota
+TimeoutStartSec=3600
