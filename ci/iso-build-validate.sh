@@ -231,14 +231,16 @@ if ! xorriso -indev "$OUTPUT_ISO" -find /syslinux/isolinux.bin -exec report_lba 
 fi
 log "BIOS boot asset check passed"
 
-if xorriso -indev "$OUTPUT_ISO" -find /EFI/boot/bootx64.efi -exec report_lba >/dev/null 2>&1; then
+if xorriso -indev "$OUTPUT_ISO" -find /boot/grub/efi.img -exec report_lba >/dev/null 2>&1; then
   :
-elif xorriso -indev "$OUTPUT_ISO" -find /EFI/BOOT/BOOTX64.EFI -exec report_lba >/dev/null 2>&1; then
+elif xorriso -indev "$OUTPUT_ISO" -find /boot/grub/EFI.img -exec report_lba >/dev/null 2>&1; then
   :
-elif xorriso -indev "$OUTPUT_ISO" -find /EFI/BOOT/BOOTx64.EFI -exec report_lba >/dev/null 2>&1; then
+elif xorriso -indev "$OUTPUT_ISO" -find /EFI/boot/efi.img -exec report_lba >/dev/null 2>&1; then
+  :
+elif xorriso -indev "$OUTPUT_ISO" -find /EFI/BOOT/EFI.img -exec report_lba >/dev/null 2>&1; then
   :
 else
-  echo "Validation failed: UEFI boot asset BOOTx64.EFI not found" >&2
+  echo "Validation failed: UEFI boot image efi.img not found" >&2
   exit 1
 fi
 log "UEFI boot asset check passed"

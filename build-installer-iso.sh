@@ -464,20 +464,26 @@ fi
 
 ISOLINUX_BIN="syslinux/isolinux.bin"
 BOOT_CAT="syslinux/boot.cat"
+EFI_BOOT_IMG=""
 
 if [[ ! -f "$ISO_ROOT/$ISOLINUX_BIN" ]]; then
   echo "Expected BIOS boot file not found: $ISOLINUX_BIN" >&2
   exit 1
 fi
 
-EFI_BOOT_REL=""
-while IFS= read -r efi_file; do
-  EFI_BOOT_REL="${efi_file#"$ISO_ROOT"/}"
-  break
-done < <(find "$ISO_ROOT" -type f \( -iname 'bootx64.efi' -o -iname 'BOOTx64.EFI' \))
+for candidate in \
+  "$ISO_ROOT/boot/grub/efi.img" \
+  "$ISO_ROOT/boot/grub/EFI.img" \
+  "$ISO_ROOT/EFI/boot/efi.img" \
+  "$ISO_ROOT/EFI/BOOT/EFI.img"; do
+  if [[ -f "$candidate" ]]; then
+    EFI_BOOT_IMG="${candidate#"$ISO_ROOT"/}"
+    break
+  fi
+done
 
-if [[ -z "$EFI_BOOT_REL" ]]; then
-  echo "Expected UEFI boot file BOOTx64.EFI was not found in extracted ISO." >&2
+if [[ -z "$EFI_BOOT_IMG" ]]; then
+  echo "Expected UEFI boot image efi.img was not found in extracted ISO." >&2
   exit 1
 fi
 
@@ -492,7 +498,7 @@ xorriso -as mkisofs \
   -boot-load-size 4 \
   -boot-info-table \
   -eltorito-alt-boot \
-  -e "$EFI_BOOT_REL" \
+  -e "$EFI_BOOT_IMG" \
   -no-emul-boot \
   "$ISO_ROOT"
 
