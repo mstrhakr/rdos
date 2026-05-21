@@ -55,6 +55,7 @@ confirm_msg() {
 
 run_with_gauge() {
   local target_disk="$1"
+  local expected_bytes="${2:-}"
 
   if [[ "$UI_AVAILABLE" != "1" ]] || ! declare -F ui_progress_gauge >/dev/null 2>&1; then
     zstd -d -c "$IMAGE_ZST" | dd of="/dev/$target_disk" bs=16M status=progress conv=fsync
@@ -62,7 +63,7 @@ run_with_gauge() {
     return
   fi
 
-  ui_progress_gauge "$target_disk" "$IMAGE_ZST"
+  ui_progress_gauge "$target_disk" "$IMAGE_ZST" "$expected_bytes"
 }
 
 prepare_target_disk() {
@@ -111,8 +112,15 @@ sanitize_disk_name() {
 }
 
 IMAGE_ZST="/run/live/medium/uftc/uftc.img.zst"
+IMAGE_SIZE_FILE="/run/live/medium/uftc/uftc.img.size"
 if [[ ! -f "$IMAGE_ZST" ]]; then
   IMAGE_ZST="/lib/live/mount/medium/uftc/uftc.img.zst"
+  IMAGE_SIZE_FILE="/lib/live/mount/medium/uftc/uftc.img.size"
+fi
+
+EXPECTED_IMAGE_BYTES=""
+if [[ -f "$IMAGE_SIZE_FILE" ]]; then
+  EXPECTED_IMAGE_BYTES="$(tr -dc '0-9' < "$IMAGE_SIZE_FILE")"
 fi
 
 if [[ ! -f "$IMAGE_ZST" ]]; then
@@ -248,7 +256,7 @@ if ! prepare_target_disk "$TARGET_DISK"; then
   poweroff -f
 fi
 
-run_with_gauge "$TARGET_DISK"
+run_with_gauge "$TARGET_DISK" "$EXPECTED_IMAGE_BYTES"
 
 if [[ "$MODE" == "auto" ]]; then
   echo "Install complete. Powering off."

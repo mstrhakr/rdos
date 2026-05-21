@@ -7,3 +7,4 @@ tcconfig*
 .installer-work
 *.iso
 *.img
+*.raw

@@ -1,237 +1,324 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# BuildKit enables parallel layer execution, cache mounts, and better layer caching.
+# Run the full build as root to avoid piecemeal sudo permissions for loop/mount operations.
+if [[ "$EUID" -ne 0 ]]; then
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo "This script requires root privileges and sudo is not installed." >&2
+        echo "Run as root, or install sudo and rerun." >&2
+        exit 1
+    fi
+    exec sudo -E "$0" "$@"
+fi
+
 export DOCKER_BUILDKIT=1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-D2VM_WRAPPER="$SCRIPT_DIR/d2vm"
 BUILD_AB_DISK_SCRIPT="$SCRIPT_DIR/build-ab-disk.sh"
 
 log_phase() {
-	printf '\n[%s] %s\n' "$(date +'%H:%M:%S')" "$1"
+    printf '\n[%s] %s\n' "$(date +'%H:%M:%S')" "$1"
 }
 
 run_with_heartbeat() {
-	local label="$1"
-	shift
+    local label="$1"
+    shift
 
-	log_phase "$label"
-	"$@" &
-	local cmd_pid=$!
-	local started_at
-	started_at="$(date +%s)"
+    log_phase "$label"
+    "$@" &
+    local cmd_pid=$!
+    local started_at
+    started_at="$(date +%s)"
 
-	while kill -0 "$cmd_pid" 2>/dev/null; do
-		sleep 15
-		if kill -0 "$cmd_pid" 2>/dev/null; then
-			local now elapsed
-			now="$(date +%s)"
-			elapsed=$((now - started_at))
-			printf '[%s] %s still running (%ss elapsed)\n' "$(date +'%H:%M:%S')" "$label" "$elapsed"
-		fi
-	done
+    while kill -0 "$cmd_pid" 2>/dev/null; do
+        sleep 15
+        if kill -0 "$cmd_pid" 2>/dev/null; then
+            local now elapsed
+            now="$(date +%s)"
+            elapsed=$((now - started_at))
+            printf '[%s] %s still running (%ss elapsed)\n' "$(date +'%H:%M:%S')" "$label" "$elapsed"
+        fi
+    done
 
-	wait "$cmd_pid"
+    wait "$cmd_pid"
 }
 
 IMAGE_NAME="uftc"
-OUTPUT_VHD="uftc.vhd"
+RECOVERY_IMAGE_NAME="uftc-recovery"
+OUTPUT_PROD_RAW="uftc-prod.raw"
+OUTPUT_RECOVERY_RAW="recovery.raw"
+OUTPUT_AB="uftc-ab.img"
 FORCE_OVERWRITE=0
 SKIP_DOCKER_BUILD=0
-NO_STAGING=0
 NO_CACHE=0
-STAGING_DIR=""
-AUTO_STAGING_DIR=""
 BUILD_AB=0
-OUTPUT_AB="uftc-ab.img"
+
+PARTITION_TOOL="partscan"
 
 usage() {
-	cat <<'EOF'
-Usage: ./build.sh [options] [-- <d2vm args>]
+    cat <<'EOF'
+Usage: ./build.sh [options]
 
-Builds the UFTC Docker image, then converts it to a bootable VHD.
+Builds UFTC Docker images and assembles raw disk artifacts (no d2vm/VHD).
 
 Options:
-	-o, --output PATH          Output VHD path (default: uftc.vhd)
-			--image-name NAME      Docker image name/tag base (default: uftc)
-			--skip-docker-build    Reuse existing Docker image and only run d2vm convert
-			--staging-dir PATH     Run d2vm conversion in PATH, then copy result to --output
-			--no-staging           Disable automatic /mnt performance staging
-			--no-cache             Rebuild Docker image without cache
-	-f, --force                Overwrite an existing output VHD
-	-h, --help                 Show this help message
-
-Any arguments after -- are passed directly to d2vm convert.
+  -o, --output PATH          Output production raw disk path (default: uftc-prod.raw)
+      --output-prod-raw PATH Output production raw disk path (default: uftc-prod.raw)
+      --output-recovery-raw PATH
+                             Output recovery raw disk path (default: recovery.raw)
+      --image-name NAME      Production Docker image name/tag base (default: uftc)
+      --skip-docker-build    Reuse existing Docker images and only assemble raw artifacts
+      --no-cache             Rebuild Docker images without cache
+      --ab                   Also assemble A/B disk artifact (uftc-ab.img)
+      --output-ab PATH       Output A/B disk path (default: uftc-ab.img)
+  -f, --force                Overwrite existing outputs
+  -h, --help                 Show this help message
 EOF
 }
 
-usage_ab_note() {
-	echo "  --ab                     Also build recovery image and assemble A/B disk (uftc-ab.img)"
-	echo "  --output-ab PATH         Output A/B disk path (default: uftc-ab.img)"
+wait_for_block_device() {
+    local dev_path="$1"
+    local timeout_sec="${2:-30}"
+    local i
+
+    for ((i=0; i<timeout_sec; i++)); do
+        if [[ -b "$dev_path" ]]; then
+            return 0
+        fi
+        if command -v udevadm >/dev/null 2>&1; then
+            udevadm settle 2>/dev/null || true
+        fi
+        sleep 1
+    done
+
+    return 1
 }
-D2VM_ARGS=()
+
+prepare_loop_partitions() {
+    local loop_dev="$1"
+    local mapper_probe
+    mapper_probe="/dev/mapper/$(basename "$loop_dev")p1"
+
+    if command -v kpartx >/dev/null 2>&1; then
+        if kpartx -as "$loop_dev" >/dev/null 2>&1 || kpartx -a "$loop_dev" >/dev/null 2>&1; then
+            if command -v udevadm >/dev/null 2>&1; then
+                udevadm settle 2>/dev/null || true
+            fi
+            if [[ -b "$mapper_probe" ]]; then
+                PARTITION_TOOL="kpartx"
+                return 0
+            fi
+            kpartx -d "$loop_dev" >/dev/null 2>&1 || true
+        fi
+    fi
+
+    PARTITION_TOOL="partscan"
+    partprobe "$loop_dev" 2>/dev/null || true
+    if command -v partx >/dev/null 2>&1; then
+        partx -a "$loop_dev" 2>/dev/null || partx -u "$loop_dev" 2>/dev/null || true
+    fi
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm settle 2>/dev/null || true
+    fi
+}
+
+partition_device() {
+    local loop_dev="$1"
+    local part_num="$2"
+
+    if [[ "$PARTITION_TOOL" == "kpartx" ]]; then
+        printf '/dev/mapper/%s' "$(basename "$loop_dev")p${part_num}"
+    else
+        printf '%sp%s' "$loop_dev" "$part_num"
+    fi
+}
+
+extract_image_rootfs() {
+    local image_name="$1"
+    local target_dir="$2"
+    local cid
+
+    cid=$(docker create "$image_name")
+    docker export "$cid" | tar -xpf - -C "$target_dir"
+    docker rm "$cid" >/dev/null
+}
+
+build_source_raw_image() {
+    local image_name="$1"
+    local output_raw="$2"
+    local disk_size="$3"
+    local boot_mb="$4"
+
+    local work_dir loop_dev p1 p2 kernel_path initrd_path
+    work_dir="$(mktemp -d /var/tmp/uftc-src.XXXXXX)"
+    loop_dev=""
+
+    cleanup_source_raw() {
+        set +e
+        umount -l "$work_dir/boot" 2>/dev/null || true
+        umount -l "$work_dir/root" 2>/dev/null || true
+        if [[ "$PARTITION_TOOL" == "kpartx" ]] && [[ -n "$loop_dev" ]]; then
+            kpartx -d "$loop_dev" >/dev/null 2>&1 || true
+        fi
+        [[ -n "$loop_dev" ]] && losetup -d "$loop_dev" 2>/dev/null || true
+        rm -rf "$work_dir"
+    }
+    trap cleanup_source_raw RETURN
+
+    rm -f "$output_raw"
+    truncate -s "$disk_size" "$output_raw"
+
+    sgdisk --zap-all "$output_raw" >/dev/null
+    sgdisk \
+        -n 1:2048:+"${boot_mb}"M -t 1:ef00 -c 1:BOOT \
+        -n 2:0:0               -t 2:8300 -c 2:ROOT \
+        "$output_raw" >/dev/null
+
+    loop_dev=$(losetup --find --show --partscan "$output_raw")
+    prepare_loop_partitions "$loop_dev"
+
+    p1="$(partition_device "$loop_dev" 1)"
+    p2="$(partition_device "$loop_dev" 2)"
+
+    wait_for_block_device "$p1" 30 || { echo "Partition node $p1 did not appear in time" >&2; return 1; }
+    wait_for_block_device "$p2" 30 || { echo "Partition node $p2 did not appear in time" >&2; return 1; }
+
+    mkfs.fat -F32 "$p1" >/dev/null
+    mkfs.ext4 -q "$p2"
+
+    mkdir -p "$work_dir/boot" "$work_dir/root"
+    mount "$p2" "$work_dir/root"
+    mount "$p1" "$work_dir/boot"
+
+    extract_image_rootfs "$image_name" "$work_dir/root"
+
+    kernel_path=""
+    initrd_path=""
+    if [[ -d "$work_dir/root/boot" ]]; then
+        kernel_path=$(find "$work_dir/root/boot" -maxdepth 1 -type f -name 'vmlinuz*' 2>/dev/null | sort -V | tail -1)
+        initrd_path=$(find "$work_dir/root/boot" -maxdepth 1 -type f \( -name 'initrd*' -o -name 'initramfs*' \) 2>/dev/null | sort -V | tail -1)
+    fi
+
+    [[ -n "$kernel_path" ]] || { echo "Kernel not found in /boot for image $image_name (install a kernel package in the image build)" >&2; return 1; }
+    [[ -n "$initrd_path" ]] || { echo "Initrd/initramfs not found in /boot for image $image_name (install a kernel package that provides initramfs)" >&2; return 1; }
+
+    cp "$kernel_path" "$work_dir/boot/vmlinuz"
+    cp "$initrd_path" "$work_dir/boot/initrd.img"
+
+    umount "$work_dir/boot"
+    umount "$work_dir/root"
+
+    if [[ "$PARTITION_TOOL" == "kpartx" ]]; then
+        kpartx -d "$loop_dev" >/dev/null 2>&1 || true
+    fi
+    losetup -d "$loop_dev"
+    loop_dev=""
+}
+
 while [[ $# -gt 0 ]]; do
-	case "$1" in
-		-o|--output)
-			if [[ $# -lt 2 ]]; then
-				echo "Missing value for $1" >&2
-				exit 1
-			fi
-			OUTPUT_VHD="$2"
-			shift 2
-			;;
-		--image-name)
-			if [[ $# -lt 2 ]]; then
-				echo "Missing value for $1" >&2
-				exit 1
-			fi
-			IMAGE_NAME="$2"
-			shift 2
-			;;
-		--skip-docker-build)
-			SKIP_DOCKER_BUILD=1
-			shift
-			;;
-		--staging-dir)
-			if [[ $# -lt 2 ]]; then
-				echo "Missing value for $1" >&2
-				exit 1
-			fi
-			STAGING_DIR="$2"
-			shift 2
-			;;
-		--no-staging)
-			NO_STAGING=1
-			shift
-			;;
-		--no-cache)
-			NO_CACHE=1
-			shift
-			;;
-		-f|--force)
-			FORCE_OVERWRITE=1
-			shift
-			;;
-		-h|--help)
-			usage
-			exit 0
-			;;
-		--ab)
-			BUILD_AB=1
-			shift
-			;;
-		--output-ab)
-			if [[ $# -lt 2 ]]; then
-				echo "Missing value for $1" >&2
-				exit 1
-			fi
-			OUTPUT_AB="$2"
-			shift 2
-			;;
-		--)
-			shift
-			D2VM_ARGS+=("$@")
-			break
-			;;
-		*)
-			D2VM_ARGS+=("$1")
-			shift
-			;;
-	esac
+    case "$1" in
+        -o|--output|--output-prod-raw)
+            [[ $# -lt 2 ]] && { echo "Missing value for $1" >&2; exit 1; }
+            OUTPUT_PROD_RAW="$2"
+            shift 2
+            ;;
+        --output-recovery-raw)
+            [[ $# -lt 2 ]] && { echo "Missing value for $1" >&2; exit 1; }
+            OUTPUT_RECOVERY_RAW="$2"
+            shift 2
+            ;;
+        --image-name)
+            [[ $# -lt 2 ]] && { echo "Missing value for $1" >&2; exit 1; }
+            IMAGE_NAME="$2"
+            shift 2
+            ;;
+        --skip-docker-build)
+            SKIP_DOCKER_BUILD=1
+            shift
+            ;;
+        --no-cache)
+            NO_CACHE=1
+            shift
+            ;;
+        --ab)
+            BUILD_AB=1
+            shift
+            ;;
+        --output-ab)
+            [[ $# -lt 2 ]] && { echo "Missing value for $1" >&2; exit 1; }
+            OUTPUT_AB="$2"
+            shift 2
+            ;;
+        -f|--force)
+            FORCE_OVERWRITE=1
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
 done
 
-if [[ -f "$OUTPUT_VHD" ]] && [[ "$FORCE_OVERWRITE" != "1" ]]; then
-	echo "Output already exists: $OUTPUT_VHD" >&2
-	echo "Use --force to overwrite, or choose a different --output path." >&2
-	exit 1
-fi
+for cmd in sgdisk mkfs.fat mkfs.ext4 losetup partprobe qemu-img rsync grub-install grub-editenv tar; do
+    command -v "$cmd" >/dev/null 2>&1 || { echo "Missing required command: $cmd" >&2; exit 1; }
+done
 
 if [[ "$SKIP_DOCKER_BUILD" != "1" ]]; then
-	DOCKER_BUILD_ARGS=()
-	if [[ "$NO_CACHE" == "1" ]]; then
-		DOCKER_BUILD_ARGS+=("--no-cache")
-	fi
-	run_with_heartbeat "Building Docker image ($IMAGE_NAME)" sudo docker build "${DOCKER_BUILD_ARGS[@]}" . -t "$IMAGE_NAME"
+    docker_args=()
+    [[ "$NO_CACHE" == "1" ]] && docker_args+=(--no-cache)
+    run_with_heartbeat "Building production Docker image ($IMAGE_NAME)" docker build "${docker_args[@]}" . -t "$IMAGE_NAME"
+
+    if [[ "$BUILD_AB" == "1" ]]; then
+        run_with_heartbeat "Building recovery Docker image ($RECOVERY_IMAGE_NAME)" docker build "${docker_args[@]}" -f Dockerfile.recovery . -t "$RECOVERY_IMAGE_NAME"
+    fi
 else
-	log_phase "Skipping Docker build; reusing image ${IMAGE_NAME}:latest"
+    log_phase "Skipping Docker build; reusing image ${IMAGE_NAME}:latest"
 fi
 
-if [[ -f "$OUTPUT_VHD" ]]; then
-	log_phase "Removing existing output VHD: $OUTPUT_VHD"
-	rm -f "$OUTPUT_VHD"
+if [[ -f "$OUTPUT_PROD_RAW" ]] && [[ "$FORCE_OVERWRITE" != "1" ]]; then
+    echo "Output already exists: $OUTPUT_PROD_RAW" >&2
+    echo "Use --force to overwrite, or choose a different --output path." >&2
+    exit 1
 fi
 
-if [[ -z "$STAGING_DIR" ]] && [[ "$NO_STAGING" != "1" ]] && [[ "$SCRIPT_DIR" == /mnt/* ]]; then
-	AUTO_STAGING_DIR="$(mktemp -d /var/tmp/uftc-d2vm.XXXXXX)"
-	STAGING_DIR="$AUTO_STAGING_DIR"
-	log_phase "Detected /mnt workspace. Using fast staging at $STAGING_DIR for d2vm conversion"
+if [[ -f "$OUTPUT_PROD_RAW" ]]; then
+    rm -f "$OUTPUT_PROD_RAW"
 fi
+run_with_heartbeat "Assembling production raw source image" build_source_raw_image "${IMAGE_NAME}:latest" "$OUTPUT_PROD_RAW" 14G 4000
+log_phase "Production raw image ready: $OUTPUT_PROD_RAW"
 
-if [[ -n "$STAGING_DIR" ]]; then
-	mkdir -p "$STAGING_DIR"
-	staged_output_name="$(basename "$OUTPUT_VHD")"
-	if [[ -f "$STAGING_DIR/$staged_output_name" ]]; then
-		rm -f "$STAGING_DIR/$staged_output_name"
-	fi
-
-	(
-		cd "$STAGING_DIR"
-		run_with_heartbeat "Converting Docker image to VHD via d2vm" \
-			sudo "$D2VM_WRAPPER" convert "${IMAGE_NAME}:latest" -o "$staged_output_name" --bootloader grub --boot-size 4000 --size 14G --network-manager none "${D2VM_ARGS[@]}"
-	)
-
-	log_phase "Copying staged VHD to destination: $OUTPUT_VHD"
-	mv -f "$STAGING_DIR/$staged_output_name" "$OUTPUT_VHD"
-
-	if [[ -n "$AUTO_STAGING_DIR" ]]; then
-		rmdir "$AUTO_STAGING_DIR" 2>/dev/null || true
-	fi
-else
-	run_with_heartbeat "Converting Docker image to VHD via d2vm" \
-		sudo "$D2VM_WRAPPER" convert "${IMAGE_NAME}:latest" -o "$OUTPUT_VHD" --bootloader grub --boot-size 4000 --size 14G --network-manager none "${D2VM_ARGS[@]}"
-fi
-
-log_phase "Build complete: $OUTPUT_VHD"
-
-# ---------------------------------------------------------------------------
-# A/B disk assembly (optional, enabled with --ab)
-# ---------------------------------------------------------------------------
 if [[ "$BUILD_AB" == "1" ]]; then
-	RECOVERY_VHD="recovery.vhd"
-	RECOVERY_IMAGE_NAME="uftc-recovery"
+    if [[ -f "$OUTPUT_RECOVERY_RAW" ]] && [[ "$FORCE_OVERWRITE" != "1" ]]; then
+        echo "Output already exists: $OUTPUT_RECOVERY_RAW" >&2
+        echo "Use --force to overwrite, or choose a different --output-recovery-raw path." >&2
+        exit 1
+    fi
 
-	if [[ -f "$RECOVERY_VHD" ]] && [[ "$FORCE_OVERWRITE" != "1" ]]; then
-		log_phase "Reusing existing recovery VHD: $RECOVERY_VHD (use --force to rebuild)"
-	else
-		log_phase "Building recovery Docker image ($RECOVERY_IMAGE_NAME)"
-		DOCKER_RECOVERY_ARGS=()
-		if [[ "$NO_CACHE" == "1" ]]; then
-			DOCKER_RECOVERY_ARGS+=("--no-cache")
-		fi
-		sudo docker build "${DOCKER_RECOVERY_ARGS[@]}" -f Dockerfile.recovery . -t "$RECOVERY_IMAGE_NAME"
+    if [[ -f "$OUTPUT_AB" ]] && [[ "$FORCE_OVERWRITE" != "1" ]]; then
+        echo "Output already exists: $OUTPUT_AB" >&2
+        echo "Use --force to overwrite, or choose a different --output-ab path." >&2
+        exit 1
+    fi
 
-		if [[ -f "$RECOVERY_VHD" ]]; then
-			rm -f "$RECOVERY_VHD"
-		fi
+    [[ -f "$OUTPUT_RECOVERY_RAW" ]] && rm -f "$OUTPUT_RECOVERY_RAW"
+    [[ -f "$OUTPUT_AB" ]] && rm -f "$OUTPUT_AB"
 
-		run_with_heartbeat "Converting recovery image to VHD via d2vm" \
-			sudo "$D2VM_WRAPPER" convert "${RECOVERY_IMAGE_NAME}:latest" -o "$RECOVERY_VHD" \
-			    --bootloader grub --boot-size 200 --size 2G --network-manager none
-	fi
+    run_with_heartbeat "Assembling recovery raw source image" build_source_raw_image "${RECOVERY_IMAGE_NAME}:latest" "$OUTPUT_RECOVERY_RAW" 2G 200
+    log_phase "Recovery raw image ready: $OUTPUT_RECOVERY_RAW"
 
-	if [[ -f "$OUTPUT_AB" ]] && [[ "$FORCE_OVERWRITE" != "1" ]]; then
-		log_phase "Removing existing A/B disk: $OUTPUT_AB"
-		rm -f "$OUTPUT_AB"
-	fi
+    run_with_heartbeat "Assembling A/B+Recovery disk" \
+        "$BUILD_AB_DISK_SCRIPT" \
+            --prod-raw "$OUTPUT_PROD_RAW" \
+            --recovery-raw "$OUTPUT_RECOVERY_RAW" \
+            --output "$OUTPUT_AB"
 
-	run_with_heartbeat "Assembling A/B+Recovery disk" \
-		sudo "$BUILD_AB_DISK_SCRIPT" \
-		    --prod-vhd "$OUTPUT_VHD" \
-		    --recovery-vhd "$RECOVERY_VHD" \
-		    --output "$OUTPUT_AB"
-
-	log_phase "A/B disk ready: $OUTPUT_AB"
+    log_phase "A/B disk ready: $OUTPUT_AB"
 fi

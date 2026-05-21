@@ -10,3 +10,4 @@ tcconfig*
 *.AppImage
 *.iso
 *.img
+*.raw

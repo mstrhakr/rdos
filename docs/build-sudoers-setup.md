@@ -28,9 +28,13 @@ The script writes `/etc/sudoers.d/uftc-build-nopasswd` and validates it with `vi
 
 Rules are static and limited to build pipeline operations:
 
-- `docker build ...`
-- `./d2vm convert ...`
-- `./build-ab-disk.sh` (default and explicit `--prod-vhd/--recovery-vhd/--output` forms)
+- `./build.sh` (raw production/recovery image assembly)
+- `./build-installer-iso.sh` (installer payload generation)
+- `./build-ab-disk.sh` (A/B composition from `--prod-raw/--recovery-raw`)
+
+`build.sh` now self-elevates once (`sudo`) and performs privileged loop/mount
+operations in that elevated context. The sudoers policy therefore grants the
+top-level build scripts rather than individual helper binaries.
 
 ## Removal
 

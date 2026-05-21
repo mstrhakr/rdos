@@ -238,6 +238,7 @@ ui_simple_disk_menu() {
 ui_progress_gauge() {
   local target_disk="$1"
   local image_path="$2"
+  local provided_expected_bytes="${3:-}"
   local log_file="${LOG_FILE:-/var/log/uftc-installer.log}"
   local dev="/dev/$target_disk"
   local expected_bytes=""
@@ -267,6 +268,11 @@ ui_progress_gauge() {
 
   # Try to read uncompressed image size from zstd metadata.
   _detect_expected_bytes() {
+    if [[ -n "$provided_expected_bytes" ]] && [[ "$provided_expected_bytes" =~ ^[0-9]+$ ]] && (( provided_expected_bytes > 0 )); then
+      printf '%s\n' "$provided_expected_bytes"
+      return 0
+    fi
+
     local line value unit
     line="$(zstd --list -v "$image_path" 2>>"$log_file" | awk '/^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]/ {print; exit}')"
     if [[ -n "$line" ]]; then
@@ -281,8 +287,8 @@ ui_progress_gauge() {
       fi
     fi
 
-    # Fallback: UFTC images are built as fixed 14 GiB VHDs.
-    _size_to_bytes "14" "GiB"
+    # If metadata parsing fails, run without a fixed total instead of guessing.
+    echo 0
   }
 
   _read_written_sectors() {

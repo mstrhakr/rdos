@@ -10,7 +10,6 @@ WITH_DEPS=1
 RUN_MODE="local"
 SHELLCHECK_SEVERITY=""
 
-OUTPUT_VHD="uftc.vhd"
 OUTPUT_AB="uftc-ab.img"
 OUTPUT_ISO="uftc-installer.iso"
 
@@ -25,7 +24,7 @@ Usage: ./ci/pipeline.sh [target] [options]
 Targets:
   pretest    Run preflight validation only
   build-img  Build image artifact only (build.sh)
-  img-test   Validate image artifact only
+  img-test   Validate image artifact only (alias for ab-test)
   ab-test    Validate A/B disk artifact only
   build-iso  Build installer ISO only (build-installer-iso.sh)
   iso-test   Validate installer ISO only
@@ -38,7 +37,6 @@ Options:
                        (error|warning|info|style)
   --no-deps            Run only selected target without earlier steps
   --with-deps          Run selected target with prerequisite steps (default)
-  --output-vhd PATH    VHD artifact path (default: uftc.vhd)
   --output-ab PATH     A/B disk artifact path (default: uftc-ab.img)
   --output-iso PATH    ISO artifact path (default: uftc-installer.iso)
   --no-cache           Pass no-cache to build scripts
@@ -50,7 +48,7 @@ Examples:
   ./ci/pipeline.sh all
   ./ci/pipeline.sh iso-test
   ./ci/pipeline.sh iso-test --no-deps
-  ./ci/pipeline.sh build-iso --with-deps --output-vhd uftc.vhd --output-ab uftc-ab.img --output-iso uftc-installer.iso
+  ./ci/pipeline.sh build-iso --with-deps --output-ab uftc-ab.img --output-iso uftc-installer.iso
 EOF
 }
 
@@ -86,11 +84,6 @@ while [[ $# -gt 0 ]]; do
     --with-deps)
       WITH_DEPS=1
       shift
-      ;;
-    --output-vhd)
-      [[ $# -lt 2 ]] && { echo "Missing value for --output-vhd" >&2; exit 1; }
-      OUTPUT_VHD="$2"
-      shift 2
       ;;
     --output-ab)
       [[ $# -lt 2 ]] && { echo "Missing value for --output-ab" >&2; exit 1; }
@@ -132,6 +125,10 @@ if [[ "$RUN_MODE" != "local" && "$RUN_MODE" != "ci" ]]; then
   exit 1
 fi
 
+if [[ "$TARGET_STEP" == "img-test" ]]; then
+  TARGET_STEP="ab-test"
+fi
+
 log() {
   printf '[%s] %s\n' "$(date +'%H:%M:%S')" "$1"
 }
@@ -147,18 +144,16 @@ run_pretest() {
 }
 
 run_build_img() {
-  local args=(--output "$OUTPUT_VHD" --output-ab "$OUTPUT_AB" --ab --force)
+  local args=(--output-ab "$OUTPUT_AB" --ab --force)
   [[ "$NO_CACHE" == "1" ]] && args+=(--no-cache)
-  [[ "$NO_STAGING" == "1" ]] && args+=(--no-staging)
-  [[ -n "$STAGING_DIR" ]] && args+=(--staging-dir "$STAGING_DIR")
 
-  log "Step build-img: building VHD and A/B disk artifacts"
+  log "Step build-img: building raw source and A/B disk artifacts"
   bash ./build.sh "${args[@]}"
 }
 
 run_img_test() {
-  log "Step img-test: validating VHD artifact"
-  bash ./ci/vhd-build-validate.sh --mode validate-only --output "$OUTPUT_VHD"
+  log "Step img-test: validating A/B disk artifact"
+  bash ./ci/ab-disk-validate.sh --output "$OUTPUT_AB"
 }
 
 run_ab_test() {
@@ -181,7 +176,7 @@ run_iso_test() {
   bash ./ci/iso-build-validate.sh --mode validate-only --payload-layout ab --output-iso "$OUTPUT_ISO"
 }
 
-steps=(pretest build-img img-test ab-test build-iso iso-test)
+steps=(pretest build-img ab-test build-iso iso-test)
 target_index=-1
 
 if [[ "$TARGET_STEP" == "all" ]]; then

@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Build a minimal unattended installer ISO that writes uftc.vhd to disk and powers off.
+# Build a minimal unattended installer ISO that writes a prebuilt A/B raw disk image to disk and powers off.
 
 CLONEZILLA_VERSION="${CLONEZILLA_VERSION:-3.3.1-35}"
 CLONEZILLA_ISO_URL_DEFAULT="https://downloads.sourceforge.net/project/clonezilla/clonezilla_live_stable/${CLONEZILLA_VERSION}/clonezilla-live-${CLONEZILLA_VERSION}-amd64.iso"
@@ -12,7 +12,7 @@ CLONEZILLA_ISO_URL="${CLONEZILLA_ISO_URL:-$CLONEZILLA_ISO_URL_DEFAULT}"
 CLONEZILLA_ISO_SHA256="${CLONEZILLA_ISO_SHA256:-}"
 CLONEZILLA_ALLOW_UNVERIFIED="${CLONEZILLA_ALLOW_UNVERIFIED:-1}"
 INPUT_VHD="${INPUT_VHD:-uftc.vhd}"
-INPUT_DISK="${INPUT_DISK:-}"
+INPUT_DISK="${INPUT_DISK:-uftc-ab.img}"
 OUTPUT_ISO="${OUTPUT_ISO:-uftc-installer.iso}"
 DEFAULT_WORKDIR=".installer-work"
 WORKDIR="${WORKDIR:-$DEFAULT_WORKDIR}"
@@ -30,6 +30,7 @@ BASE_ISO="$BASE_ISO_CACHE"
 ISO_ROOT="$WORKDIR/iso-root"
 RAW_IMAGE="$WORKDIR/uftc.img"
 COMPRESSED_IMAGE="$ISO_ROOT/uftc/uftc.img.zst"
+IMAGE_SIZE_METADATA="$ISO_ROOT/uftc/uftc.img.size"
 MIN_BASE_ISO_SIZE_BYTES=400000000
 
 usage() {
@@ -37,15 +38,15 @@ usage() {
 Usage: ./build-installer-iso.sh [options]
 
 Builds a Clonezilla-based unattended installer ISO for UFTC.
-By default, this script builds a fresh VHD first by invoking ./build.sh.
+By default, this script builds fresh raw A/B artifacts first by invoking ./build.sh --ab.
 
 Options:
-      --skip-build                 Skip invoking build.sh and use existing --input-vhd/--input-disk
+      --skip-build                 Skip invoking build.sh and use existing --input-disk/--input-vhd
       --build-script PATH          Path to build script (default: ./build.sh)
       --build-arg ARG              Pass one argument to build.sh (repeatable)
       --no-cache                   Build without Docker cache (alias for --build-arg --no-cache)
-      --input-vhd PATH             Input VHD path (default: uftc.vhd)
-     --input-disk PATH            Input raw disk image (A/B layout); skips qemu-img conversion
+      --input-vhd PATH             Input VHD path (legacy fallback; default: uftc.vhd)
+      --input-disk PATH            Input raw disk image (A/B layout; default: uftc-ab.img)
       --output-iso PATH            Output ISO path (default: uftc-installer.iso)
       --workdir PATH               Working directory for intermediate files
       --staging-dir PATH           Run ISO build work in PATH, then move final ISO to --output-iso
@@ -254,6 +255,7 @@ fi
 ISO_ROOT="$WORKDIR/iso-root"
 RAW_IMAGE="$WORKDIR/uftc.img"
 COMPRESSED_IMAGE="$ISO_ROOT/uftc/uftc.img.zst"
+IMAGE_SIZE_METADATA="$ISO_ROOT/uftc/uftc.img.size"
 
 if [[ "$SKIP_BUILD" != "1" ]]; then
   if [[ ! -x "$BUILD_SCRIPT" ]]; then
@@ -261,17 +263,17 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
     exit 1
   fi
 
-  build_output_vhd="$INPUT_VHD"
+  build_output_disk="$INPUT_DISK"
   if [[ -n "$STAGING_DIR" ]]; then
-    build_output_vhd="$STAGING_DIR/$(basename "$INPUT_VHD")"
+    build_output_disk="$STAGING_DIR/$(basename "$INPUT_DISK")"
   fi
 
-  log_phase "Building fresh VHD via $BUILD_SCRIPT"
-  "$BUILD_SCRIPT" --output "$build_output_vhd" --force "${BUILD_SCRIPT_ARGS[@]}"
-  INPUT_VHD="$build_output_vhd"
+  log_phase "Building fresh raw A/B disk via $BUILD_SCRIPT"
+  "$BUILD_SCRIPT" --ab --output-ab "$build_output_disk" --force "${BUILD_SCRIPT_ARGS[@]}"
+  INPUT_DISK="$build_output_disk"
 else
   if [[ -n "$INPUT_DISK" ]]; then
-    log_phase "Skipping VHD build; using existing raw disk $INPUT_DISK"
+    log_phase "Skipping build; using existing raw disk $INPUT_DISK"
   else
     log_phase "Skipping VHD build; using existing $INPUT_VHD"
   fi
@@ -366,6 +368,7 @@ fi
 
 log_phase "Compressing installer payload (zstd level ${ZSTD_LEVEL}, threads: all)"
 zstd -T0 "-${ZSTD_LEVEL}" -f "$RAW_IMAGE" -o "$COMPRESSED_IMAGE"
+stat -c%s "$RAW_IMAGE" > "$IMAGE_SIZE_METADATA"
 rm -f "$RAW_IMAGE"
 
 cp "$SCRIPT_DIR/tcfiles/installer-install.sh" "$ISO_ROOT/uftc/install.sh"

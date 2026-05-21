@@ -89,15 +89,15 @@ jobs:
           set -euo pipefail
           TARGET_DIR="${RUNNER_ARTIFACT_ROOT}/${GITHUB_SHA}"
           mkdir -p "$TARGET_DIR"
-          install -m 0644 uftc.vhd "$TARGET_DIR/uftc.vhd"
+          install -m 0644 uftc-ab.img "$TARGET_DIR/uftc-ab.img"
           install -m 0644 uftc-installer.iso "$TARGET_DIR/uftc-installer.iso"
-          ls -lh "$TARGET_DIR/uftc.vhd" "$TARGET_DIR/uftc-installer.iso"
+          ls -lh "$TARGET_DIR/uftc-ab.img" "$TARGET_DIR/uftc-installer.iso"
 
-      - name: Upload VHD artifact
+      - name: Upload A/B disk artifact
         uses: actions/upload-artifact@v4
         with:
-          name: uftc-vhd
-          path: uftc.vhd
+          name: uftc-ab
+          path: uftc-ab.img
           if-no-files-found: error
           retention-days: 7
 

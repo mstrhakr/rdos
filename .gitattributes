@@ -1,6 +1,7 @@
 # Binary files (not subject to line ending conversion)
 *.png binary
 *.vhd binary
+*.raw binary
 
 # Default: all files use LF
 * text eol=lf

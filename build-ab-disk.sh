@@ -16,6 +16,8 @@
 # Options:
 #   --prod-vhd PATH       Production VHD (default: uftc.vhd)
 #   --recovery-vhd PATH   Recovery VHD   (default: recovery.vhd)
+#   --prod-raw PATH       Production raw disk image (optional; skips VHD conversion)
+#   --recovery-raw PATH   Recovery raw disk image   (optional; skips VHD conversion)
 #   --output PATH         Output disk image (default: uftc-ab.img)
 #   --skip-efi            Skip EFI GRUB install (BIOS only)
 #
@@ -26,6 +28,8 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 PROD_VHD="uftc.vhd"
 RECOVERY_VHD="recovery.vhd"
+PROD_RAW_INPUT=""
+RECOVERY_RAW_INPUT=""
 OUTPUT_DISK="uftc-ab.img"
 SKIP_EFI=false
 
@@ -33,6 +37,8 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --prod-vhd)       PROD_VHD="$2";     shift 2 ;;
         --recovery-vhd)   RECOVERY_VHD="$2"; shift 2 ;;
+        --prod-raw)       PROD_RAW_INPUT="$2"; shift 2 ;;
+        --recovery-raw)   RECOVERY_RAW_INPUT="$2"; shift 2 ;;
         --output)         OUTPUT_DISK="$2";  shift 2 ;;
         --skip-efi)       SKIP_EFI=true;     shift   ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -67,13 +73,26 @@ wait_for_block_device() {
 
 prepare_loop_partitions() {
     local loop_dev="$1"
+    local mapper_probe
+    mapper_probe="/dev/mapper/$(basename "$loop_dev")p1"
 
     if command -v kpartx >/dev/null 2>&1; then
-        kpartx -as "$loop_dev" >/dev/null 2>&1 || kpartx -a "$loop_dev" >/dev/null 2>&1 || true
-        PARTITION_TOOL="kpartx"
-        return 0
+        if kpartx -as "$loop_dev" >/dev/null 2>&1 || kpartx -a "$loop_dev" >/dev/null 2>&1; then
+            if command -v udevadm >/dev/null 2>&1; then
+                udevadm settle 2>/dev/null || true
+            fi
+
+            # Some WSL setups have kpartx installed but do not expose /dev/mapper nodes.
+            if [[ -b "$mapper_probe" ]]; then
+                PARTITION_TOOL="kpartx"
+                return 0
+            fi
+
+            kpartx -d "$loop_dev" >/dev/null 2>&1 || true
+        fi
     fi
 
+    PARTITION_TOOL="partscan"
     partprobe "$loop_dev" 2>/dev/null || true
     if command -v partx >/dev/null 2>&1; then
         partx -a "$loop_dev" 2>/dev/null || partx -u "$loop_dev" 2>/dev/null || true
@@ -102,8 +121,17 @@ for cmd in sgdisk mkfs.fat mkfs.ext4 rsync losetup grub-install grub-editenv \
     command -v "$cmd" >/dev/null 2>&1 || die "Required tool not found: $cmd"
 done
 
-[[ -f "$PROD_VHD" ]]     || die "Production VHD not found: $PROD_VHD"
-[[ -f "$RECOVERY_VHD" ]] || die "Recovery VHD not found: $RECOVERY_VHD"
+if [[ -n "$PROD_RAW_INPUT" ]]; then
+    [[ -f "$PROD_RAW_INPUT" ]] || die "Production raw image not found: $PROD_RAW_INPUT"
+else
+    [[ -f "$PROD_VHD" ]] || die "Production VHD not found: $PROD_VHD"
+fi
+
+if [[ -n "$RECOVERY_RAW_INPUT" ]]; then
+    [[ -f "$RECOVERY_RAW_INPUT" ]] || die "Recovery raw image not found: $RECOVERY_RAW_INPUT"
+else
+    [[ -f "$RECOVERY_VHD" ]] || die "Recovery VHD not found: $RECOVERY_VHD"
+fi
 
 # ---------------------------------------------------------------------------
 # Temp directory and cleanup
@@ -177,8 +205,17 @@ mount "$(partition_device "$AB_LOOP" 5)" "$WORK_DIR/recovery"
 # Extract production VHD (d2vm output)
 # d2vm layout: p1 = FAT32 boot (contains kernel + GRUB), p2 = ext4 root
 # ---------------------------------------------------------------------------
-log "Mounting production VHD: $PROD_VHD"
-VHD_LOOP=$(losetup --find --show --partscan "$PROD_VHD")
+log "Preparing production source image"
+PROD_RAW="$PROD_RAW_INPUT"
+if [[ -z "$PROD_RAW" ]]; then
+    PROD_RAW="$WORK_DIR/prod.raw"
+    log "Converting production VHD to raw image for reliable loop partition probing"
+    qemu-img convert -f vpc -O raw "$PROD_VHD" "$PROD_RAW"
+else
+    log "Using prebuilt production raw image: $PROD_RAW"
+fi
+
+VHD_LOOP=$(losetup --find --show --partscan "$PROD_RAW")
 prepare_loop_partitions "$VHD_LOOP"
 part_dev="$(partition_device "$VHD_LOOP" 1)"
 wait_for_block_device "$part_dev" 30 || die "Partition node $part_dev did not appear in time"
@@ -220,8 +257,17 @@ losetup -d "$VHD_LOOP"; VHD_LOOP=""
 # Extract recovery VHD
 # d2vm layout (same): p1 = FAT32 boot (Alpine kernel), p2 = ext4 Alpine root
 # ---------------------------------------------------------------------------
-log "Mounting recovery VHD: $RECOVERY_VHD"
-REC_LOOP=$(losetup --find --show --partscan "$RECOVERY_VHD")
+log "Preparing recovery source image"
+RECOVERY_RAW="$RECOVERY_RAW_INPUT"
+if [[ -z "$RECOVERY_RAW" ]]; then
+    RECOVERY_RAW="$WORK_DIR/recovery.raw"
+    log "Converting recovery VHD to raw image for reliable loop partition probing"
+    qemu-img convert -f vpc -O raw "$RECOVERY_VHD" "$RECOVERY_RAW"
+else
+    log "Using prebuilt recovery raw image: $RECOVERY_RAW"
+fi
+
+REC_LOOP=$(losetup --find --show --partscan "$RECOVERY_RAW")
 prepare_loop_partitions "$REC_LOOP"
 part_dev="$(partition_device "$REC_LOOP" 1)"
 wait_for_block_device "$part_dev" 30 || die "Partition node $part_dev did not appear in time"
@@ -270,27 +316,27 @@ tmpfs         /tmp   tmpfs defaults,noatime   0  0
 FSTAB
 
 # ---------------------------------------------------------------------------
-# Install GRUB to the A/B disk via chroot into ROOT_A
+# Install GRUB to the A/B disk using host grub-install
 # ---------------------------------------------------------------------------
 log "Installing GRUB"
-mount "${AB_LOOP}p2" "$WORK_DIR/root_a/boot"
-mount --bind /dev    "$WORK_DIR/root_a/dev"
-mount -t proc  none  "$WORK_DIR/root_a/proc"
-mount -t sysfs none  "$WORK_DIR/root_a/sys"
+ESP_PARTITION="$(partition_device "$AB_LOOP" 2)"
+wait_for_block_device "$ESP_PARTITION" 30 || die "Partition node $ESP_PARTITION did not appear in time"
+mount "$ESP_PARTITION" "$WORK_DIR/root_a/boot"
 
 # BIOS GRUB (writes core image to the BIOSBOOT partition + modules to ESP/grub/)
-chroot "$WORK_DIR/root_a" grub-install \
+grub-install \
     --target=i386-pc \
-    --boot-directory=/boot \
+    --boot-directory="$WORK_DIR/root_a/boot" \
     --recheck \
     "$AB_LOOP"
 
 # EFI GRUB (optional — skip if the chroot lacks the EFI target)
 if [[ "$SKIP_EFI" == false ]]; then
     log "Installing EFI GRUB"
-    chroot "$WORK_DIR/root_a" grub-install \
+    grub-install \
         --target=x86_64-efi \
-        --efi-directory=/boot \
+        --boot-directory="$WORK_DIR/root_a/boot" \
+        --efi-directory="$WORK_DIR/root_a/boot" \
         --bootloader-id=uftc \
         --no-nvram \
         --recheck 2>/dev/null || log "EFI GRUB install skipped (target not available)"
@@ -382,11 +428,8 @@ grub-editenv "$WORK_DIR/root_a/boot/grub/grubenv" set \
 mkdir -p "$WORK_DIR/root_a/boot/slots"
 
 # ---------------------------------------------------------------------------
-# Unmount chroot bind mounts
+# Unmount boot mount
 # ---------------------------------------------------------------------------
-umount "$WORK_DIR/root_a/sys"
-umount "$WORK_DIR/root_a/proc"
-umount "$WORK_DIR/root_a/dev"
 umount "$WORK_DIR/root_a/boot"
 
 # ---------------------------------------------------------------------------
