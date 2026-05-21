@@ -176,9 +176,10 @@ extract_image_rootfs() {
     local cid=""
 
     cleanup_extract_image_rootfs() {
+        local cleanup_cid="${cid:-}"
         set +e
-        if [[ -n "$cid" ]]; then
-            docker rm -f "$cid" >/dev/null 2>&1 || true
+        if [[ -n "$cleanup_cid" ]]; then
+            docker rm -f "$cleanup_cid" >/dev/null 2>&1 || true
         fi
     }
     trap cleanup_extract_image_rootfs RETURN
