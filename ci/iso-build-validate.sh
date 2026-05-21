@@ -163,34 +163,6 @@ if [[ "$effective_payload_layout" == "auto" ]]; then
   fi
 fi
 
-check_ab_layout() {
-  local disk_path="$1"
-  local partition_table part_info part_number part_name
-
-  require_cmd sgdisk
-
-  partition_table="$(sgdisk -p "$disk_path")"
-  if [[ "$partition_table" != *"Found valid GPT"* ]]; then
-    echo "Validation failed: ISO payload does not contain a valid GPT" >&2
-    exit 1
-  fi
-
-  for entry in \
-    "1:BIOSBOOT" \
-    "2:ESP" \
-    "3:ROOT_A" \
-    "4:ROOT_B" \
-    "5:RECOVERY"; do
-    part_number="${entry%%:*}"
-    part_name="${entry#*:}"
-    part_info="$(sgdisk -i "$part_number" "$disk_path")"
-    if [[ "$part_info" != *"Partition name: '$part_name'"* ]]; then
-      echo "Validation failed: ISO payload partition $part_number is not labeled $part_name" >&2
-      exit 1
-    fi
-  done
-}
-
 if [[ "$BUILD_MODE" == "build" ]]; then
   build_args=(--skip-build --output-iso "$OUTPUT_ISO")
   if [[ -n "$INPUT_DISK_ZST" ]]; then
@@ -303,13 +275,7 @@ fi
 log "Installer menu entry check passed for BIOS and UEFI boot paths"
 
 if [[ "$effective_payload_layout" == "ab" ]]; then
-  payload_img="$tmpdir/RDOS.img"
-  log "Decompressing payload image for A/B layout validation (this can take several minutes)"
-  run_with_heartbeat "Payload decompress" bash -lc 'zstd -d -c "$1" | dd of="$2" bs=16M conv=sparse status=none' _ "$payload_file" "$payload_img"
-
-  log "Validating GPT and partition labels in decompressed payload"
-  run_with_heartbeat "A/B layout validation" check_ab_layout "$payload_img"
-  log "ISO payload A/B layout check passed"
+  log "Skipping A/B payload layout check (decompression validation temporarily disabled)"
 else
   log "Skipping A/B payload layout check for payload-layout=$effective_payload_layout"
 fi

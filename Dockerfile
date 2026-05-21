@@ -107,8 +107,9 @@ RUN chmod +x \
 # Allow mtr to send raw ICMP packets without root (capability survives into the final image)
 RUN setcap cap_net_raw+ep /usr/bin/mtr-packet
 
-RUN mkdir -p /etc/systemd/system/getty@tty1.service.d
+RUN mkdir -p /etc/systemd/system/getty@tty1.service.d /etc/systemd/system/console-getty.service.d
 COPY tcfiles/autologin /etc/systemd/system/getty@tty1.service.d/override.conf
+COPY tcfiles/autologin-console /etc/systemd/system/console-getty.service.d/override.conf
 RUN systemctl enable getty@tty1.service
 
 COPY tcfiles/tc-copyconfig.service /etc/systemd/system/tc-copyconfig.service
