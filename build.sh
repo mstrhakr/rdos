@@ -33,6 +33,9 @@ for arg in "$@"; do
     esac
 done
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_SCRIPT="$SCRIPT_DIR/build.sh"
+
 # Run the full build as root to avoid piecemeal sudo permissions for loop/mount operations.
 if [[ "$EUID" -ne 0 ]]; then
     if ! command -v sudo >/dev/null 2>&1; then
@@ -40,12 +43,11 @@ if [[ "$EUID" -ne 0 ]]; then
         echo "Run as root, or install sudo and rerun." >&2
         exit 1
     fi
-    exec sudo "$0" "$@"
+    exec sudo "$BUILD_SCRIPT" "$@"
 fi
 
 export DOCKER_BUILDKIT=1
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 BUILD_AB_DISK_SCRIPT="$SCRIPT_DIR/build-ab-disk.sh"
