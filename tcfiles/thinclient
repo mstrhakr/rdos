@@ -257,7 +257,7 @@ status_overlay_loop() {
         x_offset=0
     fi
 
-    fifo_path="$(mktemp -u /tmp/uftc-status-overlay.XXXXXX)"
+    fifo_path="$(mktemp -u /tmp/RDOS-status-overlay.XXXXXX)"
     mkfifo "$fifo_path"
 
     yad --progress \
@@ -684,7 +684,7 @@ fi
 echo "Start of session" > session.log
 if [[ "$server" != "citrix" && "$server" != "moonlight" ]]; then
     loading_text="Connecting to remote desktop..."
-    if [[ "${UFTC_RECONNECTING:-0}" == "1" ]]; then
+    if [[ "${RDOS_RECONNECTING:-0}" == "1" ]]; then
         loading_text="Reconnecting to remote desktop..."
     fi
 
@@ -748,7 +748,7 @@ if [[ "$server" != "citrix" && "$server" != "moonlight" ]]; then
         if [ "$cert_prompted" != "true" ] && session_has_unknown_host_key_error; then
             if prompt_trust_unknown_host_key; then
                 cert_prompted="true"
-                UFTC_CERT_PROMPTED=1
+                RDOS_CERT_PROMPTED=1
                 echo "User accepted unknown host key prompt, retrying with TOFU policy"
                 set_freerdp_cert_policy "tofu"
                 loading_text="Saving server key and reconnecting..."
@@ -799,7 +799,7 @@ fi
 # Restart the application, this will fetch updated configs and return us to the login screen
 password=""
 if [[ "$user_signout" == "true" ]]; then
-    UFTC_RECONNECTING=0 $0 "$@" &
+    RDOS_RECONNECTING=0 $0 "$@" &
 else
-    UFTC_RECONNECTING=1 $0 "$@" &
+    RDOS_RECONNECTING=1 $0 "$@" &
 fi

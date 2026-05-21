@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Recovery OS for UFTC A/B slot switching.
+# Recovery OS for RDOS A/B slot switching.
 # Built into a raw source image by build.sh (no d2vm).
 # The recovery script runs as PID 1 via GRUB: init=/usr/bin/recovery
 FROM alpine:3.20

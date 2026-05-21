@@ -1,5 +1,5 @@
 #!/bin/bash
-# UFTC OTA slot-swap agent.
+# RDOS OTA slot-swap agent.
 # Runs as PID 1 (passed to kernel via init=/usr/bin/recovery) when GRUB detects
 # a staged update (pending_recovery=true in grubenv).
 #

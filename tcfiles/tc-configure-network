@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-STATIC_NETWORK_FILE="/etc/systemd/network/10-uftc-static.network"
+STATIC_NETWORK_FILE="/etc/systemd/network/10-RDOS-static.network"
 
 list_interfaces() {
     local device

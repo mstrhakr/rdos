@@ -11,10 +11,10 @@ CLONEZILLA_ISO_URL_DEFAULT="https://downloads.sourceforge.net/project/clonezilla
 CLONEZILLA_ISO_URL="${CLONEZILLA_ISO_URL:-$CLONEZILLA_ISO_URL_DEFAULT}"
 CLONEZILLA_ISO_SHA256="${CLONEZILLA_ISO_SHA256:-}"
 CLONEZILLA_ALLOW_UNVERIFIED="${CLONEZILLA_ALLOW_UNVERIFIED:-1}"
-INPUT_VHD="${INPUT_VHD:-uftc.vhd}"
-INPUT_DISK="${INPUT_DISK:-uftc-ab.img}"
+INPUT_VHD="${INPUT_VHD:-RDOS.vhd}"
+INPUT_DISK="${INPUT_DISK:-RDOS-ab.img}"
 INPUT_DISK_ZST="${INPUT_DISK_ZST:-}"
-OUTPUT_ISO="${OUTPUT_ISO:-uftc-installer.iso}"
+OUTPUT_ISO="${OUTPUT_ISO:-RDOS-installer.iso}"
 DEFAULT_WORKDIR=".installer-work"
 WORKDIR="${WORKDIR:-$DEFAULT_WORKDIR}"
 BASE_ISO_CACHE="${BASE_ISO_CACHE:-.installer-cache/clonezilla-base.iso}"
@@ -29,16 +29,16 @@ ZSTD_LEVEL="${ZSTD_LEVEL:-9}"
 
 BASE_ISO="$BASE_ISO_CACHE"
 ISO_ROOT="$WORKDIR/iso-root"
-RAW_IMAGE="$WORKDIR/uftc.img"
-COMPRESSED_IMAGE="$ISO_ROOT/uftc/uftc.img.zst"
-IMAGE_SIZE_METADATA="$ISO_ROOT/uftc/uftc.img.size"
+RAW_IMAGE="$WORKDIR/RDOS.img"
+COMPRESSED_IMAGE="$ISO_ROOT/RDOS/RDOS.img.zst"
+IMAGE_SIZE_METADATA="$ISO_ROOT/RDOS/RDOS.img.size"
 MIN_BASE_ISO_SIZE_BYTES=400000000
 
 usage() {
   cat <<'EOF'
 Usage: ./build-installer-iso.sh [options]
 
-Builds a Clonezilla-based unattended installer ISO for UFTC.
+Builds a Clonezilla-based unattended installer ISO for RDOS.
 By default, this script builds fresh raw A/B artifacts first by invoking ./build.sh --ab.
 
 Options:
@@ -46,10 +46,10 @@ Options:
       --build-script PATH          Path to build script (default: ./build.sh)
       --build-arg ARG              Pass one argument to build.sh (repeatable)
       --no-cache                   Build without Docker cache (alias for --build-arg --no-cache)
-      --input-vhd PATH             Input VHD path (legacy fallback; default: uftc.vhd)
-      --input-disk PATH            Input raw disk image (A/B layout; default: uftc-ab.img)
+      --input-vhd PATH             Input VHD path (legacy fallback; default: RDOS.vhd)
+      --input-disk PATH            Input raw disk image (A/B layout; default: RDOS-ab.img)
       --input-disk-zst PATH        Input pre-compressed A/B payload (.img.zst)
-      --output-iso PATH            Output ISO path (default: uftc-installer.iso)
+      --output-iso PATH            Output ISO path (default: RDOS-installer.iso)
       --workdir PATH               Working directory for intermediate files
       --staging-dir PATH           Run ISO build work in PATH, then move final ISO to --output-iso
       --no-staging                 Disable automatic /mnt performance staging
@@ -253,7 +253,7 @@ fi
 AUTO_STAGING_DIR=""
 ORIGINAL_OUTPUT_ISO="$OUTPUT_ISO"
 if [[ -z "$STAGING_DIR" ]] && [[ "$NO_STAGING" != "1" ]] && [[ "$SCRIPT_DIR" == /mnt/* ]] && [[ "$WORKDIR" == "$DEFAULT_WORKDIR" ]]; then
-  AUTO_STAGING_DIR="$(mktemp -d /var/tmp/uftc-iso.XXXXXX)"
+  AUTO_STAGING_DIR="$(mktemp -d /var/tmp/RDOS-iso.XXXXXX)"
   STAGING_DIR="$AUTO_STAGING_DIR"
 fi
 
@@ -264,9 +264,9 @@ if [[ -n "$STAGING_DIR" ]]; then
 fi
 
 ISO_ROOT="$WORKDIR/iso-root"
-RAW_IMAGE="$WORKDIR/uftc.img"
-COMPRESSED_IMAGE="$ISO_ROOT/uftc/uftc.img.zst"
-IMAGE_SIZE_METADATA="$ISO_ROOT/uftc/uftc.img.size"
+RAW_IMAGE="$WORKDIR/RDOS.img"
+COMPRESSED_IMAGE="$ISO_ROOT/RDOS/RDOS.img.zst"
+IMAGE_SIZE_METADATA="$ISO_ROOT/RDOS/RDOS.img.size"
 
 if [[ "$SKIP_BUILD" != "1" ]]; then
   if [[ ! -x "$BUILD_SCRIPT" ]]; then
@@ -382,7 +382,7 @@ for grub_file in "$ISO_ROOT/boot/grub/grub.cfg" "$ISO_ROOT/boot/grub/config.cfg"
   fi
 done
 
-mkdir -p "$ISO_ROOT/uftc"
+mkdir -p "$ISO_ROOT/RDOS"
 
 if [[ -n "$INPUT_DISK_ZST" ]]; then
   log_phase "Using pre-compressed A/B payload directly: $INPUT_DISK_ZST"
@@ -412,10 +412,10 @@ else
   rm -f "$RAW_IMAGE"
 fi
 
-cp "$SCRIPT_DIR/tcfiles/installer-install.sh" "$ISO_ROOT/uftc/install.sh"
-cp "$SCRIPT_DIR/tcfiles/tc-installer-ui.sh" "$ISO_ROOT/uftc/tc-installer-ui.sh"
-chmod +x "$ISO_ROOT/uftc/install.sh"
-chmod +x "$ISO_ROOT/uftc/tc-installer-ui.sh"
+cp "$SCRIPT_DIR/tcfiles/installer-install.sh" "$ISO_ROOT/RDOS/install.sh"
+cp "$SCRIPT_DIR/tcfiles/tc-installer-ui.sh" "$ISO_ROOT/RDOS/tc-installer-ui.sh"
+chmod +x "$ISO_ROOT/RDOS/install.sh"
+chmod +x "$ISO_ROOT/RDOS/tc-installer-ui.sh"
 
 CLONEZILLA_BOOT_ARGS="boot=live union=overlay username=user config components quiet loglevel=3 ocs_1_cpu_udev noswap edd=on nomodeset enforcing=0 locales= keyboard-layouts= net.ifnames=0 nosplash modprobe.blacklist=pcspkr"
 
@@ -423,21 +423,21 @@ for SYS_CFG in "$ISO_ROOT/syslinux/syslinux.cfg" "$ISO_ROOT/syslinux/isolinux.cf
   if [[ -f "$SYS_CFG" ]]; then
     log_phase "Writing BIOS boot config in $(basename "$SYS_CFG")"
     cat >"$SYS_CFG" <<EOF
-default uftc_guided
+default RDOS_guided
 prompt 0
 timeout 50
 
-menu title UFTC Installer
+menu title RDOS Installer
 
-label uftc_guided
-  menu label UFTC guided installer (disk selection + progress UI)
+label RDOS_guided
+  menu label RDOS guided installer (disk selection + progress UI)
   kernel /live/vmlinuz
-  append initrd=/live/initrd.img ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/uftc/install.sh guided" ocs_live_extra_param="" ocs_live_batch="yes"
+  append initrd=/live/initrd.img ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/RDOS/install.sh guided" ocs_live_extra_param="" ocs_live_batch="yes"
 
-label uftc_auto
-  menu label UFTC automatic install (first target disk)
+label RDOS_auto
+  menu label RDOS automatic install (first target disk)
   kernel /live/vmlinuz
-  append initrd=/live/initrd.img ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/uftc/install.sh auto" ocs_live_extra_param="" ocs_live_batch="yes"
+  append initrd=/live/initrd.img ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/RDOS/install.sh auto" ocs_live_extra_param="" ocs_live_batch="yes"
 EOF
   fi
 done
@@ -450,13 +450,13 @@ set default="0"
 set timeout=5
 set timeout_style=menu
 
-menuentry "UFTC guided installer (disk selection + progress UI)" --id uftc_guided {
-  linux /live/vmlinuz ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/uftc/install.sh guided" ocs_live_extra_param="" ocs_live_batch="yes"
+menuentry "RDOS guided installer (disk selection + progress UI)" --id RDOS_guided {
+  linux /live/vmlinuz ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/RDOS/install.sh guided" ocs_live_extra_param="" ocs_live_batch="yes"
   initrd /live/initrd.img
 }
 
-menuentry "UFTC automatic install (first target disk)" --id uftc_auto {
-  linux /live/vmlinuz ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/uftc/install.sh auto" ocs_live_extra_param="" ocs_live_batch="yes"
+menuentry "RDOS automatic install (first target disk)" --id RDOS_auto {
+  linux /live/vmlinuz ${CLONEZILLA_BOOT_ARGS} ocs_live_run="bash /run/live/medium/RDOS/install.sh auto" ocs_live_extra_param="" ocs_live_batch="yes"
   initrd /live/initrd.img
 }
 EOF
@@ -484,7 +484,7 @@ fi
 log_phase "Building installer ISO"
 xorriso -as mkisofs \
   -r -J -joliet-long -l -iso-level 3 \
-  -V "UFTC_INSTALLER" \
+  -V "RDOS_INSTALLER" \
   -o "$OUTPUT_ISO" \
   -b "$ISOLINUX_BIN" \
   -c "$BOOT_CAT" \
@@ -500,7 +500,7 @@ log_phase "Installer ISO build complete"
 echo "Created $OUTPUT_ISO"
 echo "Boot mode: guided installer default (5s timeout) with optional automatic mode."
 echo "Payload mode: zstd compressed."
-echo "Review target disk detection in uftc/install.sh if you need a different policy."
+echo "Review target disk detection in RDOS/install.sh if you need a different policy."
 
 if [[ -n "$STAGING_DIR" ]]; then
   log_phase "Moving staged ISO to destination: $ORIGINAL_OUTPUT_ISO"

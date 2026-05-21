@@ -5,10 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-INPUT_VHD="uftc.vhd"
+INPUT_VHD="RDOS.vhd"
 INPUT_DISK=""
 INPUT_DISK_ZST=""
-OUTPUT_ISO="uftc-installer.iso"
+OUTPUT_ISO="RDOS-installer.iso"
 BUILD_MODE="build"
 NO_CACHE=0
 NO_STAGING=0
@@ -20,14 +20,14 @@ usage() {
   cat <<'EOF'
 Usage: ./ci/iso-build-validate.sh [options]
 
-Builds (or reuses) a UFTC installer ISO through build-installer-iso.sh,
+Builds (or reuses) a RDOS installer ISO through build-installer-iso.sh,
 then validates ISO shape, boot assets, and payload integrity.
 
 Options:
-  --input-vhd PATH        Input VHD path used by ISO build (default: uftc.vhd)
+  --input-vhd PATH        Input VHD path used by ISO build (default: RDOS.vhd)
   --input-disk PATH       Input raw A/B disk path used by ISO build
   --input-disk-zst PATH   Input compressed A/B payload path used by ISO build
-  --output-iso PATH       Output ISO path (default: uftc-installer.iso)
+  --output-iso PATH       Output ISO path (default: RDOS-installer.iso)
   --mode MODE             build (default) or validate-only
   --payload-layout MODE   Expected payload layout: auto, single, or ab
   --no-cache              Pass --no-cache to build-installer-iso.sh
@@ -247,11 +247,11 @@ if command -v file >/dev/null 2>&1; then
   fi
 fi
 
-if ! xorriso -indev "$OUTPUT_ISO" -find /uftc/uftc.img.zst -exec report_lba >/dev/null 2>&1; then
-  echo "Validation failed: payload /uftc/uftc.img.zst not found in ISO" >&2
+if ! xorriso -indev "$OUTPUT_ISO" -find /RDOS/RDOS.img.zst -exec report_lba >/dev/null 2>&1; then
+  echo "Validation failed: payload /RDOS/RDOS.img.zst not found in ISO" >&2
   exit 1
 fi
-log "Payload path check passed: /uftc/uftc.img.zst"
+log "Payload path check passed: /RDOS/RDOS.img.zst"
 
 if ! xorriso -indev "$OUTPUT_ISO" -find /syslinux/isolinux.bin -exec report_lba >/dev/null 2>&1; then
   echo "Validation failed: BIOS boot asset /syslinux/isolinux.bin not found" >&2
@@ -277,9 +277,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-payload_file="$tmpdir/uftc.img.zst"
+payload_file="$tmpdir/RDOS.img.zst"
 log "Extracting compressed payload from ISO"
-run_with_heartbeat "Payload extract" xorriso -osirrox on -indev "$OUTPUT_ISO" -extract /uftc/uftc.img.zst "$payload_file" >/dev/null
+run_with_heartbeat "Payload extract" xorriso -osirrox on -indev "$OUTPUT_ISO" -extract /RDOS/RDOS.img.zst "$payload_file" >/dev/null
 
 log "Verifying compressed payload integrity"
 run_with_heartbeat "zstd integrity test" zstd -t "$payload_file" >/dev/null
@@ -290,12 +290,12 @@ isolinux_cfg="$tmpdir/isolinux.cfg"
 xorriso -osirrox on -indev "$OUTPUT_ISO" -extract /boot/grub/grub.cfg "$grub_cfg" >/dev/null
 xorriso -osirrox on -indev "$OUTPUT_ISO" -extract /syslinux/isolinux.cfg "$isolinux_cfg" >/dev/null
 
-if ! grep -Fq 'UFTC guided installer' "$grub_cfg" || ! grep -Fq 'UFTC automatic install' "$grub_cfg"; then
+if ! grep -Fq 'RDOS guided installer' "$grub_cfg" || ! grep -Fq 'RDOS automatic install' "$grub_cfg"; then
   echo "Validation failed: GRUB menu does not expose both guided and automatic installer entries" >&2
   exit 1
 fi
 
-if ! grep -Fq 'label uftc_guided' "$isolinux_cfg" || ! grep -Fq 'label uftc_auto' "$isolinux_cfg"; then
+if ! grep -Fq 'label RDOS_guided' "$isolinux_cfg" || ! grep -Fq 'label RDOS_auto' "$isolinux_cfg"; then
   echo "Validation failed: BIOS menu does not expose both guided and automatic installer entries" >&2
   exit 1
 fi
@@ -303,7 +303,7 @@ fi
 log "Installer menu entry check passed for BIOS and UEFI boot paths"
 
 if [[ "$effective_payload_layout" == "ab" ]]; then
-  payload_img="$tmpdir/uftc.img"
+  payload_img="$tmpdir/RDOS.img"
   log "Decompressing payload image for A/B layout validation (this can take several minutes)"
   run_with_heartbeat "Payload decompress" bash -lc 'zstd -d -c "$1" | dd of="$2" bs=16M conv=sparse status=none' _ "$payload_file" "$payload_img"
 

@@ -13,7 +13,7 @@ usage() {
   cat <<'EOF'
 Usage: ./ci/preflight-validate.sh [--mode local|ci] [--path preflight|vhd|iso|all] [--shellcheck-severity error|warning|info|style]
 
-Preflight validation checks for UFTC:
+Preflight validation checks for RDOS:
 - Bash syntax checks for key scripts
 - Strict mode guards in build entry scripts
 - Help-path parsing for build scripts

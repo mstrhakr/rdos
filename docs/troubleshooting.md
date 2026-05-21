@@ -1,6 +1,6 @@
-# UFTC Thin Client Troubleshooting
+# RDOS Thin Client Troubleshooting
 
-This manual is designed to help tech support diagnose issues with UFTC based thin client.
+This manual is designed to help tech support diagnose issues with RDOS based thin client.
 
 ## Boot and login
 

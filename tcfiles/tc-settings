@@ -4,7 +4,7 @@ set -euo pipefail
 
 CONFIG_PATH="${HOME}/tcconfig"
 VERSION="$(< /tcversion)"
-DEFAULT_ADMINPASS="uftc"
+DEFAULT_ADMINPASS="RDOS"
 
 list_interfaces() {
     local device
@@ -200,7 +200,7 @@ save_config() {
 }
 
 apply_network_config() {
-    local log_path="${HOME}/.uftc-network-apply.log"
+    local log_path="${HOME}/.RDOS-network-apply.log"
 
     if ! sudo -n /usr/bin/tc-configure-network --apply-tcconfig "$CONFIG_PATH" --reload 2>&1 | tee "$log_path" >/dev/null; then
         show_warning "The network settings were saved, but the live network reload reported an error. They will still be applied on the next boot.\n\nDetails:\n$(tail -n 5 "$log_path" 2>/dev/null)"
@@ -208,7 +208,7 @@ apply_network_config() {
 }
 
 apply_ota_timer_config() {
-    local log_path="${HOME}/.uftc-ota-timer-apply.log"
+    local log_path="${HOME}/.RDOS-ota-timer-apply.log"
 
     if ! sudo -n /usr/bin/tc-ota-configure-timer 2>&1 | tee "$log_path" >/dev/null; then
         show_warning "Update settings were saved, but the OTA schedule could not be refreshed immediately. The new time will be used after the next boot.\n\nDetails:\n$(tail -n 5 "$log_path" 2>/dev/null)"
@@ -221,7 +221,7 @@ apply_ota_timer_config() {
 apply_wireguard_config() {
     local requested_state
     local applied_state
-    local log_path="${HOME}/.uftc-wireguard-apply.log"
+    local log_path="${HOME}/.RDOS-wireguard-apply.log"
 
     if wireguard_config_present; then
         requested_state="$(normalize_bool "$wireguard_enabled")"

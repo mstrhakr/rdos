@@ -14,9 +14,9 @@ permissions:
 jobs:
   validate-version:
     name: Validate & Detect RC Version
-    runs-on: [self-hosted, linux, uftc-builder]
+    runs-on: [self-hosted, linux, RDOS-builder]
     if: >-
-      github.repository == 'mstrhakr/uftc' &&
+      github.repository == 'mstrhakr/RDOS' &&
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request' &&
@@ -96,12 +96,12 @@ jobs:
   build-and-test:
     name: Collect Prebuilt Artifacts (for RC)
     needs: validate-version
-    runs-on: [self-hosted, linux, uftc-builder]
+    runs-on: [self-hosted, linux, RDOS-builder]
     env:
-      RUNNER_ARTIFACT_ROOT: /var/tmp/uftc-artifacts
+      RUNNER_ARTIFACT_ROOT: /var/tmp/RDOS-artifacts
     timeout-minutes: 180
     if: >-
-      github.repository == 'mstrhakr/uftc' &&
+      github.repository == 'mstrhakr/RDOS' &&
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request' &&
@@ -112,11 +112,11 @@ jobs:
         run: |
           set -euo pipefail
           SOURCE_DIR="${RUNNER_ARTIFACT_ROOT}/${{ github.event.workflow_run.head_sha }}"
-          test -f "$SOURCE_DIR/uftc.vhd"
-          test -f "$SOURCE_DIR/uftc-installer.iso"
-          cp "$SOURCE_DIR/uftc.vhd" ./uftc.vhd
-          cp "$SOURCE_DIR/uftc-installer.iso" ./uftc-installer.iso
-          ls -lh ./uftc.vhd ./uftc-installer.iso
+          test -f "$SOURCE_DIR/RDOS.vhd"
+          test -f "$SOURCE_DIR/RDOS-installer.iso"
+          cp "$SOURCE_DIR/RDOS.vhd" ./RDOS.vhd
+          cp "$SOURCE_DIR/RDOS-installer.iso" ./RDOS-installer.iso
+          ls -lh ./RDOS.vhd ./RDOS-installer.iso
 
       - name: Rename artifacts with version
         id: rename
@@ -124,11 +124,11 @@ jobs:
           VERSION="${{ needs.validate-version.outputs.version }}"
           RC_NUMBER="${{ needs.validate-version.outputs.rc_number }}"
           
-          VHD_VERSIONED="uftc-${VERSION}-rc.${RC_NUMBER}.vhd"
-          ISO_VERSIONED="uftc-installer-${VERSION}-rc.${RC_NUMBER}.iso"
+          VHD_VERSIONED="RDOS-${VERSION}-rc.${RC_NUMBER}.vhd"
+          ISO_VERSIONED="RDOS-installer-${VERSION}-rc.${RC_NUMBER}.iso"
           
-          mv uftc.vhd "$VHD_VERSIONED"
-          mv uftc-installer.iso "$ISO_VERSIONED"
+          mv RDOS.vhd "$VHD_VERSIONED"
+          mv RDOS-installer.iso "$ISO_VERSIONED"
           
           echo "vhd-versioned=$VHD_VERSIONED" >> $GITHUB_OUTPUT
           echo "iso-versioned=$ISO_VERSIONED" >> $GITHUB_OUTPUT
@@ -138,18 +138,18 @@ jobs:
       - name: Upload RC artifact
         uses: actions/upload-artifact@v4
         with:
-          name: uftc-rc-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}
+          name: RDOS-rc-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}
           path: |
-            uftc-*.vhd
-            uftc-installer-*.iso
+            RDOS-*.vhd
+            RDOS-installer-*.iso
           retention-days: 30
 
   create-rc-release:
     name: Create RC GitHub Release
     needs: [validate-version, build-and-test]
-    runs-on: [self-hosted, linux, uftc-builder]
+    runs-on: [self-hosted, linux, RDOS-builder]
     if: >-
-      github.repository == 'mstrhakr/uftc' &&
+      github.repository == 'mstrhakr/RDOS' &&
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request' &&
@@ -163,7 +163,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: uftc-rc-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}
+          name: RDOS-rc-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}
           path: ./rc-artifacts
 
       - name: Create git tag
@@ -185,15 +185,15 @@ jobs:
             
             This is a pre-release build for testing and validation.
             
-            - **VHD**: uftc-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}.vhd (14GB bootable disk image)
-            - **Installer ISO**: uftc-installer-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}.iso (Clonezilla-based installer)
+            - **VHD**: RDOS-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}.vhd (14GB bootable disk image)
+            - **Installer ISO**: RDOS-installer-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}.iso (Clonezilla-based installer)
             
             When this PR is merged to master, a stable release will be automatically generated.
             
             See [docs/building.md](docs/building.md) and [Readme.md](Readme.md) for deployment instructions.
           files: |
-            rc-artifacts/uftc-*.vhd
-            rc-artifacts/uftc-installer-*.iso
+            rc-artifacts/RDOS-*.vhd
+            rc-artifacts/RDOS-installer-*.iso
           draft: false
           prerelease: true
         env:

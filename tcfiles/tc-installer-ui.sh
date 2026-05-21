@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# UFTC Enhanced Installer UI Library
+# RDOS Enhanced Installer UI Library
 # Provides styled, full-screen UI components with colors and ASCII art
 
 # Color codes
@@ -43,27 +43,27 @@ ui_clear() {
   printf '\033[H'
 }
 
-# Print UFTC ASCII art header
+# Print RDOS ASCII art header
 ui_print_header() {
   printf '%b' "${COLOR_BRIGHT_CYAN}"
   cat << 'EOF'
-╔═══════════════════════════════════════════════════════════════════════╗
-║                                                                       ║
-║                                                                       ║
-║       █████  █████    ███████████    ███████████      █████████       ║
-║      ░░███  ░░███    ░░███░░░░░░█   ░█░░░███░░░█     ███░░░░░███      ║
-║       ░███   ░███     ░███   █ ░    ░   ░███  ░     ███     ░░░       ║
-║       ░███   ░███     ░███████          ░███       ░███               ║
-║       ░███   ░███     ░███░░░█          ░███       ░███               ║
-║       ░███   ░███     ░███  ░           ░███       ░░███     ███      ║
-║       ░░████████      █████             █████       ░░█████████       ║
-║        ░░░░░░░░      ░░░░░             ░░░░░         ░░░░░░░░░        ║
-║                                                                       ║
-║                                                                       ║
-║                       User Friendly Thin Client                       ║
-║                          Guided Installation                          ║
-║                                                                       ║
-╚═══════════════════════════════════════════════════════════════════════╝
+╔═════════════════════════════════════════════════════════════════════╗
+║                                                                     ║
+║                                                                     ║
+║        ███████████   ██████████      ███████     █████████          ║
+║       ▒▒███▒▒▒▒▒███ ▒▒███▒▒▒▒███   ███▒▒▒▒▒███  ███▒▒▒▒▒███         ║
+║        ▒███    ▒███  ▒███   ▒▒███ ███     ▒▒███▒███    ▒▒▒          ║
+║        ▒██████████   ▒███    ▒███▒███      ▒███▒▒█████████          ║
+║        ▒███▒▒▒▒▒███  ▒███    ▒███▒███      ▒███ ▒▒▒▒▒▒▒▒███         ║
+║        ▒███    ▒███  ▒███    ███ ▒▒███     ███  ███    ▒███         ║
+║        █████   █████ ██████████   ▒▒▒███████▒  ▒▒█████████          ║
+║       ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒▒▒▒▒▒      ▒▒▒▒▒▒▒     ▒▒▒▒▒▒▒▒▒           ║
+║                                                                     ║
+║                                                                     ║
+║                   Remote Desktop Operating System                   ║
+║                         Guided Installation                         ║
+║                                                                     ║
+╚═════════════════════════════════════════════════════════════════════╝
 EOF
   printf '%b\n' "${COLOR_RESET}"
 }
@@ -239,7 +239,7 @@ ui_progress_gauge() {
   local target_disk="$1"
   local image_path="$2"
   local provided_expected_bytes="${3:-}"
-  local log_file="${LOG_FILE:-/var/log/uftc-installer.log}"
+  local log_file="${LOG_FILE:-/var/log/RDOS-installer.log}"
   local dev="/dev/$target_disk"
   local expected_bytes=""
   local start_sectors="0"
@@ -306,7 +306,7 @@ ui_progress_gauge() {
   ui_clear
   ui_print_header
   printf "\n"
-  ui_section_header "INSTALLING UFTC"
+  ui_section_header "INSTALLING RDOS"
   printf "\n"
   ui_info_message "Writing image to /dev/$target_disk"
   printf "\n"
@@ -395,7 +395,7 @@ ui_post_action_menu() {
     printf "\n"
     ui_section_header "INSTALLATION COMPLETE"
     printf "\n"
-    ui_success_message "UFTC has been successfully installed to /dev/$target_disk"
+    ui_success_message "RDOS has been successfully installed to /dev/$target_disk"
     printf "\n"
     printf "${COLOR_BRIGHT_WHITE}What would you like to do next?${COLOR_RESET}\n\n"
   } >&2

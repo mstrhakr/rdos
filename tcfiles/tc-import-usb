@@ -5,7 +5,7 @@ TCCONFIG_DEST="${HOME}/tcconfig"
 OVERRIDE_DEST="${HOME}/tcconfig_override"
 WIREGUARD_DEST_DIR="/etc/wireguard"
 VERSION="$(< /tcversion)"
-DEFAULT_ADMINPASS="uftc"
+DEFAULT_ADMINPASS="RDOS"
 
 # Find mountpoints of USB-backed block devices, excluding /boot and /
 find_usb_mounts() {

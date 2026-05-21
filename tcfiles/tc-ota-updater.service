@@ -1,6 +1,6 @@
 [Unit]
-Description=UFTC OTA Update Client
-Documentation=https://github.com/mstrhakr/uftc
+Description=RDOS OTA Update Client
+Documentation=https://github.com/mstrhakr/RDOS
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/boot/grub/grubenv

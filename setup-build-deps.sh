@@ -10,7 +10,7 @@ usage() {
   cat <<'EOF'
 Usage: ./setup-build-deps.sh [options]
 
-Installs or reports the host-side dependencies needed for the full UFTC build
+Installs or reports the host-side dependencies needed for the full RDOS build
 pipeline, including A/B disk assembly, ISO generation, and CI preflight checks.
 
 Options:

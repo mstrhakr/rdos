@@ -1,23 +1,23 @@
-# Building UFTC
+# Building RDOS
 
 This repository builds:
 
-- `uftc.vhd` (bootable virtual disk image)
-- `uftc-installer.iso` (minimal unattended installer ISO)
+- `RDOS.vhd` (bootable virtual disk image)
+- `RDOS-installer.iso` (minimal unattended installer ISO)
 
-The normal flow is still to build `uftc.vhd` first, then optionally package it into the installer ISO.
+The normal flow is still to build `RDOS.vhd` first, then optionally package it into the installer ISO.
 
 ## What the build actually does
 
 The current build flow is small but it depends on Linux container behavior:
 
-1. `docker build . -t uftc`
-2. `./d2vm convert uftc:latest -o uftc.vhd --bootloader grub --boot-size 4000 --size 14G --network-manager none`
+1. `docker build . -t RDOS`
+2. `./d2vm convert RDOS:latest -o RDOS.vhd --bootloader grub --boot-size 4000 --size 14G --network-manager none`
 
 In practice that means:
 
 - [Dockerfile](Dockerfile) assembles a Debian-based thin-client filesystem.
-- [build.sh](build.sh) builds the container and converts it into `uftc.vhd`.
+- [build.sh](build.sh) builds the container and converts it into `RDOS.vhd`.
 - [d2vm](d2vm) is a wrapper around the `linkacloud/d2vm` container, which needs privileged access and the Docker socket.
 - Runtime networking is provided by `systemd-networkd` and `systemd-resolved`, with `wpa_supplicant@<iface>.service` used for WiFi association.
 
@@ -68,7 +68,7 @@ chmod +x setup-build-sudoers.sh
 ./setup-build-sudoers.sh
 ```
 
-This creates `/etc/sudoers.d/uftc-build-nopasswd` for the current Linux user and allows passwordless sudo only for static build commands (`docker build`, this repo's `d2vm convert`, and `build-ab-disk.sh`).
+This creates `/etc/sudoers.d/RDOS-build-nopasswd` for the current Linux user and allows passwordless sudo only for static build commands (`docker build`, this repo's `d2vm convert`, and `build-ab-disk.sh`).
 
 To remove the rule later:
 
@@ -78,7 +78,7 @@ To remove the rule later:
 
 If the build succeeds, you should get:
 
-- `uftc.vhd`
+- `RDOS.vhd`
 
 ## Preflight validation
 
@@ -115,7 +115,7 @@ Use the canonical VHD validation wrapper to run `build.sh` and assert artifact s
 
 ```bash
 chmod +x ci/vhd-build-validate.sh
-./ci/vhd-build-validate.sh --mode build --output uftc.vhd
+./ci/vhd-build-validate.sh --mode build --output RDOS.vhd
 ```
 
 What it validates:
@@ -129,10 +129,10 @@ Useful variants:
 
 ```bash
 # Validate an existing artifact without rebuilding
-./ci/vhd-build-validate.sh --mode validate-only --output uftc.vhd
+./ci/vhd-build-validate.sh --mode validate-only --output RDOS.vhd
 
 # CI deterministic leg example
-./ci/vhd-build-validate.sh --mode build --output uftc.vhd --no-cache
+./ci/vhd-build-validate.sh --mode build --output RDOS.vhd --no-cache
 ```
 
 ## Post-build behavior
@@ -155,11 +155,11 @@ That keeps your feedback cycle focused on one artifact.
 
 This repository now includes a minimal installer ISO pipeline via `build-installer-iso.sh`.
 
-It wraps a Clonezilla Live base ISO, injects your built UFTC image payload, and adds an unattended boot entry that:
+It wraps a Clonezilla Live base ISO, injects your built RDOS image payload, and adds an unattended boot entry that:
 
 1. boots the live environment
 2. finds the first non-removable disk that is not the boot USB
-3. writes UFTC to that disk
+3. writes RDOS to that disk
 4. powers off automatically
 
 ## ISO build validation
@@ -168,14 +168,14 @@ Use the ISO validation wrapper after VHD validation to build and verify installe
 
 ```bash
 chmod +x ci/iso-build-validate.sh
-./ci/iso-build-validate.sh --mode build --input-vhd uftc.vhd --output-iso uftc-installer.iso
+./ci/iso-build-validate.sh --mode build --input-vhd RDOS.vhd --output-iso RDOS-installer.iso
 ```
 
 What it validates:
 
 - output ISO exists and passes a minimum-size gate
 - ISO format (`ISO 9660`) when `file` is available
-- required payload path (`/uftc/uftc.img.zst`) exists in ISO
+- required payload path (`/RDOS/RDOS.img.zst`) exists in ISO
 - BIOS/UEFI boot assets are present (`/syslinux/isolinux.bin` and `BOOTx64.EFI`)
 - compressed payload integrity via `zstd -t`
 
@@ -183,7 +183,7 @@ Useful variant:
 
 ```bash
 # Validate an existing ISO without rebuilding
-./ci/iso-build-validate.sh --mode validate-only --output-iso uftc-installer.iso
+./ci/iso-build-validate.sh --mode validate-only --output-iso RDOS-installer.iso
 ```
 
 ## Orchestrated pipeline
@@ -215,7 +215,7 @@ Examples:
 ./ci/pipeline.sh iso-test
 
 # Run only image validation
-./ci/pipeline.sh img-test --no-deps --output-vhd uftc.vhd
+./ci/pipeline.sh img-test --no-deps --output-vhd RDOS.vhd
 
 # Override shellcheck threshold for pretest
 ./ci/pipeline.sh pretest --mode ci --shellcheck-severity error
@@ -232,7 +232,7 @@ The self-hosted job expects runner labels:
 
 - `self-hosted`
 - `linux`
-- `uftc-builder`
+- `RDOS-builder`
 
 Runner requirements for `build-and-validate`:
 
@@ -254,7 +254,7 @@ Runner requirements for `build-and-validate`:
 Self-hosted job behavior:
 
 - runs `bash ./ci/pipeline.sh all --mode ci --shellcheck-severity error`
-- uploads `uftc.vhd` and `uftc-installer.iso` as artifacts
+- uploads `RDOS.vhd` and `RDOS-installer.iso` as artifacts
 - skips untrusted fork PRs by default
 
 If your runner uses different labels, update `runs-on` in `.github/workflows/ci.yml`.
@@ -299,8 +299,8 @@ Next tag: v2.3.6 (patch incremented)
 
 Each release includes:
 
-- `uftc.vhd` (14GB bootable disk image)
-- `uftc-installer.iso` (Clonezilla-based installer)
+- `RDOS.vhd` (14GB bootable disk image)
+- `RDOS-installer.iso` (Clonezilla-based installer)
 
 ### Triggering a release manually
 
@@ -346,8 +346,8 @@ The RC workflow runs on each PR update (`synchronize`), so pushes that do not to
 
 RC releases include versioned artifacts:
 
-- `uftc-2.4.0-rc.1.vhd` (14GB bootable disk image)
-- `uftc-installer-2.4.0-rc.1.iso` (Clonezilla-based installer)
+- `RDOS-2.4.0-rc.1.vhd` (14GB bootable disk image)
+- `RDOS-installer-2.4.0-rc.1.iso` (Clonezilla-based installer)
 
 RC releases are marked as **pre-release** on GitHub and do not show up in stable release listings.
 
@@ -358,7 +358,7 @@ When the PR is merged to `master`:
 1. The Version file (e.g., `2.4`) is now on master
 2. Next push to master automatically triggers `release.yml`
 3. A stable release is created: `v2.4.0`
-4. Artifacts are named: `uftc-2.4.0.vhd`, `uftc-installer-2.4.0.iso`
+4. Artifacts are named: `RDOS-2.4.0.vhd`, `RDOS-installer-2.4.0.iso`
 5. Subsequent master pushes (without Version changes) increment: `v2.4.1`, `v2.4.2`, etc.
 
 ## Installer ISO Build Requirements
@@ -399,15 +399,15 @@ If the script fails with `Permission denied` while editing extracted boot files,
 
 Default output:
 
-- `uftc-installer.iso`
+- `RDOS-installer.iso`
 
 Optional overrides:
 
 ```bash
 CLONEZILLA_ISO_URL="https://.../clonezilla-live-amd64.iso" \
-INPUT_VHD="/path/to/uftc.vhd" \
+INPUT_VHD="/path/to/RDOS.vhd" \
 OUTPUT_ISO="/path/to/custom-installer.iso" \
-WORKDIR="/tmp/uftc-installer" \
+WORKDIR="/tmp/RDOS-installer" \
 ./build-installer-iso.sh
 ```
 
@@ -415,7 +415,7 @@ WORKDIR="/tmp/uftc-installer" \
 
 - This installer is intentionally non-interactive.
 - It will erase the selected target disk.
-- Review and adjust target disk detection in `uftc/install.sh` inside the script if your environment needs a stricter policy.
+- Review and adjust target disk detection in `RDOS/install.sh` inside the script if your environment needs a stricter policy.
 
 References used for this implementation:
 

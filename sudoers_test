@@ -1,4 +1,4 @@
-# Managed by setup-build-sudoers.sh for UFTC local build helpers.
+# Managed by setup-build-sudoers.sh for RDOS local build helpers.
 # Remove with: ./setup-build-sudoers.sh --remove
 # Only exact pipeline commands are authorized.
 localuser ALL=(root) NOPASSWD: /usr/bin/docker build . -t *

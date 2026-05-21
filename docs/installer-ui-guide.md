@@ -1,14 +1,14 @@
-# UFTC Guided Installer - Enhanced UI Guide
+# RDOS Guided Installer - Enhanced UI Guide
 
 ## Overview
 
-The UFTC guided installer has been upgraded with a full-screen, colorful, and visually appealing UI that provides a much better user experience than the previous plain whiptail dialogs.
+The RDOS guided installer has been upgraded with a full-screen, colorful, and visually appealing UI that provides a much better user experience than the previous plain whiptail dialogs.
 
 ## New Features
 
 ### Visual Enhancements
 
-- **ASCII Art Header**: Large, styled UFTC logo with colors and borders
+- **ASCII Art Header**: Large, styled RDOS logo with colors and borders
 - **Styled Section Headers**: Color-coded section dividers and titles
 - **Status Messages**: Icons (✓, ✗, ⚠, ℹ) with colored text for various message types
 - **Full-Screen Layout**: Uses the entire terminal for better readability
@@ -24,7 +24,7 @@ The UFTC guided installer has been upgraded with a full-screen, colorful, and vi
 
 #### 1. Welcome Screen
 
-- Shows UFTC logo and welcome message
+- Shows RDOS logo and welcome message
 - Displays the live media disk information
 - Prompts to continue to disk selection
 
@@ -111,7 +111,7 @@ ui_confirm "Do you want to proceed?"
 2. Boot the ISO in a VM with the guided installer mode
 
 3. You should see:
-   - Large ASCII art UFTC header
+   - Large ASCII art RDOS header
    - Styled welcome screen
    - Colorful disk selection menu
    - Progress gauge during installation

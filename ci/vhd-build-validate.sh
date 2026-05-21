@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-OUTPUT_VHD="uftc.vhd"
-IMAGE_NAME="uftc"
+OUTPUT_VHD="RDOS.vhd"
+IMAGE_NAME="RDOS"
 BUILD_MODE="build"
 NO_CACHE=0
 NO_STAGING=0
@@ -18,11 +18,11 @@ usage() {
   cat <<'EOF'
 Usage: ./ci/vhd-build-validate.sh [options] [-- <d2vm args>]
 
-Builds (or reuses) a UFTC VHD through build.sh, then validates artifact shape.
+Builds (or reuses) a RDOS VHD through build.sh, then validates artifact shape.
 
 Options:
-  --output PATH              Output VHD path (default: uftc.vhd)
-  --image-name NAME          Docker image name for build.sh (default: uftc)
+  --output PATH              Output VHD path (default: RDOS.vhd)
+  --image-name NAME          Docker image name for build.sh (default: RDOS)
   --mode MODE                build (default) or validate-only
   --no-cache                 Pass --no-cache to build.sh
   --no-staging               Pass --no-staging to build.sh

@@ -5,17 +5,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-OUTPUT_AB="uftc-ab.img"
+OUTPUT_AB="RDOS-ab.img"
 MIN_SIZE_BYTES=$((28 * 1024 * 1024 * 1024))
 
 usage() {
   cat <<'EOF'
 Usage: ./ci/ab-disk-validate.sh [options]
 
-Validates the assembled UFTC A/B + recovery raw disk image.
+Validates the assembled RDOS A/B + recovery raw disk image.
 
 Options:
-  --output PATH          Output raw disk path (default: uftc-ab.img)
+  --output PATH          Output raw disk path (default: RDOS-ab.img)
   --min-size-bytes N     Minimum logical file size gate (default: 28 GiB)
   -h, --help             Show this help
 EOF

@@ -1,12 +1,12 @@
-# UFTC Agent Instructions
+# RDOS Agent Instructions
 
-UFTC (User Friendly ThinClient) is a lightweight Linux thin-client distribution for RDP deployments. This file helps AI agents understand the project structure, build system, and development conventions.
+RDOS (User Friendly ThinClient) is a lightweight Linux thin-client distribution for RDP deployments. This file helps AI agents understand the project structure, build system, and development conventions.
 
 ## Quick Reference
 
 **Build Environment**: Linux or WSL2 (not Windows native—line endings and permissions are critical)
 
-**Build Command**: `./build.sh` → produces `uftc.vhd` (14GB bootable disk image)
+**Build Command**: `./build.sh` → produces `RDOS.vhd` (14GB bootable disk image)
 
 **ISO Build**: `./build-installer-iso.sh` → produces unattended installer ISO
 
@@ -80,7 +80,7 @@ UFTC (User Friendly ThinClient) is a lightweight Linux thin-client distribution 
 ```bash
 1. Edit files in tcfiles/ or Dockerfile
 2. ./build.sh
-3. Boot uftc.vhd in a VM
+3. Boot RDOS.vhd in a VM
 4. Let first boot complete (watch for poweroff)
 5. Boot again, validate RDP login/connectivity
 ```

@@ -14,11 +14,11 @@
 #   sudo ./build-ab-disk.sh [OPTIONS]
 #
 # Options:
-#   --prod-vhd PATH       Production VHD (default: uftc.vhd)
+#   --prod-vhd PATH       Production VHD (default: RDOS.vhd)
 #   --recovery-vhd PATH   Recovery VHD   (default: recovery.vhd)
 #   --prod-raw PATH       Production raw disk image (optional; skips VHD conversion)
 #   --recovery-raw PATH   Recovery raw disk image   (optional; skips VHD conversion)
-#   --output PATH         Output disk image (default: uftc-ab.img)
+#   --output PATH         Output disk image (default: RDOS-ab.img)
 #   --skip-efi            Skip EFI GRUB install (BIOS only)
 #
 set -euo pipefail
@@ -26,11 +26,11 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
-PROD_VHD="uftc.vhd"
+PROD_VHD="RDOS.vhd"
 RECOVERY_VHD="recovery.vhd"
 PROD_RAW_INPUT=""
 RECOVERY_RAW_INPUT=""
-OUTPUT_DISK="uftc-ab.img"
+OUTPUT_DISK="RDOS-ab.img"
 SKIP_EFI=false
 
 while [[ $# -gt 0 ]]; do
@@ -136,7 +136,7 @@ fi
 # ---------------------------------------------------------------------------
 # Temp directory and cleanup
 # ---------------------------------------------------------------------------
-WORK_DIR="$(mktemp -d /var/tmp/uftc-ab.XXXXXX)"
+WORK_DIR="$(mktemp -d /var/tmp/RDOS-ab.XXXXXX)"
 
 AB_LOOP=""
 VHD_LOOP=""
@@ -309,7 +309,7 @@ losetup -d "$REC_LOOP"; REC_LOOP=""
 # ---------------------------------------------------------------------------
 log "Writing /etc/fstab in ROOT_A"
 cat > "$WORK_DIR/root_a/etc/fstab" <<'FSTAB'
-# UFTC A/B disk layout
+# RDOS A/B disk layout
 LABEL=ROOT_A  /      ext4  errors=remount-ro  0  1
 LABEL=ESP     /boot  vfat  umask=0077         0  2
 tmpfs         /tmp   tmpfs defaults,noatime   0  0
@@ -337,7 +337,7 @@ if [[ "$SKIP_EFI" == false ]]; then
         --target=x86_64-efi \
         --boot-directory="$WORK_DIR/root_a/boot" \
         --efi-directory="$WORK_DIR/root_a/boot" \
-        --bootloader-id=uftc \
+        --bootloader-id=RDOS \
         --no-nvram \
     --recheck 2>/dev/null || log "EFI GRUB install skipped (target not available)"
 fi
@@ -393,19 +393,19 @@ else
     fi
 fi
 
-menuentry "UFTC (Slot A)" --id slot_a {
+menuentry "RDOS (Slot A)" --id slot_a {
     search --no-floppy --label --set=root ESP
     linux  /vmlinuz-a root=LABEL=ROOT_A rw quiet loglevel=3
     initrd /initrd-a.img
 }
 
-menuentry "UFTC (Slot B)" --id slot_b {
+menuentry "RDOS (Slot B)" --id slot_b {
     search --no-floppy --label --set=root ESP
     linux  /vmlinuz-b root=LABEL=ROOT_B rw quiet loglevel=3
     initrd /initrd-b.img
 }
 
-menuentry "UFTC Recovery" --id recovery {
+menuentry "RDOS Recovery" --id recovery {
     search --no-floppy --label --set=root RECOVERY
     linux  /boot/vmlinuz root=LABEL=RECOVERY rw quiet init=/usr/bin/recovery
     initrd /boot/initrd.img
@@ -414,9 +414,9 @@ GRUBCFG
 
 if [[ "$SKIP_EFI" == false ]]; then
     log "Writing EFI GRUB chainload stubs"
-    mkdir -p "$WORK_DIR/root_a/boot/EFI/uftc" "$WORK_DIR/root_a/boot/EFI/BOOT"
+    mkdir -p "$WORK_DIR/root_a/boot/EFI/RDOS" "$WORK_DIR/root_a/boot/EFI/BOOT"
 
-    cat > "$WORK_DIR/root_a/boot/EFI/uftc/grub.cfg" <<'EFI_GRUBCFG'
+    cat > "$WORK_DIR/root_a/boot/EFI/RDOS/grub.cfg" <<'EFI_GRUBCFG'
 search --no-floppy --label --set=esp ESP
 set prefix=($esp)/grub
 configfile ($esp)/grub/grub.cfg
@@ -428,10 +428,10 @@ set prefix=($esp)/grub
 configfile ($esp)/grub/grub.cfg
 EFI_FALLBACK_CFG
 
-    if [[ -f "$WORK_DIR/root_a/boot/EFI/uftc/grubx64.efi" ]]; then
-        cp "$WORK_DIR/root_a/boot/EFI/uftc/grubx64.efi" "$WORK_DIR/root_a/boot/EFI/BOOT/BOOTX64.EFI"
+    if [[ -f "$WORK_DIR/root_a/boot/EFI/RDOS/grubx64.efi" ]]; then
+        cp "$WORK_DIR/root_a/boot/EFI/RDOS/grubx64.efi" "$WORK_DIR/root_a/boot/EFI/BOOT/BOOTX64.EFI"
     else
-        log "WARNING: EFI binary not found at EFI/uftc/grubx64.efi; fallback BOOTX64.EFI was not created"
+        log "WARNING: EFI binary not found at EFI/RDOS/grubx64.efi; fallback BOOTX64.EFI was not created"
     fi
 fi
 

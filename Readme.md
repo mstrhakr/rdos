@@ -1,29 +1,27 @@
-# User Friendly ThinClient
+# Remote Desktop Operating System
 
 ```ascii
-                     █████  █████    ███████████    ███████████      █████████ 
-                    ░░███  ░░███    ░░███░░░░░░█   ░█░░░███░░░█     ███░░░░░███
-                     ░███   ░███     ░███   █ ░    ░   ░███  ░     ███     ░░░ 
-                     ░███   ░███     ░███████          ░███       ░███         
-                     ░███   ░███     ░███░░░█          ░███       ░███         
-                     ░███   ░███     ░███  ░           ░███       ░░███     ███
-                     ░░████████      █████             █████       ░░█████████ 
-                      ░░░░░░░░      ░░░░░             ░░░░░         ░░░░░░░░░  
+                 ███████████   ██████████      ███████     █████████ 
+                ▒▒███▒▒▒▒▒███ ▒▒███▒▒▒▒███   ███▒▒▒▒▒███  ███▒▒▒▒▒███
+                 ▒███    ▒███  ▒███   ▒▒███ ███     ▒▒███▒███    ▒▒▒ 
+                 ▒██████████   ▒███    ▒███▒███      ▒███▒▒█████████ 
+                 ▒███▒▒▒▒▒███  ▒███    ▒███▒███      ▒███ ▒▒▒▒▒▒▒▒███
+                 ▒███    ▒███  ▒███    ███ ▒▒███     ███  ███    ▒███
+                 █████   █████ ██████████   ▒▒▒███████▒  ▒▒█████████ 
+                ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒▒▒▒▒▒      ▒▒▒▒▒▒▒     ▒▒▒▒▒▒▒▒▒  
 ```
 
-![UFTC Login Screen](login.png)
+![RDOS Login Screen](login.png)
 
-UFTC was born out of my passion for IT, I have always wanted the ability to have thin clients in my home lab yet nothing online I could use for free was what I wanted.
-Many organizations I supported across IT departments always wanted the same thing, a lightweight locked down thinclient with a simple login screen.
+RDOS, short for Remote Desktop Operating System, is a lightweight Linux appliance built for remote desktop deployments. The goal is straightforward: turn generic PCs, laptops, and mini systems into consistent, locked-down remote desktop endpoints that are easy to deploy, easy to support, and predictable for end users.
 
-This project is geared towards that use case, repurpose machines into thin clients or save money by using your own consistent thinclient image with mini PC's.
-Super simple to setup, and easy for the end user.
+The project is aimed at environments that want a simple login-driven thin client experience without carrying around a full general-purpose desktop. RDOS focuses on fast provisioning, sensible defaults, and operational tools that help support staff diagnose issues without exposing unnecessary local functionality.
 
-- Henk.Tech
+RDOS was originally forked from Henk's UFTC project. The codebase has since diverged substantially, but the project continues to acknowledge and credit that original foundation.
 
 ## Features
 
-- Simple UI, your users only see a login screen and a shutdown button just like you'd want!
+- Purpose-built thin client UI with a login screen, core tools, and minimal local surface area.
 - Admin options are present but hidden behind secret passwords.
 - Users can use the "ping" password to ping the remote server including a full trace route. You don't have to guess where the connection goes wrong just let them send you a picture.
 - Error messages that make sense and include your own helpdesk info, your users know exactly who to contact and what to say (Written by an experienced sysadmin who also does first line support).
@@ -34,6 +32,12 @@ Super simple to setup, and easy for the end user.
 - Docker as the build system making it easy to build your own custom image.
 - auto-maintenance command for system updates (Own risk especially on auto update mode, if a bad update releases and you enabled automatic updates you have to manually roll back your machines).
 - No remote access ports and minimal packages to reduce the attack surface even if the machine is outdated (The UI can be navigated easily over the phone, VNC is not neccesary. Instead if you need to assist users request remote access within the remote desktop.)
+
+## Project lineage
+
+RDOS began as a fork of [henk717/uftc](https://github.com/henk717/uftc).
+
+That project established the original direction for a lightweight remote desktop thin client. RDOS keeps explicit attribution to that work while evolving into a separate codebase with different goals, build flows, and longer-term platform plans.
 
 ## Build your own image
 
@@ -80,7 +84,7 @@ sudo dnf install -y moby-engine ShellCheck qemu-img xorriso zstd curl util-linux
 
 `qemu-img` is provided by `qemu-utils` on Debian/Ubuntu.
 
-This installer ISO boots, writes UFTC to the first non-removable disk that is not the USB boot media, then powers off so you can remove the flash drive.
+This installer ISO boots, writes RDOS to the first non-removable disk that is not the USB boot media, then powers off so you can remove the flash drive.
 
 grub as the bootloader unlocks a few things most importantly uefi support, you also get a seperate fat32 boot partition where you can place the config files when provisioning.
 Boot partition is a sizable 4GB to reduce the risk of running out of space for the kernels, with a total size of under 16GB this should fit on a 16GB USB stick if you wish to use a USB Stick for customization and capture.
@@ -89,9 +93,9 @@ Boot partition is a sizable 4GB to reduce the risk of running out of space for t
 
 ### Installation from the ISO
 
-You can build an ISO from your local `uftc.vhd` using `./build-installer-iso.sh`.
+You can build an ISO from your local `RDOS.vhd` using `./build-installer-iso.sh`.
 
-The generated `uftc-installer.iso` is designed to be minimal: it boots directly into unattended install mode, restores UFTC to the first non-removable target disk (excluding the boot USB), and powers off when done.
+The generated `RDOS-installer.iso` is designed to be minimal: it boots directly into unattended install mode, restores RDOS to the first non-removable target disk (excluding the boot USB), and powers off when done.
 
 If you saw a `Permission denied` error while editing extracted boot files during ISO build, update to the latest `build-installer-iso.sh` from this repo (that behavior is handled in the current script).
 
@@ -116,7 +120,7 @@ Because a full copy of Clonezilla is bundled on the disk you can use this to fac
 
 #### Instructions
 
-0. Install and configure the source machine with UFTC.
+0. Install and configure the source machine with RDOS.
 1. Load CloneZilla from the installation disk using the Start Clonezilla option.
 2. Enter Shell
 3. Type the following command : sudo rm /home/partimag && sudo mkdir /home/partimag && sudo mkdir /home/partimag/live
@@ -180,7 +184,7 @@ Sensible defaults are applied automatically for display, timeout, keyboard, and 
 
 After first boot, use the `Settings` button on the login screen to open the full settings page. If an admin password is configured, you will get a separate unlock prompt before the panel opens.
 
-Default settings password: `uftc`
+Default settings password: `RDOS`
 
 The first-time setup wizard shows this default and lets you replace it during the Support step.
 
@@ -195,7 +199,7 @@ The template for this file is as follows (pay attention to the line endings, the
 server="server1|server2|server3"
 domain=""
 param=""
-adminpass="uftc"
+adminpass="RDOS"
 helpdesk="the helpdesk"
 login_timeout="600"
 volume="100"
@@ -242,7 +246,7 @@ You implement this functionality strictly on your own risk. If left blank this f
 
 ### RDP Files
 
-UFTC supports existing RDP files if downloaded from a central location, to do this simply put the RDP URL as the server name.
+RDOS supports existing RDP files if downloaded from a central location, to do this simply put the RDP URL as the server name.
 
 ### Moonlight Mode
 
@@ -253,7 +257,7 @@ For use with the Sunlight or Apollo server.
 
 ### Multiple Servers
 
-Starting at version 1.10 UFTC supports specifying multiple RDP servers (and optionally also citrix if neither uses additional parameters).
+Starting at version 1.10 RDOS supports specifying multiple RDP servers (and optionally also citrix if neither uses additional parameters).
 To set this up use the regular server field and seperate the servers with |
 
 ### Root Account
@@ -280,6 +284,8 @@ ip (without your admin password in front): Shows the devices network information
 wifi (without your admin password in front): Opens the WiFi Wizard
 
 ## Terms of Use
+
+The following terms originated with the upstream UFTC project and are retained here for clarity and attribution until this repository adopts its own finalized licensing model.
 
 - I currently don't know which formal license is the best fit, when using this software please respect the following:
 - I am not responsible for what happens with your deployment, its designed to be as robust as I could make it. But should unforseen consequences, bugs or updates happen I am not liable as you accept you use and deploy this on your own risk especially if you enabled automatic updates and your company is now offline due to a bad/incompatible debian update.

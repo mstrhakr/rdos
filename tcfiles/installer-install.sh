@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LOG_FILE="/var/log/uftc-installer.log"
+LOG_FILE="/var/log/RDOS-installer.log"
 touch "$LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-echo "=== UFTC installer ==="
+echo "=== RDOS installer ==="
 date
 
 # Silence console bell and unload pcspkr if it is present.
@@ -153,11 +153,11 @@ sanitize_disk_name() {
     | head -n1
 }
 
-IMAGE_ZST="/run/live/medium/uftc/uftc.img.zst"
-IMAGE_SIZE_FILE="/run/live/medium/uftc/uftc.img.size"
+IMAGE_ZST="/run/live/medium/RDOS/RDOS.img.zst"
+IMAGE_SIZE_FILE="/run/live/medium/RDOS/RDOS.img.size"
 if [[ ! -f "$IMAGE_ZST" ]]; then
-  IMAGE_ZST="/lib/live/mount/medium/uftc/uftc.img.zst"
-  IMAGE_SIZE_FILE="/lib/live/mount/medium/uftc/uftc.img.size"
+  IMAGE_ZST="/lib/live/mount/medium/RDOS/RDOS.img.zst"
+  IMAGE_SIZE_FILE="/lib/live/mount/medium/RDOS/RDOS.img.size"
 fi
 
 EXPECTED_IMAGE_BYTES=""
@@ -270,19 +270,19 @@ else
     ui_print_header
     printf "\n"
     printf "${COLOR_BRIGHT_CYAN}═══════════════════════════════════════════════════════════════${COLOR_RESET}\n"
-    printf "${COLOR_BRIGHT_WHITE}Welcome to UFTC Guided Installation${COLOR_RESET}\n"
+    printf "${COLOR_BRIGHT_WHITE}Welcome to RDOS Guided Installation${COLOR_RESET}\n"
     printf "${COLOR_BRIGHT_CYAN}═══════════════════════════════════════════════════════════════${COLOR_RESET}\n\n"
     ui_info_message "Live media disk: ${LIVE_DISK:-unknown}"
     printf "\n${COLOR_DIM}Press Enter to continue...${COLOR_RESET}"
     read -r
   else
-    show_msg "UFTC Installer" "Guided mode will let you choose target disk and post-install behavior.\n\nLive media disk: ${LIVE_DISK:-unknown}"
+    show_msg "RDOS Installer" "Guided mode will let you choose target disk and post-install behavior.\n\nLive media disk: ${LIVE_DISK:-unknown}"
   fi
   
   TARGET_DISK="$(pick_target_disk || true)"
   TARGET_DISK="$(sanitize_disk_name "$TARGET_DISK")"
   if [[ -z "$TARGET_DISK" ]]; then
-    show_msg "UFTC Installer" "No install target disk was selected or available."
+    show_msg "RDOS Installer" "No install target disk was selected or available."
     poweroff -f
   fi
   if ! confirm_msg "Final Warning" "All data on /dev/$TARGET_DISK will be permanently erased. Continue?"; then
@@ -294,7 +294,7 @@ echo "Writing image to /dev/$TARGET_DISK"
 echo "This will erase all data on /dev/$TARGET_DISK"
 
 if ! run_prepare_stage "$TARGET_DISK"; then
-  show_msg "UFTC Installer" "Install failed while preparing /dev/$TARGET_DISK.\n\nSee $LOG_FILE for details."
+  show_msg "RDOS Installer" "Install failed while preparing /dev/$TARGET_DISK.\n\nSee $LOG_FILE for details."
   poweroff -f
 fi
 

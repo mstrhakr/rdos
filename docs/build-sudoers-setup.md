@@ -1,6 +1,6 @@
-# UFTC Build Sudoers Setup
+# RDOS Build Sudoers Setup
 
-This document describes the static sudoers model for UFTC builds on local development machines and self-hosted runners.
+This document describes the static sudoers model for RDOS builds on local development machines and self-hosted runners.
 
 ## Overview
 
@@ -24,7 +24,7 @@ After that, `./build.sh` and `./build.sh --ab` can run without repeated sudo pro
 
 ## What setup-build-sudoers.sh installs
 
-The script writes `/etc/sudoers.d/uftc-build-nopasswd` and validates it with `visudo` before install.
+The script writes `/etc/sudoers.d/RDOS-build-nopasswd` and validates it with `visudo` before install.
 
 Rules are static and limited to build pipeline operations:
 
@@ -54,7 +54,7 @@ Re-run setup and check output:
 ./setup-build-sudoers.sh
 ```
 
-The script validates with `visudo -cf` before writing to `/etc/sudoers.d/uftc-build-nopasswd`.
+The script validates with `visudo -cf` before writing to `/etc/sudoers.d/RDOS-build-nopasswd`.
 
 ### Docker rule missing
 

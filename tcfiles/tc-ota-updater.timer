@@ -1,6 +1,6 @@
 [Unit]
-Description=UFTC OTA Update Timer
-Documentation=https://github.com/mstrhakr/uftc
+Description=RDOS OTA Update Timer
+Documentation=https://github.com/mstrhakr/RDOS
 ConditionACPower=true
 
 [Timer]
