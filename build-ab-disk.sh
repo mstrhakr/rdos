@@ -447,8 +447,10 @@ grub-editenv "$WORK_DIR/root_a/boot/grub/grubenv" set \
     pending_recovery=false \
     pending_slot=a
 
-# Create /boot/slots/ directory for slot version tracking
+# Create /boot/slots/ directory with init-done marker (no first-boot needed)
+log "Creating slot marker (kernel and initramfs pre-built in image)"
 mkdir -p "$WORK_DIR/root_a/boot/slots"
+touch "$WORK_DIR/root_a/boot/slots/a-init-done"
 
 # ---------------------------------------------------------------------------
 # Unmount boot mount
