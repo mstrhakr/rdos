@@ -132,7 +132,6 @@ shell_files=(
   setup-build-deps.sh
   setup-build-sudoers.sh
   tcfiles/auto-maintenance.debian
-  tcfiles/firstboot
   tcfiles/installer-install.sh
   tcfiles/recovery
   tcfiles/set-hostname
