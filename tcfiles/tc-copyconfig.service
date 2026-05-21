@@ -7,8 +7,8 @@ Before=network-pre.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/mv /boot/tcconfig /home/thinclient/tcconfig
-ExecStartPost=/bin/chown thinclient:thinclient /home/thinclient/tcconfig
+ExecStart=/usr/bin/install -m 600 -o thinclient -g thinclient /boot/tcconfig /home/thinclient/tcconfig
+ExecStartPost=/bin/rm -f /boot/tcconfig
 ExecStartPost=/usr/bin/tc-ota-configure-timer
 
 [Install]
