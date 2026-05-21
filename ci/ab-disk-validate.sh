@@ -76,8 +76,15 @@ if (( disk_size < MIN_SIZE_BYTES )); then
 fi
 log "A/B disk size gate passed: $disk_size bytes"
 
-partition_table="$(sgdisk -p "$OUTPUT_AB")"
-if [[ "$partition_table" != *"Found valid GPT"* ]]; then
+if ! partition_table="$(sgdisk -p "$OUTPUT_AB" 2>&1)"; then
+  echo "Validation failed: unable to read GPT partition table from $OUTPUT_AB" >&2
+  echo "$partition_table" >&2
+  exit 1
+fi
+
+# Newer/older sgdisk versions format status text differently. Validate using
+# stable markers that indicate GPT metadata and partition listing are present.
+if [[ "$partition_table" != *"Disk identifier (GUID):"* ]] || [[ "$partition_table" != *"Number  Start (sector)"* ]]; then
   echo "Validation failed: A/B disk does not contain a valid GPT" >&2
   exit 1
 fi
