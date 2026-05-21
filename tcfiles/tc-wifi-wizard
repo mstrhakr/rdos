@@ -262,13 +262,13 @@ fi
 while true; do
     show_scan_progress "$iface"
     update_progress 10 "Bringing adapter up"
-    scan_results="$(run_privileged /usr/bin/tc-scan-wifi "$iface" 2>/tmp/RDOS-wifi-scan.log || true)"
+    scan_results="$(run_privileged /usr/bin/tc-scan-wifi "$iface" 2>/tmp/rdos-wifi-scan.log || true)"
     update_progress 100 "Scan complete"
     finish_progress 1
 
     if [ -z "$scan_results" ]; then
-        if [ -s /tmp/RDOS-wifi-scan.log ]; then
-            yad --warning --center --title="WiFi Wizard" --text="The adapter scan returned an error or no usable results.\n\nDetails:\n$(tail -n 5 /tmp/RDOS-wifi-scan.log)"
+        if [ -s /tmp/rdos-wifi-scan.log ]; then
+            yad --warning --center --title="WiFi Wizard" --text="The adapter scan returned an error or no usable results.\n\nDetails:\n$(tail -n 5 /tmp/rdos-wifi-scan.log)"
         else
             yad --info --center --title="WiFi Wizard" --text="No WiFi networks were detected on $iface. You can enter the network details manually."
         fi

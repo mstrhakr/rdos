@@ -10,9 +10,9 @@ WITH_DEPS=0
 RUN_MODE="local"
 SHELLCHECK_SEVERITY=""
 
-OUTPUT_AB="RDOS-ab.img"
-OUTPUT_AB_ZST="RDOS-ab.img.zst"
-OUTPUT_ISO="RDOS-installer.iso"
+OUTPUT_AB="rdos-ab.img"
+OUTPUT_AB_ZST="rdos-ab.img.zst"
+OUTPUT_ISO="rdos-installer.iso"
 
 NO_CACHE=0
 NO_STAGING=0
@@ -38,9 +38,9 @@ Options:
                        (error|warning|info|style)
   --no-deps            Run only selected target without earlier steps
   --with-deps          Run selected target with prerequisite steps
-  --output-ab PATH     A/B disk artifact path (default: RDOS-ab.img)
-  --output-ab-zst PATH Compressed A/B disk artifact path (default: RDOS-ab.img.zst)
-  --output-iso PATH    ISO artifact path (default: RDOS-installer.iso)
+  --output-ab PATH     A/B disk artifact path (default: rdos-ab.img)
+  --output-ab-zst PATH Compressed A/B disk artifact path (default: rdos-ab.img.zst)
+  --output-iso PATH    ISO artifact path (default: rdos-installer.iso)
   --no-cache           Pass no-cache to build scripts
   --no-staging         Pass no-staging to build scripts
   --staging-dir PATH   Pass staging-dir to build scripts
@@ -50,8 +50,8 @@ Examples:
   ./ci/pipeline.sh all
   ./ci/pipeline.sh iso-test
   ./ci/pipeline.sh iso-test --no-deps
-  ./ci/pipeline.sh build-iso --output-ab RDOS-ab.img --output-ab-zst RDOS-ab.img.zst --output-iso RDOS-installer.iso
-  ./ci/pipeline.sh build-iso --with-deps --output-ab RDOS-ab.img --output-ab-zst RDOS-ab.img.zst --output-iso RDOS-installer.iso
+  ./ci/pipeline.sh build-iso --output-ab rdos-ab.img --output-ab-zst rdos-ab.img.zst --output-iso rdos-installer.iso
+  ./ci/pipeline.sh build-iso --with-deps --output-ab rdos-ab.img --output-ab-zst rdos-ab.img.zst --output-iso rdos-installer.iso
 EOF
 }
 

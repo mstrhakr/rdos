@@ -239,7 +239,7 @@ ui_progress_gauge() {
   local target_disk="$1"
   local image_path="$2"
   local provided_expected_bytes="${3:-}"
-  local log_file="${LOG_FILE:-/var/log/RDOS-installer.log}"
+  local log_file="${LOG_FILE:-/var/log/rdos-installer.log}"
   local dev="/dev/$target_disk"
   local expected_bytes=""
   local start_sectors="0"

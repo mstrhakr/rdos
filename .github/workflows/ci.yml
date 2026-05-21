@@ -19,7 +19,7 @@ concurrency:
 jobs:
   pretest:
     name: Pretest (Self-Hosted)
-    runs-on: [self-hosted, linux, RDOS-builder]
+    runs-on: [self-hosted, linux, rdos-builder]
     timeout-minutes: 20
     if: >-
       github.event_name != 'pull_request' ||
@@ -50,9 +50,9 @@ jobs:
   build-and-validate:
     name: Build + Validate (Self-Hosted)
     needs: pretest
-    runs-on: [self-hosted, linux, RDOS-builder]
+    runs-on: [self-hosted, linux, rdos-builder]
     env:
-      RUNNER_ARTIFACT_ROOT: /var/tmp/RDOS-artifacts
+      RUNNER_ARTIFACT_ROOT: /var/tmp/rdos-artifacts
     timeout-minutes: 180
     if: >-
       github.event_name != 'pull_request' ||
@@ -89,22 +89,22 @@ jobs:
           set -euo pipefail
           TARGET_DIR="${RUNNER_ARTIFACT_ROOT}/${GITHUB_SHA}"
           mkdir -p "$TARGET_DIR"
-          install -m 0644 RDOS-ab.img "$TARGET_DIR/RDOS-ab.img"
-          install -m 0644 RDOS-installer.iso "$TARGET_DIR/RDOS-installer.iso"
-          ls -lh "$TARGET_DIR/RDOS-ab.img" "$TARGET_DIR/RDOS-installer.iso"
+          install -m 0644 rdos-ab.img "$TARGET_DIR/rdos-ab.img"
+          install -m 0644 rdos-installer.iso "$TARGET_DIR/rdos-installer.iso"
+          ls -lh "$TARGET_DIR/rdos-ab.img" "$TARGET_DIR/rdos-installer.iso"
 
       - name: Upload A/B disk artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RDOS-ab
-          path: RDOS-ab.img
+          name: rdos-ab
+          path: rdos-ab.img
           if-no-files-found: error
           retention-days: 7
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RDOS-installer-iso
-          path: RDOS-installer.iso
+          name: rdos-installer-iso
+          path: rdos-installer.iso
           if-no-files-found: error
           retention-days: 7

@@ -12,9 +12,9 @@ CLONEZILLA_ISO_URL="${CLONEZILLA_ISO_URL:-$CLONEZILLA_ISO_URL_DEFAULT}"
 CLONEZILLA_ISO_SHA256="${CLONEZILLA_ISO_SHA256:-}"
 CLONEZILLA_ALLOW_UNVERIFIED="${CLONEZILLA_ALLOW_UNVERIFIED:-1}"
 INPUT_VHD="${INPUT_VHD:-RDOS.vhd}"
-INPUT_DISK="${INPUT_DISK:-RDOS-ab.img}"
+INPUT_DISK="${INPUT_DISK:-rdos-ab.img}"
 INPUT_DISK_ZST="${INPUT_DISK_ZST:-}"
-OUTPUT_ISO="${OUTPUT_ISO:-RDOS-installer.iso}"
+OUTPUT_ISO="${OUTPUT_ISO:-rdos-installer.iso}"
 DEFAULT_WORKDIR=".installer-work"
 WORKDIR="${WORKDIR:-$DEFAULT_WORKDIR}"
 BASE_ISO_CACHE="${BASE_ISO_CACHE:-.installer-cache/clonezilla-base.iso}"
@@ -47,9 +47,9 @@ Options:
       --build-arg ARG              Pass one argument to build.sh (repeatable)
       --no-cache                   Build without Docker cache (alias for --build-arg --no-cache)
       --input-vhd PATH             Input VHD path (legacy fallback; default: RDOS.vhd)
-      --input-disk PATH            Input raw disk image (A/B layout; default: RDOS-ab.img)
+      --input-disk PATH            Input raw disk image (A/B layout; default: rdos-ab.img)
       --input-disk-zst PATH        Input pre-compressed A/B payload (.img.zst)
-      --output-iso PATH            Output ISO path (default: RDOS-installer.iso)
+      --output-iso PATH            Output ISO path (default: rdos-installer.iso)
       --workdir PATH               Working directory for intermediate files
       --staging-dir PATH           Run ISO build work in PATH, then move final ISO to --output-iso
       --no-staging                 Disable automatic /mnt performance staging
@@ -253,7 +253,7 @@ fi
 AUTO_STAGING_DIR=""
 ORIGINAL_OUTPUT_ISO="$OUTPUT_ISO"
 if [[ -z "$STAGING_DIR" ]] && [[ "$NO_STAGING" != "1" ]] && [[ "$SCRIPT_DIR" == /mnt/* ]] && [[ "$WORKDIR" == "$DEFAULT_WORKDIR" ]]; then
-  AUTO_STAGING_DIR="$(mktemp -d /var/tmp/RDOS-iso.XXXXXX)"
+  AUTO_STAGING_DIR="$(mktemp -d /var/tmp/rdos-iso.XXXXXX)"
   STAGING_DIR="$AUTO_STAGING_DIR"
 fi
 

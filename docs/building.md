@@ -3,7 +3,7 @@
 This repository builds:
 
 - `RDOS.vhd` (bootable virtual disk image)
-- `RDOS-installer.iso` (minimal unattended installer ISO)
+- `rdos-installer.iso` (minimal unattended installer ISO)
 
 The normal flow is still to build `RDOS.vhd` first, then optionally package it into the installer ISO.
 
@@ -68,7 +68,7 @@ chmod +x setup-build-sudoers.sh
 ./setup-build-sudoers.sh
 ```
 
-This creates `/etc/sudoers.d/RDOS-build-nopasswd` for the current Linux user and allows passwordless sudo only for static build commands (`docker build`, this repo's `d2vm convert`, and `build-ab-disk.sh`).
+This creates `/etc/sudoers.d/rdos-build-nopasswd` for the current Linux user and allows passwordless sudo only for static build commands (`docker build`, this repo's `d2vm convert`, and `build-ab-disk.sh`).
 
 To remove the rule later:
 
@@ -168,7 +168,7 @@ Use the ISO validation wrapper after VHD validation to build and verify installe
 
 ```bash
 chmod +x ci/iso-build-validate.sh
-./ci/iso-build-validate.sh --mode build --input-vhd RDOS.vhd --output-iso RDOS-installer.iso
+./ci/iso-build-validate.sh --mode build --input-vhd RDOS.vhd --output-iso rdos-installer.iso
 ```
 
 What it validates:
@@ -183,7 +183,7 @@ Useful variant:
 
 ```bash
 # Validate an existing ISO without rebuilding
-./ci/iso-build-validate.sh --mode validate-only --output-iso RDOS-installer.iso
+./ci/iso-build-validate.sh --mode validate-only --output-iso rdos-installer.iso
 ```
 
 ## Orchestrated pipeline
@@ -232,7 +232,7 @@ The self-hosted job expects runner labels:
 
 - `self-hosted`
 - `linux`
-- `RDOS-builder`
+- `rdos-builder`
 
 Runner requirements for `build-and-validate`:
 
@@ -254,7 +254,7 @@ Runner requirements for `build-and-validate`:
 Self-hosted job behavior:
 
 - runs `bash ./ci/pipeline.sh all --mode ci --shellcheck-severity error`
-- uploads `RDOS.vhd` and `RDOS-installer.iso` as artifacts
+- uploads `RDOS.vhd` and `rdos-installer.iso` as artifacts
 - skips untrusted fork PRs by default
 
 If your runner uses different labels, update `runs-on` in `.github/workflows/ci.yml`.
@@ -300,7 +300,7 @@ Next tag: v2.3.6 (patch incremented)
 Each release includes:
 
 - `RDOS.vhd` (14GB bootable disk image)
-- `RDOS-installer.iso` (Clonezilla-based installer)
+- `rdos-installer.iso` (Clonezilla-based installer)
 
 ### Triggering a release manually
 
@@ -346,8 +346,8 @@ The RC workflow runs on each PR update (`synchronize`), so pushes that do not to
 
 RC releases include versioned artifacts:
 
-- `RDOS-2.4.0-rc.1.vhd` (14GB bootable disk image)
-- `RDOS-installer-2.4.0-rc.1.iso` (Clonezilla-based installer)
+- `rdos-2.4.0-rc.1.vhd` (14GB bootable disk image)
+- `rdos-installer-2.4.0-rc.1.iso` (Clonezilla-based installer)
 
 RC releases are marked as **pre-release** on GitHub and do not show up in stable release listings.
 
@@ -358,7 +358,7 @@ When the PR is merged to `master`:
 1. The Version file (e.g., `2.4`) is now on master
 2. Next push to master automatically triggers `release.yml`
 3. A stable release is created: `v2.4.0`
-4. Artifacts are named: `RDOS-2.4.0.vhd`, `RDOS-installer-2.4.0.iso`
+4. Artifacts are named: `rdos-2.4.0.vhd`, `rdos-installer-2.4.0.iso`
 5. Subsequent master pushes (without Version changes) increment: `v2.4.1`, `v2.4.2`, etc.
 
 ## Installer ISO Build Requirements
@@ -399,7 +399,7 @@ If the script fails with `Permission denied` while editing extracted boot files,
 
 Default output:
 
-- `RDOS-installer.iso`
+- `rdos-installer.iso`
 
 Optional overrides:
 
@@ -407,7 +407,7 @@ Optional overrides:
 CLONEZILLA_ISO_URL="https://.../clonezilla-live-amd64.iso" \
 INPUT_VHD="/path/to/RDOS.vhd" \
 OUTPUT_ISO="/path/to/custom-installer.iso" \
-WORKDIR="/tmp/RDOS-installer" \
+WORKDIR="/tmp/rdos-installer" \
 ./build-installer-iso.sh
 ```
 

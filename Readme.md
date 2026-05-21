@@ -95,7 +95,7 @@ Boot partition is a sizable 4GB to reduce the risk of running out of space for t
 
 You can build an ISO from your local `RDOS.vhd` using `./build-installer-iso.sh`.
 
-The generated `RDOS-installer.iso` is designed to be minimal: it boots directly into unattended install mode, restores RDOS to the first non-removable target disk (excluding the boot USB), and powers off when done.
+The generated `rdos-installer.iso` is designed to be minimal: it boots directly into unattended install mode, restores RDOS to the first non-removable target disk (excluding the boot USB), and powers off when done.
 
 If you saw a `Permission denied` error while editing extracted boot files during ISO build, update to the latest `build-installer-iso.sh` from this repo (that behavior is handled in the current script).
 

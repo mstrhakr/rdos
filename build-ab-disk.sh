@@ -18,7 +18,7 @@
 #   --recovery-vhd PATH   Recovery VHD   (default: recovery.vhd)
 #   --prod-raw PATH       Production raw disk image (optional; skips VHD conversion)
 #   --recovery-raw PATH   Recovery raw disk image   (optional; skips VHD conversion)
-#   --output PATH         Output disk image (default: RDOS-ab.img)
+#   --output PATH         Output disk image (default: rdos-ab.img)
 #   --skip-efi            Skip EFI GRUB install (BIOS only)
 #
 set -euo pipefail
@@ -30,7 +30,7 @@ PROD_VHD="RDOS.vhd"
 RECOVERY_VHD="recovery.vhd"
 PROD_RAW_INPUT=""
 RECOVERY_RAW_INPUT=""
-OUTPUT_DISK="RDOS-ab.img"
+OUTPUT_DISK="rdos-ab.img"
 SKIP_EFI=false
 
 while [[ $# -gt 0 ]]; do
@@ -136,7 +136,7 @@ fi
 # ---------------------------------------------------------------------------
 # Temp directory and cleanup
 # ---------------------------------------------------------------------------
-WORK_DIR="$(mktemp -d /var/tmp/RDOS-ab.XXXXXX)"
+WORK_DIR="$(mktemp -d /var/tmp/rdos-ab.XXXXXX)"
 
 AB_LOOP=""
 VHD_LOOP=""

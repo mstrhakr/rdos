@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SUDOERS_FILE="/etc/sudoers.d/RDOS-build-nopasswd"
+SUDOERS_FILE="/etc/sudoers.d/rdos-build-nopasswd"
 BUILD_SCRIPT="$SCRIPT_DIR/build.sh"
 BUILD_AB_DISK_SCRIPT="$SCRIPT_DIR/build-ab-disk.sh"
 BUILD_ISO_SCRIPT="$SCRIPT_DIR/build-installer-iso.sh"

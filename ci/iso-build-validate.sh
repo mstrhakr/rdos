@@ -8,7 +8,7 @@ cd "$REPO_ROOT"
 INPUT_VHD="RDOS.vhd"
 INPUT_DISK=""
 INPUT_DISK_ZST=""
-OUTPUT_ISO="RDOS-installer.iso"
+OUTPUT_ISO="rdos-installer.iso"
 BUILD_MODE="build"
 NO_CACHE=0
 NO_STAGING=0
@@ -27,7 +27,7 @@ Options:
   --input-vhd PATH        Input VHD path used by ISO build (default: RDOS.vhd)
   --input-disk PATH       Input raw A/B disk path used by ISO build
   --input-disk-zst PATH   Input compressed A/B payload path used by ISO build
-  --output-iso PATH       Output ISO path (default: RDOS-installer.iso)
+  --output-iso PATH       Output ISO path (default: rdos-installer.iso)
   --mode MODE             build (default) or validate-only
   --payload-layout MODE   Expected payload layout: auto, single, or ab
   --no-cache              Pass --no-cache to build-installer-iso.sh

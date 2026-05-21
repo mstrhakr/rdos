@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-OUTPUT_AB="RDOS-ab.img"
+OUTPUT_AB="rdos-ab.img"
 MIN_SIZE_BYTES=$((28 * 1024 * 1024 * 1024))
 
 usage() {
@@ -15,7 +15,7 @@ Usage: ./ci/ab-disk-validate.sh [options]
 Validates the assembled RDOS A/B + recovery raw disk image.
 
 Options:
-  --output PATH          Output raw disk path (default: RDOS-ab.img)
+  --output PATH          Output raw disk path (default: rdos-ab.img)
   --min-size-bytes N     Minimum logical file size gate (default: 28 GiB)
   -h, --help             Show this help
 EOF

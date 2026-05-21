@@ -10,7 +10,7 @@ GRUBENV="/boot/grub/grubenv"
 CONFIG_FILE="/boot/tcconfig"
 GITHUB_API="https://api.github.com/repos/mstrhakr/RDOS/releases/latest"
 STAGING_DIR="/var/tmp"
-STAGING_FILE="$STAGING_DIR/RDOS-ota.img.zst"
+STAGING_FILE="$STAGING_DIR/rdos-ota.img.zst"
 STAGING_PARTIAL="${STAGING_FILE}.partial"
 LOG_TAG="tc-ota"
 REQUIRED_FREE_KB=$((5 * 1024 * 1024))   # 5 GB minimum free in STAGING_DIR
@@ -228,7 +228,7 @@ log "OTA staging complete. System will reboot to recovery to commit slot $INACTI
 # ---------------------------------------------------------------------------
 if pgrep -x xfreerdp3 >/dev/null 2>&1; then
     log "Active RDP session detected — scheduling reboot for 03:00."
-    systemd-run --on-calendar="*-*-* 03:00:00" --unit="RDOS-ota-reboot" \
+    systemd-run --on-calendar="*-*-* 03:00:00" --unit="rdos-ota-reboot" \
         /bin/systemctl reboot 2>/dev/null || \
         log "Could not schedule deferred reboot; reboot manually when convenient."
 else

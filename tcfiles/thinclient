@@ -257,7 +257,7 @@ status_overlay_loop() {
         x_offset=0
     fi
 
-    fifo_path="$(mktemp -u /tmp/RDOS-status-overlay.XXXXXX)"
+    fifo_path="$(mktemp -u /tmp/rdos-status-overlay.XXXXXX)"
     mkfifo "$fifo_path"
 
     yad --progress \
