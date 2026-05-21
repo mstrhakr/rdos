@@ -8,3 +8,4 @@ tcconfig*
 *.iso
 *.img
 *.raw
+*.img.zst*

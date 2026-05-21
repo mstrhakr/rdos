@@ -1,5 +1,0 @@
-#!/bin/bash
-# This script is no longer used. Kernel and initramfs are built into the image,
-# and the slot marker is created during A/B disk assembly. This file is kept for
-# backward compatibility but will never execute.
-exit 0
