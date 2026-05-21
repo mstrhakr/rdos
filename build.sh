@@ -1,6 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+    cat <<'EOF'
+Usage: ./build.sh [options]
+
+Builds RDOS Docker images and assembles raw disk artifacts (no d2vm/VHD).
+
+Options:
+  -o, --output PATH          Output production raw disk path (default: rdos-prod.raw)
+      --output-prod-raw PATH Output production raw disk path (default: rdos-prod.raw)
+      --output-recovery-raw PATH
+                             Output recovery raw disk path (default: rdos-recovery.raw)
+      --image-name NAME      Production Docker image name/tag base (default: rdos)
+      --skip-docker-build    Reuse existing Docker images and only assemble raw artifacts
+      --no-cache             Rebuild Docker images without cache
+      --ab                   Also assemble A/B disk artifact (rdos-ab.img)
+      --output-ab PATH       Output A/B disk path (default: rdos-ab.img)
+      --output-ab-zst PATH   Output compressed A/B disk path (default: <output-ab>.zst)
+      --zstd-level N         Compression level for A/B .zst (1-19, default: 9)
+  -f, --force                Overwrite existing outputs
+  -h, --help                 Show this help message
+EOF
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+    esac
+done
+
 # Run the full build as root to avoid piecemeal sudo permissions for loop/mount operations.
 if [[ "$EUID" -ne 0 ]]; then
     if ! command -v sudo >/dev/null 2>&1; then
@@ -8,7 +40,7 @@ if [[ "$EUID" -ne 0 ]]; then
         echo "Run as root, or install sudo and rerun." >&2
         exit 1
     fi
-    exec sudo -E "$0" "$@"
+    exec sudo "$0" "$@"
 fi
 
 export DOCKER_BUILDKIT=1
@@ -78,29 +110,6 @@ NO_CACHE=0
 BUILD_AB=0
 
 PARTITION_TOOL="partscan"
-
-usage() {
-    cat <<'EOF'
-Usage: ./build.sh [options]
-
-Builds RDOS Docker images and assembles raw disk artifacts (no d2vm/VHD).
-
-Options:
-  -o, --output PATH          Output production raw disk path (default: rdos-prod.raw)
-      --output-prod-raw PATH Output production raw disk path (default: rdos-prod.raw)
-      --output-recovery-raw PATH
-                             Output recovery raw disk path (default: rdos-recovery.raw)
-      --image-name NAME      Production Docker image name/tag base (default: rdos)
-      --skip-docker-build    Reuse existing Docker images and only assemble raw artifacts
-      --no-cache             Rebuild Docker images without cache
-      --ab                   Also assemble A/B disk artifact (rdos-ab.img)
-      --output-ab PATH       Output A/B disk path (default: rdos-ab.img)
-            --output-ab-zst PATH   Output compressed A/B disk path (default: <output-ab>.zst)
-            --zstd-level N         Compression level for A/B .zst (1-19, default: 9)
-  -f, --force                Overwrite existing outputs
-  -h, --help                 Show this help message
-EOF
-}
 
 wait_for_block_device() {
     local dev_path="$1"
