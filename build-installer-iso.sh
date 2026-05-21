@@ -226,6 +226,17 @@ log_phase() {
   printf '\n[%s] %s\n' "$(date +'%H:%M:%S')" "$1"
 }
 
+copy_with_progress() {
+  local source_path="$1"
+  local target_path="$2"
+
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -ah --info=progress2 --no-inc-recursive --protect-args "$source_path" "$target_path"
+  else
+    cp -f "$source_path" "$target_path"
+  fi
+}
+
 verify_clonezilla_iso() {
   local file_path="$1"
 
@@ -316,21 +327,21 @@ fi
 if [[ -z "$INPUT_DISK" ]] && [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_VHD" != "$STAGING_DIR/$(basename "$INPUT_VHD")" ]]; then
   staged_input_vhd="$STAGING_DIR/$(basename "$INPUT_VHD")"
   log_phase "Copying input VHD to staging area"
-  cp -f "$INPUT_VHD" "$staged_input_vhd"
+  copy_with_progress "$INPUT_VHD" "$staged_input_vhd"
   INPUT_VHD="$staged_input_vhd"
 fi
 
 if [[ -n "$INPUT_DISK" ]] && [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_DISK" != "$STAGING_DIR/$(basename "$INPUT_DISK")" ]]; then
   staged_input_disk="$STAGING_DIR/$(basename "$INPUT_DISK")"
   log_phase "Copying input disk to staging area"
-  cp -f "$INPUT_DISK" "$staged_input_disk"
+  copy_with_progress "$INPUT_DISK" "$staged_input_disk"
   INPUT_DISK="$staged_input_disk"
 fi
 
 if [[ -n "$INPUT_DISK_ZST" ]] && [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_DISK_ZST" != "$STAGING_DIR/$(basename "$INPUT_DISK_ZST")" ]]; then
   staged_input_disk_zst="$STAGING_DIR/$(basename "$INPUT_DISK_ZST")"
   log_phase "Copying compressed disk payload to staging area"
-  cp -f "$INPUT_DISK_ZST" "$staged_input_disk_zst"
+  copy_with_progress "$INPUT_DISK_ZST" "$staged_input_disk_zst"
   INPUT_DISK_ZST="$staged_input_disk_zst"
 fi
 
