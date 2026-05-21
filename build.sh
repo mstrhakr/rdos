@@ -70,6 +70,8 @@ RECOVERY_IMAGE_NAME="uftc-recovery"
 OUTPUT_PROD_RAW="uftc-prod.raw"
 OUTPUT_RECOVERY_RAW="recovery.raw"
 OUTPUT_AB="uftc-ab.img"
+OUTPUT_AB_ZST=""
+AB_ZSTD_LEVEL=9
 FORCE_OVERWRITE=0
 SKIP_DOCKER_BUILD=0
 NO_CACHE=0
@@ -93,6 +95,8 @@ Options:
       --no-cache             Rebuild Docker images without cache
       --ab                   Also assemble A/B disk artifact (uftc-ab.img)
       --output-ab PATH       Output A/B disk path (default: uftc-ab.img)
+            --output-ab-zst PATH   Output compressed A/B disk path (default: <output-ab>.zst)
+            --zstd-level N         Compression level for A/B .zst (1-19, default: 9)
   -f, --force                Overwrite existing outputs
   -h, --help                 Show this help message
 EOF
@@ -271,6 +275,16 @@ while [[ $# -gt 0 ]]; do
             OUTPUT_AB="$2"
             shift 2
             ;;
+        --output-ab-zst)
+            [[ $# -lt 2 ]] && { echo "Missing value for $1" >&2; exit 1; }
+            OUTPUT_AB_ZST="$2"
+            shift 2
+            ;;
+        --zstd-level)
+            [[ $# -lt 2 ]] && { echo "Missing value for $1" >&2; exit 1; }
+            AB_ZSTD_LEVEL="$2"
+            shift 2
+            ;;
         -f|--force)
             FORCE_OVERWRITE=1
             shift
@@ -287,7 +301,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for cmd in sgdisk mkfs.fat mkfs.ext4 losetup partprobe qemu-img rsync grub-install grub-editenv tar; do
+if [[ -z "$OUTPUT_AB_ZST" ]]; then
+    OUTPUT_AB_ZST="${OUTPUT_AB}.zst"
+fi
+
+if ! [[ "$AB_ZSTD_LEVEL" =~ ^[0-9]+$ ]] || (( AB_ZSTD_LEVEL < 1 || AB_ZSTD_LEVEL > 19 )); then
+    echo "Invalid --zstd-level: $AB_ZSTD_LEVEL (expected 1-19)" >&2
+    exit 1
+fi
+
+for cmd in sgdisk mkfs.fat mkfs.ext4 losetup partprobe qemu-img rsync grub-install grub-editenv tar zstd; do
     command -v "$cmd" >/dev/null 2>&1 || { echo "Missing required command: $cmd" >&2; exit 1; }
 done
 
@@ -328,8 +351,16 @@ if [[ "$BUILD_AB" == "1" ]]; then
         exit 1
     fi
 
+    if [[ -f "$OUTPUT_AB_ZST" ]] && [[ "$FORCE_OVERWRITE" != "1" ]]; then
+        echo "Output already exists: $OUTPUT_AB_ZST" >&2
+        echo "Use --force to overwrite, or choose a different --output-ab-zst path." >&2
+        exit 1
+    fi
+
     [[ -f "$OUTPUT_RECOVERY_RAW" ]] && rm -f "$OUTPUT_RECOVERY_RAW"
     [[ -f "$OUTPUT_AB" ]] && rm -f "$OUTPUT_AB"
+    [[ -f "$OUTPUT_AB_ZST" ]] && rm -f "$OUTPUT_AB_ZST"
+    [[ -f "${OUTPUT_AB_ZST}.size" ]] && rm -f "${OUTPUT_AB_ZST}.size"
 
     run_with_heartbeat "Assembling recovery raw source image" build_source_raw_image "${RECOVERY_IMAGE_NAME}:latest" "$OUTPUT_RECOVERY_RAW" 2G 200
     log_phase "Recovery raw image ready: $OUTPUT_RECOVERY_RAW"
@@ -341,4 +372,9 @@ if [[ "$BUILD_AB" == "1" ]]; then
             --output "$OUTPUT_AB"
 
     log_phase "A/B disk ready: $OUTPUT_AB"
+
+    run_with_heartbeat "Compressing A/B disk artifact (zstd level ${AB_ZSTD_LEVEL})" \
+        zstd -T0 "-${AB_ZSTD_LEVEL}" -f "$OUTPUT_AB" -o "$OUTPUT_AB_ZST"
+    stat -c%s "$OUTPUT_AB" > "${OUTPUT_AB_ZST}.size"
+    log_phase "Compressed A/B disk ready: $OUTPUT_AB_ZST"
 fi

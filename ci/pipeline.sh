@@ -11,6 +11,7 @@ RUN_MODE="local"
 SHELLCHECK_SEVERITY=""
 
 OUTPUT_AB="uftc-ab.img"
+OUTPUT_AB_ZST="uftc-ab.img.zst"
 OUTPUT_ISO="uftc-installer.iso"
 
 NO_CACHE=0
@@ -38,6 +39,7 @@ Options:
   --no-deps            Run only selected target without earlier steps
   --with-deps          Run selected target with prerequisite steps
   --output-ab PATH     A/B disk artifact path (default: uftc-ab.img)
+  --output-ab-zst PATH Compressed A/B disk artifact path (default: uftc-ab.img.zst)
   --output-iso PATH    ISO artifact path (default: uftc-installer.iso)
   --no-cache           Pass no-cache to build scripts
   --no-staging         Pass no-staging to build scripts
@@ -48,8 +50,8 @@ Examples:
   ./ci/pipeline.sh all
   ./ci/pipeline.sh iso-test
   ./ci/pipeline.sh iso-test --no-deps
-  ./ci/pipeline.sh build-iso --output-ab uftc-ab.img --output-iso uftc-installer.iso
-  ./ci/pipeline.sh build-iso --with-deps --output-ab uftc-ab.img --output-iso uftc-installer.iso
+  ./ci/pipeline.sh build-iso --output-ab uftc-ab.img --output-ab-zst uftc-ab.img.zst --output-iso uftc-installer.iso
+  ./ci/pipeline.sh build-iso --with-deps --output-ab uftc-ab.img --output-ab-zst uftc-ab.img.zst --output-iso uftc-installer.iso
 EOF
 }
 
@@ -89,6 +91,11 @@ while [[ $# -gt 0 ]]; do
     --output-ab)
       [[ $# -lt 2 ]] && { echo "Missing value for --output-ab" >&2; exit 1; }
       OUTPUT_AB="$2"
+      shift 2
+      ;;
+    --output-ab-zst)
+      [[ $# -lt 2 ]] && { echo "Missing value for --output-ab-zst" >&2; exit 1; }
+      OUTPUT_AB_ZST="$2"
       shift 2
       ;;
     --output-iso)
@@ -145,7 +152,7 @@ run_pretest() {
 }
 
 run_build_img() {
-  local args=(--output-ab "$OUTPUT_AB" --ab --force)
+  local args=(--output-ab "$OUTPUT_AB" --output-ab-zst "$OUTPUT_AB_ZST" --ab --force)
   [[ "$NO_CACHE" == "1" ]] && args+=(--no-cache)
 
   log "Step build-img: building raw source and A/B disk artifacts"
@@ -163,7 +170,7 @@ run_ab_test() {
 }
 
 run_build_iso() {
-  local args=(--skip-build --input-disk "$OUTPUT_AB" --output-iso "$OUTPUT_ISO")
+  local args=(--skip-build --input-disk-zst "$OUTPUT_AB_ZST" --output-iso "$OUTPUT_ISO")
   [[ "$NO_CACHE" == "1" ]] && args+=(--no-cache)
   [[ "$NO_STAGING" == "1" ]] && args+=(--no-staging)
   [[ -n "$STAGING_DIR" ]] && args+=(--staging-dir "$STAGING_DIR")

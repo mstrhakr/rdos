@@ -13,6 +13,7 @@ CLONEZILLA_ISO_SHA256="${CLONEZILLA_ISO_SHA256:-}"
 CLONEZILLA_ALLOW_UNVERIFIED="${CLONEZILLA_ALLOW_UNVERIFIED:-1}"
 INPUT_VHD="${INPUT_VHD:-uftc.vhd}"
 INPUT_DISK="${INPUT_DISK:-uftc-ab.img}"
+INPUT_DISK_ZST="${INPUT_DISK_ZST:-}"
 OUTPUT_ISO="${OUTPUT_ISO:-uftc-installer.iso}"
 DEFAULT_WORKDIR=".installer-work"
 WORKDIR="${WORKDIR:-$DEFAULT_WORKDIR}"
@@ -47,6 +48,7 @@ Options:
       --no-cache                   Build without Docker cache (alias for --build-arg --no-cache)
       --input-vhd PATH             Input VHD path (legacy fallback; default: uftc.vhd)
       --input-disk PATH            Input raw disk image (A/B layout; default: uftc-ab.img)
+      --input-disk-zst PATH        Input pre-compressed A/B payload (.img.zst)
       --output-iso PATH            Output ISO path (default: uftc-installer.iso)
       --workdir PATH               Working directory for intermediate files
       --staging-dir PATH           Run ISO build work in PATH, then move final ISO to --output-iso
@@ -104,6 +106,15 @@ while [[ $# -gt 0 ]]; do
         SKIP_BUILD=1
         shift 2
         ;;
+    --input-disk-zst)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      INPUT_DISK_ZST="$2"
+      SKIP_BUILD=1
+      shift 2
+      ;;
     --output-iso)
       if [[ $# -lt 2 ]]; then
         echo "Missing value for $1" >&2
@@ -269,17 +280,25 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
   fi
 
   log_phase "Building fresh raw A/B disk via $BUILD_SCRIPT"
-  "$BUILD_SCRIPT" --ab --output-ab "$build_output_disk" --force "${BUILD_SCRIPT_ARGS[@]}"
+  "$BUILD_SCRIPT" --ab --output-ab "$build_output_disk" --output-ab-zst "${build_output_disk}.zst" --force "${BUILD_SCRIPT_ARGS[@]}"
   INPUT_DISK="$build_output_disk"
+  INPUT_DISK_ZST="${build_output_disk}.zst"
 else
-  if [[ -n "$INPUT_DISK" ]]; then
+  if [[ -n "$INPUT_DISK_ZST" ]]; then
+    log_phase "Skipping build; using existing compressed disk payload $INPUT_DISK_ZST"
+  elif [[ -n "$INPUT_DISK" ]]; then
     log_phase "Skipping build; using existing raw disk $INPUT_DISK"
   else
     log_phase "Skipping VHD build; using existing $INPUT_VHD"
   fi
 fi
 
-if [[ -n "$INPUT_DISK" ]]; then
+if [[ -n "$INPUT_DISK_ZST" ]]; then
+  if [[ ! -f "$INPUT_DISK_ZST" ]]; then
+    echo "Input compressed disk not found: $INPUT_DISK_ZST" >&2
+    exit 1
+  fi
+elif [[ -n "$INPUT_DISK" ]]; then
   if [[ ! -f "$INPUT_DISK" ]]; then
     echo "Input disk not found: $INPUT_DISK" >&2
     exit 1
@@ -306,6 +325,13 @@ if [[ -n "$INPUT_DISK" ]] && [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_DISK" != "$ST
   log_phase "Copying input disk to staging area"
   cp -f "$INPUT_DISK" "$staged_input_disk"
   INPUT_DISK="$staged_input_disk"
+fi
+
+if [[ -n "$INPUT_DISK_ZST" ]] && [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_DISK_ZST" != "$STAGING_DIR/$(basename "$INPUT_DISK_ZST")" ]]; then
+  staged_input_disk_zst="$STAGING_DIR/$(basename "$INPUT_DISK_ZST")"
+  log_phase "Copying compressed disk payload to staging area"
+  cp -f "$INPUT_DISK_ZST" "$staged_input_disk_zst"
+  INPUT_DISK_ZST="$staged_input_disk_zst"
 fi
 
 mkdir -p "$WORKDIR"
@@ -358,18 +384,33 @@ done
 
 mkdir -p "$ISO_ROOT/uftc"
 
-if [[ -n "$INPUT_DISK" ]]; then
+if [[ -n "$INPUT_DISK_ZST" ]]; then
+  log_phase "Using pre-compressed A/B payload directly: $INPUT_DISK_ZST"
+  cp "$INPUT_DISK_ZST" "$COMPRESSED_IMAGE"
+
+  if [[ -f "${INPUT_DISK_ZST}.size" ]]; then
+    cp "${INPUT_DISK_ZST}.size" "$IMAGE_SIZE_METADATA"
+  elif [[ -n "$INPUT_DISK" && -f "$INPUT_DISK" ]]; then
+    stat -c%s "$INPUT_DISK" > "$IMAGE_SIZE_METADATA"
+  else
+    log_phase "No .size metadata found; deriving uncompressed size from payload stream"
+    zstd -d -c "$INPUT_DISK_ZST" | wc -c > "$IMAGE_SIZE_METADATA"
+  fi
+elif [[ -n "$INPUT_DISK" ]]; then
   log_phase "Using raw A/B disk image directly: $INPUT_DISK"
   cp "$INPUT_DISK" "$RAW_IMAGE"
+  log_phase "Compressing installer payload (zstd level ${ZSTD_LEVEL}, threads: all)"
+  zstd -T0 "-${ZSTD_LEVEL}" -f "$RAW_IMAGE" -o "$COMPRESSED_IMAGE"
+  stat -c%s "$RAW_IMAGE" > "$IMAGE_SIZE_METADATA"
+  rm -f "$RAW_IMAGE"
 else
   log_phase "Converting $INPUT_VHD to raw image"
   qemu-img convert -f vpc -O raw "$INPUT_VHD" "$RAW_IMAGE"
+  log_phase "Compressing installer payload (zstd level ${ZSTD_LEVEL}, threads: all)"
+  zstd -T0 "-${ZSTD_LEVEL}" -f "$RAW_IMAGE" -o "$COMPRESSED_IMAGE"
+  stat -c%s "$RAW_IMAGE" > "$IMAGE_SIZE_METADATA"
+  rm -f "$RAW_IMAGE"
 fi
-
-log_phase "Compressing installer payload (zstd level ${ZSTD_LEVEL}, threads: all)"
-zstd -T0 "-${ZSTD_LEVEL}" -f "$RAW_IMAGE" -o "$COMPRESSED_IMAGE"
-stat -c%s "$RAW_IMAGE" > "$IMAGE_SIZE_METADATA"
-rm -f "$RAW_IMAGE"
 
 cp "$SCRIPT_DIR/tcfiles/installer-install.sh" "$ISO_ROOT/uftc/install.sh"
 cp "$SCRIPT_DIR/tcfiles/tc-installer-ui.sh" "$ISO_ROOT/uftc/tc-installer-ui.sh"

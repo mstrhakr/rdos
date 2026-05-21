@@ -7,6 +7,7 @@ cd "$REPO_ROOT"
 
 INPUT_VHD="uftc.vhd"
 INPUT_DISK=""
+INPUT_DISK_ZST=""
 OUTPUT_ISO="uftc-installer.iso"
 BUILD_MODE="build"
 NO_CACHE=0
@@ -25,6 +26,7 @@ then validates ISO shape, boot assets, and payload integrity.
 Options:
   --input-vhd PATH        Input VHD path used by ISO build (default: uftc.vhd)
   --input-disk PATH       Input raw A/B disk path used by ISO build
+  --input-disk-zst PATH   Input compressed A/B payload path used by ISO build
   --output-iso PATH       Output ISO path (default: uftc-installer.iso)
   --mode MODE             build (default) or validate-only
   --payload-layout MODE   Expected payload layout: auto, single, or ab
@@ -46,6 +48,11 @@ while [[ $# -gt 0 ]]; do
     --input-disk)
       [[ $# -lt 2 ]] && { echo "Missing value for --input-disk" >&2; exit 1; }
       INPUT_DISK="$2"
+      shift 2
+      ;;
+    --input-disk-zst)
+      [[ $# -lt 2 ]] && { echo "Missing value for --input-disk-zst" >&2; exit 1; }
+      INPUT_DISK_ZST="$2"
       shift 2
       ;;
     --output-iso)
@@ -147,7 +154,7 @@ require_cmd zstd
 
 effective_payload_layout="$PAYLOAD_LAYOUT"
 if [[ "$effective_payload_layout" == "auto" ]]; then
-  if [[ -n "$INPUT_DISK" ]]; then
+  if [[ -n "$INPUT_DISK" || -n "$INPUT_DISK_ZST" ]]; then
     effective_payload_layout="ab"
   elif [[ "$BUILD_MODE" == "build" ]]; then
     effective_payload_layout="single"
@@ -186,7 +193,13 @@ check_ab_layout() {
 
 if [[ "$BUILD_MODE" == "build" ]]; then
   build_args=(--skip-build --output-iso "$OUTPUT_ISO")
-  if [[ -n "$INPUT_DISK" ]]; then
+  if [[ -n "$INPUT_DISK_ZST" ]]; then
+    if [[ ! -f "$INPUT_DISK_ZST" ]]; then
+      echo "Input compressed disk not found: $INPUT_DISK_ZST" >&2
+      exit 1
+    fi
+    build_args+=(--input-disk-zst "$INPUT_DISK_ZST")
+  elif [[ -n "$INPUT_DISK" ]]; then
     if [[ ! -f "$INPUT_DISK" ]]; then
       echo "Input disk not found: $INPUT_DISK" >&2
       exit 1
