@@ -21,6 +21,46 @@ log()  { logger -t "$LOG_TAG" "$*"; echo "[$LOG_TAG] $*"; }
 warn() { logger -t "$LOG_TAG" "WARNING: $*"; echo "[$LOG_TAG] WARNING: $*" >&2; }
 die()  { logger -t "$LOG_TAG" "ERROR: $*";   echo "[$LOG_TAG] ERROR: $*"   >&2; exit 1; }
 
+json_unescape() {
+    local value="$1"
+
+    value="${value//\\\//\/}"
+    value="${value//\\\"/\"}"
+    value="${value//\\\\/\\}"
+    printf '%s\n' "$value"
+}
+
+json_get_string() {
+    local json="$1"
+    local key="$2"
+    local raw
+
+    raw=$(printf '%s' "$json" | tr -d '\n' | sed -nE "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"(([^\"\\\\]|\\\\.)*)\".*/\\1/p" | head -n1)
+    [[ -n "$raw" ]] || return 1
+    json_unescape "$raw"
+}
+
+json_get_asset_url() {
+    local json="$1"
+    local asset_name="$2"
+    local compact
+    local entry
+    local raw
+
+    compact="$(printf '%s' "$json" | tr -d '\n')"
+
+    while IFS= read -r entry; do
+        if printf '%s' "$entry" | grep -Fq "\"name\":\"${asset_name}\""; then
+            raw=$(printf '%s' "$entry" | sed -nE 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p' | head -n1)
+            [[ -n "$raw" ]] || return 1
+            json_unescape "$raw"
+            return 0
+        fi
+    done < <(printf '%s\n' "$compact" | sed 's/},{/}\n{/g')
+
+    return 1
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --manual)
@@ -109,15 +149,7 @@ RELEASE_JSON=$(curl -fsSL --connect-timeout 10 --max-time 30 "$GITHUB_API") || {
 # ---------------------------------------------------------------------------
 # Download manifest.json from the release assets
 # ---------------------------------------------------------------------------
-MANIFEST_URL=$(python3 - <<'PYEOF' "$RELEASE_JSON"
-import json, sys
-data = json.loads(sys.argv[1])
-for asset in data.get("assets", []):
-    if asset["name"] == "manifest.json":
-        print(asset["browser_download_url"])
-        break
-PYEOF
-)
+MANIFEST_URL="$(json_get_asset_url "$RELEASE_JSON" "manifest.json" || true)"
 
 if [[ -z "$MANIFEST_URL" ]]; then
     warn "manifest.json not found in latest release assets, skipping."
@@ -129,9 +161,9 @@ MANIFEST=$(curl -fsSL --connect-timeout 10 --max-time 30 "$MANIFEST_URL") || {
     exit 0
 }
 
-REMOTE_VERSION=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d['version'])" "$MANIFEST" 2>/dev/null || true)
-EXPECTED_SHA256=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d['sha256'])"  "$MANIFEST" 2>/dev/null || true)
-OTA_ARTIFACT=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d['artifact'])"   "$MANIFEST" 2>/dev/null || true)
+REMOTE_VERSION="$(json_get_string "$MANIFEST" "version" || true)"
+EXPECTED_SHA256="$(json_get_string "$MANIFEST" "sha256" || true)"
+OTA_ARTIFACT="$(json_get_string "$MANIFEST" "artifact" || true)"
 
 if [[ -z "$REMOTE_VERSION" || -z "$EXPECTED_SHA256" || -z "$OTA_ARTIFACT" ]]; then
     warn "Incomplete manifest.json (version/sha256/artifact missing), skipping."
@@ -158,16 +190,7 @@ log "Update available: ${ACTIVE_VERSION:-none} → $REMOTE_VERSION"
 # ---------------------------------------------------------------------------
 # Find the OTA image download URL
 # ---------------------------------------------------------------------------
-OTA_URL=$(python3 - <<'PYEOF' "$RELEASE_JSON" "$OTA_ARTIFACT"
-import json, sys
-data = json.loads(sys.argv[1])
-artifact = sys.argv[2]
-for asset in data.get("assets", []):
-    if asset["name"] == artifact:
-        print(asset["browser_download_url"])
-        break
-PYEOF
-)
+OTA_URL="$(json_get_asset_url "$RELEASE_JSON" "$OTA_ARTIFACT" || true)"
 
 if [[ -z "$OTA_URL" ]]; then
     warn "OTA artifact '$OTA_ARTIFACT' not found in release assets, skipping."
