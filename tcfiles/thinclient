@@ -493,13 +493,24 @@ fi
 # This module is to load configs in a safe manner, if someone malicious were to add commands to the bash config files they will not be executed
 load_config ()
 {
+    is_allowed_config_key() {
+        case "$1" in
+            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|cert_policy|connect_splash_timeout|status_overlay_enabled|status_show_datetime|status_show_battery|status_show_wifi|status_show_ip|status_show_wireguard|wireguard_enabled|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns|auto_update_enabled|maintenance_window|autologon|username|password|rdpusername|rdpserver)
+                return 0
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+    }
+
     if [[ -f "$1" ]]; then
         while IFS='=' read -r key value || [[ -n "$key" ]]; do
             # Ignore empty lines and comments
             [[ -z "$key" || "$key" =~ ^# ]] && continue
-            
-            # Ensure the key is a valid variable name and replace hostname if needed
-            if [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+
+            # Only permit known config keys to avoid environment variable injection.
+            if is_allowed_config_key "$key"; then
                 # Replace tchostname with the up to date hostname
                 value=${value/tc_hostname/"$hostname"}
 
@@ -514,7 +525,7 @@ load_config ()
                     unset "$key"
                 fi
             else
-                echo "Skipping potentially unsafe entry: $key"
+                echo "Skipping unsupported config key: $key"
             fi
         done < "$1"
     else
