@@ -520,8 +520,12 @@ echo "Payload mode: zstd compressed."
 echo "Review target disk detection in RDOS/install.sh if you need a different policy."
 
 if [[ -n "$STAGING_DIR" ]]; then
-  log_phase "Moving staged ISO to destination: $ORIGINAL_OUTPUT_ISO"
-  mv -f "$OUTPUT_ISO" "$ORIGINAL_OUTPUT_ISO"
+  log_phase "Publishing staged ISO to destination: $ORIGINAL_OUTPUT_ISO"
+  if [[ -e "$ORIGINAL_OUTPUT_ISO" ]]; then
+    chmod u+w "$ORIGINAL_OUTPUT_ISO" 2>/dev/null || true
+    rm -f "$ORIGINAL_OUTPUT_ISO"
+  fi
+  cp -f "$OUTPUT_ISO" "$ORIGINAL_OUTPUT_ISO"
   if [[ -n "$AUTO_STAGING_DIR" ]]; then
     rm -rf "$AUTO_STAGING_DIR"
   fi
