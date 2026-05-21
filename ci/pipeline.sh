@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 TARGET_STEP="all"
-WITH_DEPS=1
+WITH_DEPS=0
 RUN_MODE="local"
 SHELLCHECK_SEVERITY=""
 
@@ -36,7 +36,7 @@ Options:
                        Optional override for preflight shellcheck threshold
                        (error|warning|info|style)
   --no-deps            Run only selected target without earlier steps
-  --with-deps          Run selected target with prerequisite steps (default)
+  --with-deps          Run selected target with prerequisite steps
   --output-ab PATH     A/B disk artifact path (default: uftc-ab.img)
   --output-iso PATH    ISO artifact path (default: uftc-installer.iso)
   --no-cache           Pass no-cache to build scripts
@@ -48,6 +48,7 @@ Examples:
   ./ci/pipeline.sh all
   ./ci/pipeline.sh iso-test
   ./ci/pipeline.sh iso-test --no-deps
+  ./ci/pipeline.sh build-iso --output-ab uftc-ab.img --output-iso uftc-installer.iso
   ./ci/pipeline.sh build-iso --with-deps --output-ab uftc-ab.img --output-iso uftc-installer.iso
 EOF
 }
