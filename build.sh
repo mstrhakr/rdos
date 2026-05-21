@@ -173,11 +173,20 @@ partition_device() {
 extract_image_rootfs() {
     local image_name="$1"
     local target_dir="$2"
-    local cid
+    local cid=""
+
+    cleanup_extract_image_rootfs() {
+        set +e
+        if [[ -n "$cid" ]]; then
+            docker rm -f "$cid" >/dev/null 2>&1 || true
+        fi
+    }
+    trap cleanup_extract_image_rootfs RETURN
 
     cid=$(docker create "$image_name")
     docker export "$cid" | tar -xpf - -C "$target_dir"
     docker rm "$cid" >/dev/null
+    cid=""
 }
 
 build_source_raw_image() {
