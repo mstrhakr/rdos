@@ -4,9 +4,6 @@
 # Hostname management (initial setup and hostname changes)
 thinclient ALL=(root) NOPASSWD: /usr/bin/set-hostname
 
-# First-boot initialization (kernel and initramfs setup on first VM boot)
-thinclient ALL=(root) NOPASSWD: /usr/bin/firstboot
-
 # Auto maintenance tasks (firmware updates, housekeeping)
 thinclient ALL=(root) NOPASSWD: /usr/bin/auto-maintenance
 

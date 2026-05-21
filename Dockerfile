@@ -35,9 +35,8 @@ RUN printf '%s\n' 'blacklist pcspkr' 'install pcspkr /bin/false' > /etc/modprobe
     printf '%s\n' 'set bell-style none' >> /etc/inputrc
 
 # XanMod kernel — installed during Docker build so no VM first-boot is needed.
-# INITRD=No suppresses update-initramfs here (it would fail without a live kernel);
-# d2vm runs privileged and regenerates the initramfs correctly during conversion.
-# Falls back gracefully if the package is temporarily unavailable from deb.xanmod.org.
+# We regenerate initramfs in-image and disable resume probing to avoid boot delays
+# from stale/non-existent swap UUIDs in cloned environments.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     install -d -m 755 /etc/apt/keyrings && \
@@ -49,8 +48,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     echo 'deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' > /etc/apt/sources.list.d/xanmod-release.list && \
     apt-get update && \
     INITRD=No DEBIAN_FRONTEND=noninteractive apt-get install -y linux-xanmod-lts-x64v1 || \
-        echo 'Warning: linux-xanmod-lts-x64v1 not available; d2vm will install a default kernel.' && \
-    rm -f /etc/apt/sources.list.d/xanmod-release.list
+        echo 'Warning: linux-xanmod-lts-x64v1 not available; continuing with current kernel packages in image.' && \
+    rm -f /etc/apt/sources.list.d/xanmod-release.list && \
+    printf 'RESUME=none\n' > /etc/initramfs-tools/conf.d/resume && \
+    if ls /lib/modules/* >/dev/null 2>&1; then update-initramfs -u -k all; fi
 
 # Optional: Citrix ICA client and Moonlight AppImage from the build context.
 RUN --mount=type=bind,source=.,target=/build-context,ro \
