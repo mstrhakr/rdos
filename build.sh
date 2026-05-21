@@ -65,11 +65,11 @@ docker_build_with_retry() {
     return 1
 }
 
-IMAGE_NAME="RDOS"
-RECOVERY_IMAGE_NAME="RDOS-recovery"
-OUTPUT_PROD_RAW="RDOS-prod.raw"
-OUTPUT_RECOVERY_RAW="recovery.raw"
-OUTPUT_AB="RDOS-ab.img"
+IMAGE_NAME="rdos"
+RECOVERY_IMAGE_NAME="rdos-recovery"
+OUTPUT_PROD_RAW="rdos-prod.raw"
+OUTPUT_RECOVERY_RAW="rdos-recovery.raw"
+OUTPUT_AB="rdos-ab.img"
 OUTPUT_AB_ZST=""
 AB_ZSTD_LEVEL=9
 FORCE_OVERWRITE=0
@@ -86,15 +86,15 @@ Usage: ./build.sh [options]
 Builds RDOS Docker images and assembles raw disk artifacts (no d2vm/VHD).
 
 Options:
-  -o, --output PATH          Output production raw disk path (default: RDOS-prod.raw)
-      --output-prod-raw PATH Output production raw disk path (default: RDOS-prod.raw)
+  -o, --output PATH          Output production raw disk path (default: rdos-prod.raw)
+      --output-prod-raw PATH Output production raw disk path (default: rdos-prod.raw)
       --output-recovery-raw PATH
-                             Output recovery raw disk path (default: recovery.raw)
-      --image-name NAME      Production Docker image name/tag base (default: RDOS)
+                             Output recovery raw disk path (default: rdos-recovery.raw)
+      --image-name NAME      Production Docker image name/tag base (default: rdos)
       --skip-docker-build    Reuse existing Docker images and only assemble raw artifacts
       --no-cache             Rebuild Docker images without cache
-      --ab                   Also assemble A/B disk artifact (RDOS-ab.img)
-      --output-ab PATH       Output A/B disk path (default: RDOS-ab.img)
+      --ab                   Also assemble A/B disk artifact (rdos-ab.img)
+      --output-ab PATH       Output A/B disk path (default: rdos-ab.img)
             --output-ab-zst PATH   Output compressed A/B disk path (default: <output-ab>.zst)
             --zstd-level N         Compression level for A/B .zst (1-19, default: 9)
   -f, --force                Overwrite existing outputs
@@ -176,7 +176,7 @@ build_source_raw_image() {
     local boot_mb="$4"
 
     local work_dir loop_dev p1 p2 kernel_path initrd_path
-    work_dir="$(mktemp -d /var/tmp/RDOS-src.XXXXXX)"
+    work_dir="$(mktemp -d /var/tmp/rdos-src.XXXXXX)"
     loop_dev=""
 
     cleanup_source_raw() {
