@@ -457,11 +457,6 @@ prompt_trust_unknown_host_key() {
 
 trap stop_ui_helpers EXIT
 
-# Run second phase of the build if present
-if [[ -f /usr/bin/firstboot ]]; then
-    xterm -bg black -fg white -hold -e /bin/bash -lc 'sudo -n /usr/bin/firstboot || { echo; echo "First boot failed before the image could finish setup."; echo "Review the messages above for the exact package or setup step that failed."; exit 1; }'
-fi
-
 # Verify boot slot health and commit if healthy (A/B images only, no-op on single-slot)
 if [[ -f /usr/bin/tc-health-check ]]; then
     sudo -n /usr/bin/tc-health-check &>/dev/null &

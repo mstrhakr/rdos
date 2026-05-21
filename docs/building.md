@@ -135,24 +135,10 @@ Useful variants:
 ./ci/vhd-build-validate.sh --mode build --output uftc.vhd --no-cache
 ```
 
-## Important post-build step
+## Post-build behavior
 
-The generated VHD is not fully finalized until it boots once.
-
-At first login the thin-client launcher checks for `/usr/bin/firstboot` and runs it. That script:
-
-- generates or refreshes initramfs
-- installs the XanMod kernel only if it was not already baked into the image
-- restores the hostname to `thinclient`
-- removes itself
-- powers the machine off
-
-Relevant files:
-
-- [tcfiles/thinclient](tcfiles/thinclient)
-- [tcfiles/firstboot](tcfiles/firstboot)
-
-This is why the README says to boot the generated image in a VM once before treating it as a golden image.
+There is no legacy firstboot completion phase in the current raw-image pipeline.
+The installed image should boot directly into normal thin-client flow.
 
 ## Safe test loop
 
@@ -160,9 +146,8 @@ If you want a low-risk way to start modifying the repo, use this loop:
 
 1. Edit the files you care about.
 2. Run `./build.sh`.
-3. Boot `uftc.vhd` in a VM.
-4. Let first boot finish and power off.
-5. Boot it again and validate the actual thin-client behavior.
+3. Boot the built image artifact in a VM.
+4. Validate the actual thin-client behavior.
 
 That keeps your feedback cycle focused on one artifact.
 
