@@ -7,7 +7,8 @@
 set -euo pipefail
 
 GRUBENV="/boot/grub/grubenv"
-CONFIG_FILE="/boot/tcconfig"
+CONFIG_FILE_PRIMARY="/home/thinclient/tcconfig"
+CONFIG_FILE_LEGACY="/boot/tcconfig"
 GITHUB_API="https://api.github.com/repos/mstrhakr/RDOS/releases/latest"
 STAGING_DIR="/var/tmp"
 STAGING_FILE="$STAGING_DIR/rdos-ota.img.zst"
@@ -36,10 +37,15 @@ done
 # Read user config (auto_update_enabled, maintenance_window)
 # ---------------------------------------------------------------------------
 auto_update_enabled="true"
-if [[ -f "$CONFIG_FILE" ]]; then
-    val=$(awk -F= '/^auto_update_enabled=/{print $2; exit}' "$CONFIG_FILE" 2>/dev/null || true)
-    [[ -n "$val" ]] && auto_update_enabled="$val"
-fi
+for config_file in "$CONFIG_FILE_PRIMARY" "$CONFIG_FILE_LEGACY"; do
+    if [[ -f "$config_file" ]]; then
+        val=$(awk -F= '/^auto_update_enabled=/{print $2; exit}' "$config_file" 2>/dev/null || true)
+        val="${val#\"}"
+        val="${val%\"}"
+        [[ -n "$val" ]] && auto_update_enabled="$val"
+        break
+    fi
+done
 
 if [[ "$MANUAL_CHECK" != "true" ]] && [[ "${auto_update_enabled,,}" != "true" && "${auto_update_enabled,,}" != "1" ]]; then
     log "Auto-update disabled in config, exiting."
