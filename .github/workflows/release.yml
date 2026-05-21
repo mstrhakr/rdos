@@ -63,10 +63,10 @@ jobs:
           fi
           
           TAG="v${VERSION_FILE}.${PATCH}"
-                    if git rev-parse "$TAG" >/dev/null 2>&1; then
-                      echo "Tag $TAG already exists; this run would duplicate a release tag."
-                      exit 1
-                    fi
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; this run would duplicate a release tag."
+            exit 1
+          fi
 
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "version=${VERSION_FILE}.${PATCH}" >> $GITHUB_OUTPUT
