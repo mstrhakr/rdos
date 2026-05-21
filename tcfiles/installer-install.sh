@@ -89,6 +89,48 @@ prepare_target_disk() {
   done < <(lsblk -nr -o NAME,TYPE "$dev" 2>/dev/null | awk '{print "/dev/" $1, $2}')
 }
 
+run_prepare_stage() {
+  local target_disk="$1"
+
+  # Fallback path (no enhanced UI): keep console output simple.
+  if [[ "$UI_AVAILABLE" != "1" ]] || ! declare -F ui_print_header >/dev/null 2>&1; then
+    echo "Preparing /dev/$target_disk..."
+    prepare_target_disk "$target_disk"
+    return
+  fi
+
+  local spin='|/-\\'
+  local i=0
+  local prep_pid
+
+  {
+    ui_clear
+    ui_print_header
+    printf "\n"
+    ui_section_header "PREPARING INSTALLATION"
+    printf "\n"
+    ui_info_message "Preparing /dev/$target_disk for imaging"
+    printf "\n"
+  } >&2
+
+  prepare_target_disk "$target_disk" &
+  prep_pid=$!
+
+  while kill -0 "$prep_pid" 2>/dev/null; do
+    local c="${spin:i++%${#spin}:1}"
+    printf "\r${COLOR_BRIGHT_CYAN}%s${COLOR_RESET}  ${COLOR_BRIGHT_WHITE}Preparing target disk...${COLOR_RESET}" "$c" >&2
+    sleep 0.12
+  done
+
+  if ! wait "$prep_pid"; then
+    printf "\n" >&2
+    ui_error_message "Preparation failed for /dev/$target_disk" >&2
+    return 1
+  fi
+
+  printf "\r${COLOR_BRIGHT_GREEN}✓${COLOR_RESET}  ${COLOR_GREEN}Preparation complete${COLOR_RESET}\n" >&2
+}
+
 choose_post_action() {
   local target_disk="${1:-}"
 
@@ -251,7 +293,7 @@ fi
 echo "Writing image to /dev/$TARGET_DISK"
 echo "This will erase all data on /dev/$TARGET_DISK"
 
-if ! prepare_target_disk "$TARGET_DISK"; then
+if ! run_prepare_stage "$TARGET_DISK"; then
   show_msg "UFTC Installer" "Install failed while preparing /dev/$TARGET_DISK.\n\nSee $LOG_FILE for details."
   poweroff -f
 fi
