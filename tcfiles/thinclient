@@ -493,6 +493,15 @@ fi
 # This module is to load configs in a safe manner, if someone malicious were to add commands to the bash config files they will not be executed
 load_config ()
 {
+    unquote_config_value() {
+        local decoded="$1"
+        decoded="${decoded#\"}"
+        decoded="${decoded%\"}"
+        decoded="${decoded//\\\"/\"}"
+        decoded="${decoded//\\\\/\\}"
+        printf '%s\n' "$decoded"
+    }
+
     is_allowed_config_key() {
         case "$1" in
             server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|cert_policy|connect_splash_timeout|status_overlay_enabled|status_show_datetime|status_show_battery|status_show_wifi|status_show_ip|status_show_wireguard|wireguard_enabled|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns|auto_update_enabled|maintenance_window|autologon|username|password|rdpusername|rdpserver)
@@ -514,9 +523,8 @@ load_config ()
                 # Replace tchostname with the up to date hostname
                 value=${value/tc_hostname/"$hostname"}
 
-                # Remove quotes to mimic source behavior
-                value="${value#\"}"  # Strip leading quote
-                value="${value%\"}"  # Strip trailing quote
+                # Decode config values produced by tc-settings quote_config_value().
+                value="$(unquote_config_value "$value")"
 
                 # Assign only if value is not empty
                 if [[ -n "$value" ]]; then
