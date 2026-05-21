@@ -45,6 +45,26 @@ run_with_heartbeat() {
     wait "$cmd_pid"
 }
 
+docker_build_with_retry() {
+    local label="$1"
+    shift
+    local attempt
+    local max_attempts=2
+
+    for attempt in $(seq 1 "$max_attempts"); do
+        if run_with_heartbeat "$label (attempt ${attempt}/${max_attempts})" "$@"; then
+            return 0
+        fi
+
+        if (( attempt < max_attempts )); then
+            log_phase "Docker build failed. Pruning BuildKit cache and retrying once"
+            docker builder prune -af >/dev/null 2>&1 || true
+        fi
+    done
+
+    return 1
+}
+
 IMAGE_NAME="uftc"
 RECOVERY_IMAGE_NAME="uftc-recovery"
 OUTPUT_PROD_RAW="uftc-prod.raw"
@@ -274,10 +294,10 @@ done
 if [[ "$SKIP_DOCKER_BUILD" != "1" ]]; then
     docker_args=()
     [[ "$NO_CACHE" == "1" ]] && docker_args+=(--no-cache)
-    run_with_heartbeat "Building production Docker image ($IMAGE_NAME)" docker build "${docker_args[@]}" . -t "$IMAGE_NAME"
+    docker_build_with_retry "Building production Docker image ($IMAGE_NAME)" docker build "${docker_args[@]}" . -t "$IMAGE_NAME"
 
     if [[ "$BUILD_AB" == "1" ]]; then
-        run_with_heartbeat "Building recovery Docker image ($RECOVERY_IMAGE_NAME)" docker build "${docker_args[@]}" -f Dockerfile.recovery . -t "$RECOVERY_IMAGE_NAME"
+        docker_build_with_retry "Building recovery Docker image ($RECOVERY_IMAGE_NAME)" docker build "${docker_args[@]}" -f Dockerfile.recovery . -t "$RECOVERY_IMAGE_NAME"
     fi
 else
     log_phase "Skipping Docker build; reusing image ${IMAGE_NAME}:latest"
