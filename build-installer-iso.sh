@@ -11,7 +11,7 @@ CLONEZILLA_ISO_URL_DEFAULT="https://downloads.sourceforge.net/project/clonezilla
 CLONEZILLA_ISO_URL="${CLONEZILLA_ISO_URL:-$CLONEZILLA_ISO_URL_DEFAULT}"
 CLONEZILLA_ISO_SHA256="${CLONEZILLA_ISO_SHA256:-}"
 CLONEZILLA_ALLOW_UNVERIFIED="${CLONEZILLA_ALLOW_UNVERIFIED:-1}"
-INPUT_VHD="${INPUT_VHD:-RDOS.vhd}"
+INPUT_VHD="${INPUT_VHD:-rdos.vhd}"
 INPUT_DISK="${INPUT_DISK:-rdos-ab.img}"
 INPUT_DISK_ZST="${INPUT_DISK_ZST:-}"
 OUTPUT_ISO="${OUTPUT_ISO:-rdos-installer.iso}"
@@ -29,9 +29,9 @@ ZSTD_LEVEL="${ZSTD_LEVEL:-9}"
 
 BASE_ISO="$BASE_ISO_CACHE"
 ISO_ROOT="$WORKDIR/iso-root"
-RAW_IMAGE="$WORKDIR/RDOS.img"
-COMPRESSED_IMAGE="$ISO_ROOT/RDOS/RDOS.img.zst"
-IMAGE_SIZE_METADATA="$ISO_ROOT/RDOS/RDOS.img.size"
+RAW_IMAGE="$WORKDIR/rdos.img"
+COMPRESSED_IMAGE="$ISO_ROOT/RDOS/rdos.img.zst"
+IMAGE_SIZE_METADATA="$ISO_ROOT/RDOS/rdos.img.size"
 MIN_BASE_ISO_SIZE_BYTES=400000000
 
 usage() {
@@ -46,7 +46,7 @@ Options:
       --build-script PATH          Path to build script (default: ./build.sh)
       --build-arg ARG              Pass one argument to build.sh (repeatable)
       --no-cache                   Build without Docker cache (alias for --build-arg --no-cache)
-      --input-vhd PATH             Input VHD path (legacy fallback; default: RDOS.vhd)
+      --input-vhd PATH             Input VHD path (legacy fallback; default: rdos.vhd)
       --input-disk PATH            Input raw disk image (A/B layout; default: rdos-ab.img)
       --input-disk-zst PATH        Input pre-compressed A/B payload (.img.zst)
       --output-iso PATH            Output ISO path (default: rdos-installer.iso)
@@ -264,9 +264,9 @@ if [[ -n "$STAGING_DIR" ]]; then
 fi
 
 ISO_ROOT="$WORKDIR/iso-root"
-RAW_IMAGE="$WORKDIR/RDOS.img"
-COMPRESSED_IMAGE="$ISO_ROOT/RDOS/RDOS.img.zst"
-IMAGE_SIZE_METADATA="$ISO_ROOT/RDOS/RDOS.img.size"
+RAW_IMAGE="$WORKDIR/rdos.img"
+COMPRESSED_IMAGE="$ISO_ROOT/RDOS/rdos.img.zst"
+IMAGE_SIZE_METADATA="$ISO_ROOT/RDOS/rdos.img.size"
 
 if [[ "$SKIP_BUILD" != "1" ]]; then
   if [[ ! -x "$BUILD_SCRIPT" ]]; then

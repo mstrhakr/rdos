@@ -14,7 +14,7 @@
 #   sudo ./build-ab-disk.sh [OPTIONS]
 #
 # Options:
-#   --prod-vhd PATH       Production VHD (default: RDOS.vhd)
+#   --prod-vhd PATH       Production VHD (default: rdos.vhd)
 #   --recovery-vhd PATH   Recovery VHD   (default: recovery.vhd)
 #   --prod-raw PATH       Production raw disk image (optional; skips VHD conversion)
 #   --recovery-raw PATH   Recovery raw disk image   (optional; skips VHD conversion)
@@ -26,7 +26,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
-PROD_VHD="RDOS.vhd"
+PROD_VHD="rdos.vhd"
 RECOVERY_VHD="recovery.vhd"
 PROD_RAW_INPUT=""
 RECOVERY_RAW_INPUT=""

@@ -93,7 +93,7 @@ Boot partition is a sizable 4GB to reduce the risk of running out of space for t
 
 ### Installation from the ISO
 
-You can build an ISO from your local `RDOS.vhd` using `./build-installer-iso.sh`.
+You can build an ISO from your local `rdos.vhd` using `./build-installer-iso.sh`.
 
 The generated `rdos-installer.iso` is designed to be minimal: it boots directly into unattended install mode, restores RDOS to the first non-removable target disk (excluding the boot USB), and powers off when done.
 

@@ -2,22 +2,22 @@
 
 This repository builds:
 
-- `RDOS.vhd` (bootable virtual disk image)
+- `rdos.vhd` (bootable virtual disk image)
 - `rdos-installer.iso` (minimal unattended installer ISO)
 
-The normal flow is still to build `RDOS.vhd` first, then optionally package it into the installer ISO.
+The normal flow is still to build `rdos.vhd` first, then optionally package it into the installer ISO.
 
 ## What the build actually does
 
 The current build flow is small but it depends on Linux container behavior:
 
 1. `docker build . -t RDOS`
-2. `./d2vm convert RDOS:latest -o RDOS.vhd --bootloader grub --boot-size 4000 --size 14G --network-manager none`
+2. `./d2vm convert RDOS:latest -o rdos.vhd --bootloader grub --boot-size 4000 --size 14G --network-manager none`
 
 In practice that means:
 
 - [Dockerfile](Dockerfile) assembles a Debian-based thin-client filesystem.
-- [build.sh](build.sh) builds the container and converts it into `RDOS.vhd`.
+- [build.sh](build.sh) builds the container and converts it into `rdos.vhd`.
 - [d2vm](d2vm) is a wrapper around the `linkacloud/d2vm` container, which needs privileged access and the Docker socket.
 - Runtime networking is provided by `systemd-networkd` and `systemd-resolved`, with `wpa_supplicant@<iface>.service` used for WiFi association.
 
@@ -78,7 +78,7 @@ To remove the rule later:
 
 If the build succeeds, you should get:
 
-- `RDOS.vhd`
+- `rdos.vhd`
 
 ## Preflight validation
 
@@ -115,7 +115,7 @@ Use the canonical VHD validation wrapper to run `build.sh` and assert artifact s
 
 ```bash
 chmod +x ci/vhd-build-validate.sh
-./ci/vhd-build-validate.sh --mode build --output RDOS.vhd
+./ci/vhd-build-validate.sh --mode build --output rdos.vhd
 ```
 
 What it validates:
@@ -129,10 +129,10 @@ Useful variants:
 
 ```bash
 # Validate an existing artifact without rebuilding
-./ci/vhd-build-validate.sh --mode validate-only --output RDOS.vhd
+./ci/vhd-build-validate.sh --mode validate-only --output rdos.vhd
 
 # CI deterministic leg example
-./ci/vhd-build-validate.sh --mode build --output RDOS.vhd --no-cache
+./ci/vhd-build-validate.sh --mode build --output rdos.vhd --no-cache
 ```
 
 ## Post-build behavior
@@ -168,14 +168,14 @@ Use the ISO validation wrapper after VHD validation to build and verify installe
 
 ```bash
 chmod +x ci/iso-build-validate.sh
-./ci/iso-build-validate.sh --mode build --input-vhd RDOS.vhd --output-iso rdos-installer.iso
+./ci/iso-build-validate.sh --mode build --input-vhd rdos.vhd --output-iso rdos-installer.iso
 ```
 
 What it validates:
 
 - output ISO exists and passes a minimum-size gate
 - ISO format (`ISO 9660`) when `file` is available
-- required payload path (`/RDOS/RDOS.img.zst`) exists in ISO
+- required payload path (`/RDOS/rdos.img.zst`) exists in ISO
 - BIOS/UEFI boot assets are present (`/syslinux/isolinux.bin` and `BOOTx64.EFI`)
 - compressed payload integrity via `zstd -t`
 
@@ -215,7 +215,7 @@ Examples:
 ./ci/pipeline.sh iso-test
 
 # Run only image validation
-./ci/pipeline.sh img-test --no-deps --output-vhd RDOS.vhd
+./ci/pipeline.sh img-test --no-deps --output-vhd rdos.vhd
 
 # Override shellcheck threshold for pretest
 ./ci/pipeline.sh pretest --mode ci --shellcheck-severity error
@@ -254,7 +254,7 @@ Runner requirements for `build-and-validate`:
 Self-hosted job behavior:
 
 - runs `bash ./ci/pipeline.sh all --mode ci --shellcheck-severity error`
-- uploads `RDOS.vhd` and `rdos-installer.iso` as artifacts
+- uploads `rdos.vhd` and `rdos-installer.iso` as artifacts
 - skips untrusted fork PRs by default
 
 If your runner uses different labels, update `runs-on` in `.github/workflows/ci.yml`.
@@ -299,7 +299,7 @@ Next tag: v2.3.6 (patch incremented)
 
 Each release includes:
 
-- `RDOS.vhd` (14GB bootable disk image)
+- `rdos.vhd` (14GB bootable disk image)
 - `rdos-installer.iso` (Clonezilla-based installer)
 
 ### Triggering a release manually
@@ -405,7 +405,7 @@ Optional overrides:
 
 ```bash
 CLONEZILLA_ISO_URL="https://.../clonezilla-live-amd64.iso" \
-INPUT_VHD="/path/to/RDOS.vhd" \
+INPUT_VHD="/path/to/rdos.vhd" \
 OUTPUT_ISO="/path/to/custom-installer.iso" \
 WORKDIR="/tmp/rdos-installer" \
 ./build-installer-iso.sh

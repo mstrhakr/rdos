@@ -153,11 +153,11 @@ sanitize_disk_name() {
     | head -n1
 }
 
-IMAGE_ZST="/run/live/medium/RDOS/RDOS.img.zst"
-IMAGE_SIZE_FILE="/run/live/medium/RDOS/RDOS.img.size"
+IMAGE_ZST="/run/live/medium/RDOS/rdos.img.zst"
+IMAGE_SIZE_FILE="/run/live/medium/RDOS/rdos.img.size"
 if [[ ! -f "$IMAGE_ZST" ]]; then
-  IMAGE_ZST="/lib/live/mount/medium/RDOS/RDOS.img.zst"
-  IMAGE_SIZE_FILE="/lib/live/mount/medium/RDOS/RDOS.img.size"
+  IMAGE_ZST="/lib/live/mount/medium/RDOS/rdos.img.zst"
+  IMAGE_SIZE_FILE="/lib/live/mount/medium/RDOS/rdos.img.size"
 fi
 
 EXPECTED_IMAGE_BYTES=""

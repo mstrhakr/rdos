@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-INPUT_VHD="RDOS.vhd"
+INPUT_VHD="rdos.vhd"
 INPUT_DISK=""
 INPUT_DISK_ZST=""
 OUTPUT_ISO="rdos-installer.iso"
@@ -24,7 +24,7 @@ Builds (or reuses) a RDOS installer ISO through build-installer-iso.sh,
 then validates ISO shape, boot assets, and payload integrity.
 
 Options:
-  --input-vhd PATH        Input VHD path used by ISO build (default: RDOS.vhd)
+  --input-vhd PATH        Input VHD path used by ISO build (default: rdos.vhd)
   --input-disk PATH       Input raw A/B disk path used by ISO build
   --input-disk-zst PATH   Input compressed A/B payload path used by ISO build
   --output-iso PATH       Output ISO path (default: rdos-installer.iso)
@@ -219,11 +219,11 @@ if command -v file >/dev/null 2>&1; then
   fi
 fi
 
-if ! xorriso -indev "$OUTPUT_ISO" -find /RDOS/RDOS.img.zst -exec report_lba >/dev/null 2>&1; then
-  echo "Validation failed: payload /RDOS/RDOS.img.zst not found in ISO" >&2
+if ! xorriso -indev "$OUTPUT_ISO" -find /RDOS/rdos.img.zst -exec report_lba >/dev/null 2>&1; then
+  echo "Validation failed: payload /RDOS/rdos.img.zst not found in ISO" >&2
   exit 1
 fi
-log "Payload path check passed: /RDOS/RDOS.img.zst"
+log "Payload path check passed: /RDOS/rdos.img.zst"
 
 if ! xorriso -indev "$OUTPUT_ISO" -find /syslinux/isolinux.bin -exec report_lba >/dev/null 2>&1; then
   echo "Validation failed: BIOS boot asset /syslinux/isolinux.bin not found" >&2
@@ -249,9 +249,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-payload_file="$tmpdir/RDOS.img.zst"
+payload_file="$tmpdir/rdos.img.zst"
 log "Extracting compressed payload from ISO"
-run_with_heartbeat "Payload extract" xorriso -osirrox on -indev "$OUTPUT_ISO" -extract /RDOS/RDOS.img.zst "$payload_file" >/dev/null
+run_with_heartbeat "Payload extract" xorriso -osirrox on -indev "$OUTPUT_ISO" -extract /RDOS/rdos.img.zst "$payload_file" >/dev/null
 
 log "Verifying compressed payload integrity"
 run_with_heartbeat "zstd integrity test" zstd -t "$payload_file" >/dev/null

@@ -112,11 +112,11 @@ jobs:
         run: |
           set -euo pipefail
           SOURCE_DIR="${RUNNER_ARTIFACT_ROOT}/${{ github.event.workflow_run.head_sha }}"
-          test -f "$SOURCE_DIR/RDOS.vhd"
+          test -f "$SOURCE_DIR/rdos.vhd"
           test -f "$SOURCE_DIR/rdos-installer.iso"
-          cp "$SOURCE_DIR/RDOS.vhd" ./RDOS.vhd
+          cp "$SOURCE_DIR/rdos.vhd" ./rdos.vhd
           cp "$SOURCE_DIR/rdos-installer.iso" ./rdos-installer.iso
-          ls -lh ./RDOS.vhd ./rdos-installer.iso
+          ls -lh ./rdos.vhd ./rdos-installer.iso
 
       - name: Rename artifacts with version
         id: rename
@@ -127,7 +127,7 @@ jobs:
           VHD_VERSIONED="rdos-${VERSION}-rc.${RC_NUMBER}.vhd"
           ISO_VERSIONED="rdos-installer-${VERSION}-rc.${RC_NUMBER}.iso"
           
-          mv RDOS.vhd "$VHD_VERSIONED"
+          mv rdos.vhd "$VHD_VERSIONED"
           mv rdos-installer.iso "$ISO_VERSIONED"
           
           echo "vhd-versioned=$VHD_VERSIONED" >> $GITHUB_OUTPUT

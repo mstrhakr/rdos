@@ -6,7 +6,7 @@ RDOS (User Friendly ThinClient) is a lightweight Linux thin-client distribution 
 
 **Build Environment**: Linux or WSL2 (not Windows native—line endings and permissions are critical)
 
-**Build Command**: `./build.sh` → produces `RDOS.vhd` (14GB bootable disk image)
+**Build Command**: `./build.sh` → produces `rdos.vhd` (14GB bootable disk image)
 
 **ISO Build**: `./build-installer-iso.sh` → produces unattended installer ISO
 
@@ -80,7 +80,7 @@ RDOS (User Friendly ThinClient) is a lightweight Linux thin-client distribution 
 ```bash
 1. Edit files in tcfiles/ or Dockerfile
 2. ./build.sh
-3. Boot RDOS.vhd in a VM
+3. Boot rdos.vhd in a VM
 4. Let first boot complete (watch for poweroff)
 5. Boot again, validate RDP login/connectivity
 ```
