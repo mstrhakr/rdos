@@ -428,7 +428,7 @@ cp "$SCRIPT_DIR/tcfiles/tc-installer-ui.sh" "$ISO_ROOT/RDOS/tc-installer-ui.sh"
 chmod +x "$ISO_ROOT/RDOS/install.sh"
 chmod +x "$ISO_ROOT/RDOS/tc-installer-ui.sh"
 
-CLONEZILLA_BOOT_ARGS="boot=live union=overlay username=user config components quiet loglevel=3 ocs_1_cpu_udev noswap edd=on nomodeset enforcing=0 locales= keyboard-layouts= net.ifnames=0 nosplash modprobe.blacklist=pcspkr"
+CLONEZILLA_BOOT_ARGS="boot=live union=overlay username=user config components quiet loglevel=3 noswap edd=on nomodeset enforcing=0 locales= keyboard-layouts= net.ifnames=0 nosplash modprobe.blacklist=pcspkr"
 
 for SYS_CFG in "$ISO_ROOT/syslinux/syslinux.cfg" "$ISO_ROOT/syslinux/isolinux.cfg"; do
   if [[ -f "$SYS_CFG" ]]; then
