@@ -339,7 +339,7 @@ if [[ "$SKIP_EFI" == false ]]; then
         --efi-directory="$WORK_DIR/root_a/boot" \
         --bootloader-id=uftc \
         --no-nvram \
-        --recheck 2>/dev/null || log "EFI GRUB install skipped (target not available)"
+    --recheck 2>/dev/null || log "EFI GRUB install skipped (target not available)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -411,6 +411,29 @@ menuentry "UFTC Recovery" --id recovery {
     initrd /boot/initrd.img
 }
 GRUBCFG
+
+if [[ "$SKIP_EFI" == false ]]; then
+    log "Writing EFI GRUB chainload stubs"
+    mkdir -p "$WORK_DIR/root_a/boot/EFI/uftc" "$WORK_DIR/root_a/boot/EFI/BOOT"
+
+    cat > "$WORK_DIR/root_a/boot/EFI/uftc/grub.cfg" <<'EFI_GRUBCFG'
+search --no-floppy --label --set=esp ESP
+set prefix=($esp)/grub
+configfile ($esp)/grub/grub.cfg
+EFI_GRUBCFG
+
+    cat > "$WORK_DIR/root_a/boot/EFI/BOOT/grub.cfg" <<'EFI_FALLBACK_CFG'
+search --no-floppy --label --set=esp ESP
+set prefix=($esp)/grub
+configfile ($esp)/grub/grub.cfg
+EFI_FALLBACK_CFG
+
+    if [[ -f "$WORK_DIR/root_a/boot/EFI/uftc/grubx64.efi" ]]; then
+        cp "$WORK_DIR/root_a/boot/EFI/uftc/grubx64.efi" "$WORK_DIR/root_a/boot/EFI/BOOT/BOOTX64.EFI"
+    else
+        log "WARNING: EFI binary not found at EFI/uftc/grubx64.efi; fallback BOOTX64.EFI was not created"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # Initialise grubenv
