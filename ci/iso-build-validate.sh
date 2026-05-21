@@ -112,6 +112,28 @@ log() {
   printf '[%s] %s\n' "$(date +'%H:%M:%S')" "$1"
 }
 
+run_with_heartbeat() {
+  local label="$1"
+  shift
+
+  "$@" &
+  local cmd_pid=$!
+  local started_at
+  started_at="$(date +%s)"
+
+  while kill -0 "$cmd_pid" 2>/dev/null; do
+    sleep 15
+    if kill -0 "$cmd_pid" 2>/dev/null; then
+      local now elapsed
+      now="$(date +%s)"
+      elapsed=$((now - started_at))
+      log "$label still running (${elapsed}s elapsed)"
+    fi
+  done
+
+  wait "$cmd_pid"
+}
+
 require_cmd() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -243,8 +265,11 @@ cleanup() {
 trap cleanup EXIT
 
 payload_file="$tmpdir/uftc.img.zst"
-xorriso -osirrox on -indev "$OUTPUT_ISO" -extract /uftc/uftc.img.zst "$payload_file" >/dev/null
-zstd -t "$payload_file" >/dev/null
+log "Extracting compressed payload from ISO"
+run_with_heartbeat "Payload extract" xorriso -osirrox on -indev "$OUTPUT_ISO" -extract /uftc/uftc.img.zst "$payload_file" >/dev/null
+
+log "Verifying compressed payload integrity"
+run_with_heartbeat "zstd integrity test" zstd -t "$payload_file" >/dev/null
 log "Compressed payload integrity check passed (zstd -t)"
 
 grub_cfg="$tmpdir/grub.cfg"
@@ -266,8 +291,11 @@ log "Installer menu entry check passed for BIOS and UEFI boot paths"
 
 if [[ "$effective_payload_layout" == "ab" ]]; then
   payload_img="$tmpdir/uftc.img"
-  zstd -d -c "$payload_file" | dd of="$payload_img" bs=16M conv=sparse status=none
-  check_ab_layout "$payload_img"
+  log "Decompressing payload image for A/B layout validation (this can take several minutes)"
+  run_with_heartbeat "Payload decompress" bash -lc 'zstd -d -c "$1" | dd of="$2" bs=16M conv=sparse status=none' _ "$payload_file" "$payload_img"
+
+  log "Validating GPT and partition labels in decompressed payload"
+  run_with_heartbeat "A/B layout validation" check_ab_layout "$payload_img"
   log "ISO payload A/B layout check passed"
 else
   log "Skipping A/B payload layout check for payload-layout=$effective_payload_layout"
