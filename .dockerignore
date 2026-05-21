@@ -9,5 +9,5 @@
 tcconfig*
 *.AppImage
 *.iso
-*.img
+*.img*
 *.raw
