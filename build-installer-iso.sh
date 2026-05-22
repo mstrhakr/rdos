@@ -33,6 +33,23 @@ RAW_IMAGE="$WORKDIR/rdos.img"
 COMPRESSED_IMAGE="$ISO_ROOT/RDOS/rdos.img.zst"
 IMAGE_SIZE_METADATA="$ISO_ROOT/RDOS/rdos.img.size"
 MIN_BASE_ISO_SIZE_BYTES=400000000
+TEMP_ROOT="${TMPDIR:-/tmp}"
+AUTO_STAGING_DIR=""
+ORIGINAL_OUTPUT_ISO="$OUTPUT_ISO"
+
+cleanup_auto_staging() {
+  if [[ -n "$AUTO_STAGING_DIR" && -d "$AUTO_STAGING_DIR" ]]; then
+    rm -rf "$AUTO_STAGING_DIR"
+  fi
+}
+
+cleanup_stale_temp_artifacts() {
+  if [[ -d "$TEMP_ROOT" ]]; then
+    find "$TEMP_ROOT" -maxdepth 1 -mindepth 1 -type d -name 'rdos-iso.*' -exec rm -rf {} + 2>/dev/null || true
+  fi
+}
+
+trap cleanup_auto_staging EXIT INT TERM HUP
 
 usage() {
   cat <<'EOF'
@@ -261,10 +278,9 @@ if [[ ! "$ZSTD_LEVEL" =~ ^[0-9]+$ ]] || (( ZSTD_LEVEL < 1 || ZSTD_LEVEL > 19 ));
   exit 1
 fi
 
-AUTO_STAGING_DIR=""
-ORIGINAL_OUTPUT_ISO="$OUTPUT_ISO"
 if [[ -z "$STAGING_DIR" ]] && [[ "$NO_STAGING" != "1" ]] && [[ "$SCRIPT_DIR" == /mnt/* ]] && [[ "$WORKDIR" == "$DEFAULT_WORKDIR" ]]; then
-  AUTO_STAGING_DIR="$(mktemp -d /var/tmp/rdos-iso.XXXXXX)"
+  cleanup_stale_temp_artifacts
+  AUTO_STAGING_DIR="$(mktemp -d "$TEMP_ROOT/rdos-iso.XXXXXX")"
   STAGING_DIR="$AUTO_STAGING_DIR"
 fi
 
@@ -525,9 +541,6 @@ if [[ -n "$STAGING_DIR" ]]; then
     chmod u+w "$ORIGINAL_OUTPUT_ISO" 2>/dev/null || true
     rm -f "$ORIGINAL_OUTPUT_ISO"
   fi
-  cp -f "$OUTPUT_ISO" "$ORIGINAL_OUTPUT_ISO"
-  if [[ -n "$AUTO_STAGING_DIR" ]]; then
-    rm -rf "$AUTO_STAGING_DIR"
-  fi
+  copy_with_progress "$OUTPUT_ISO" "$ORIGINAL_OUTPUT_ISO"
   echo "Created $ORIGINAL_OUTPUT_ISO"
 fi
