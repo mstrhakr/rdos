@@ -13,6 +13,7 @@ CONFIG_FILE_LEGACY="/boot/tcconfig"
 GITHUB_API_RELEASES="https://api.github.com/repos/mstrhakr/rdos/releases"
 GITHUB_API_STABLE="${GITHUB_API_RELEASES}/latest"
 OTA_ARTIFACT_NAME="rdos-prod.raw.zst"
+OTA_ARTIFACT_PATTERN='^rdos-prod-[^/]+\.raw\.zst$'
 STAGING_DIR="/var/tmp"
 STAGING_FILE="$STAGING_DIR/rdos-ota.img.zst"
 STAGING_PARTIAL="${STAGING_FILE}.partial"
@@ -273,8 +274,10 @@ if [[ -z "$REMOTE_VERSION" || -z "$EXPECTED_SHA256" ]]; then
 fi
 
 if [[ -n "$MANIFEST_ARTIFACT" && "$MANIFEST_ARTIFACT" != "$OTA_ARTIFACT_NAME" ]]; then
-    warn "Manifest artifact '$MANIFEST_ARTIFACT' does not match required OTA artifact '$OTA_ARTIFACT_NAME', skipping."
-    exit 0
+    if [[ ! "$MANIFEST_ARTIFACT" =~ $OTA_ARTIFACT_PATTERN ]]; then
+        warn "Manifest artifact '$MANIFEST_ARTIFACT' does not match required OTA artifact '$OTA_ARTIFACT_NAME' or pattern '$OTA_ARTIFACT_PATTERN', skipping."
+        exit 0
+    fi
 fi
 
 if [[ -n "$MANIFEST_CHANNEL" ]]; then
