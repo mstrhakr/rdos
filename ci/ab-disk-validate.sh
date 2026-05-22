@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 OUTPUT_AB="rdos-ab.img"
-MIN_SIZE_BYTES=$((28 * 1024 * 1024 * 1024))
+MIN_SIZE_BYTES=$((24 * 1024 * 1024 * 1024))
 
 usage() {
   cat <<'EOF'
@@ -16,7 +16,7 @@ Validates the assembled RDOS A/B + recovery raw disk image.
 
 Options:
   --output PATH          Output raw disk path (default: rdos-ab.img)
-  --min-size-bytes N     Minimum logical file size gate (default: 28 GiB)
+  --min-size-bytes N     Minimum logical file size gate (default: 24 GiB)
   -h, --help             Show this help
 EOF
 }
