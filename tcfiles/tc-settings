@@ -4,7 +4,7 @@ set -euo pipefail
 
 CONFIG_PATH="${HOME}/tcconfig"
 VERSION="$(< /tcversion)"
-DEFAULT_ADMINPASS="RDOS"
+DEFAULT_ADMINPASS="rdos"
 
 list_interfaces() {
     local device
@@ -459,24 +459,50 @@ edit_updates_section() {
     local output
     local status
     local current_slot inactive_slot current_ver inactive_ver
+    local grubenv candidates root_label
 
     current_slot=""
-    if [[ -f /boot/grub/grubenv ]]; then
-        current_slot="$(grub-editenv /boot/grub/grubenv list 2>/dev/null | awk -F= '/^current_slot/{print $2}')"
+
+    candidates=(
+        /boot/grub/grubenv
+        /boot/efi/grub/grubenv
+        /efi/grub/grubenv
+    )
+
+    for grubenv in "${candidates[@]}"; do
+        if [[ -f "$grubenv" ]]; then
+            current_slot="$(grub-editenv "$grubenv" list 2>/dev/null | awk -F= '/^current_slot=/{print $2}')"
+            break
+        fi
+    done
+
+    if [[ "$current_slot" != "a" && "$current_slot" != "b" ]]; then
+        root_label="$(findmnt -no LABEL / 2>/dev/null || true)"
+        case "$root_label" in
+            ROOT_A) current_slot="a" ;;
+            ROOT_B) current_slot="b" ;;
+            *) current_slot="" ;;
+        esac
     fi
 
     if [[ "$current_slot" = "a" ]]; then
         inactive_slot="b"
-    else
+    elif [[ "$current_slot" = "b" ]]; then
         inactive_slot="a"
+    else
+        inactive_slot="unknown"
     fi
 
-    current_ver="$(cat "/boot/slots/${current_slot}-version" 2>/dev/null || echo "unknown")"
-    inactive_ver="$(cat "/boot/slots/${inactive_slot}-version" 2>/dev/null || echo "none")"
+    current_ver="$(cat /tcversion 2>/dev/null || echo "unknown")"
+    if [[ "$inactive_slot" = "a" || "$inactive_slot" = "b" ]]; then
+        inactive_ver="$(cat "/boot/slots/${inactive_slot}-version" 2>/dev/null || echo "none")"
+    else
+        inactive_ver="unknown"
+    fi
 
     set +e
     output=$(yad --form --center --width=560 --title="System Updates | $VERSION" \
-        --text="Current slot: <b>${current_slot:-none}</b>  ($current_ver)\nInactive slot: <b>${inactive_slot}</b>  ($inactive_ver)" \
+        --text="Current slot: <b>${current_slot:-unknown}</b>  ($current_ver)\nInactive slot: <b>${inactive_slot}</b>  ($inactive_ver)" \
         --separator=$'\x1F' \
         --button="Cancel":1 \
         --button="Check for Updates":2 \

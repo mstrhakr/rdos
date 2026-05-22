@@ -5,16 +5,57 @@
 # On failure: leaves boot_tries as-is so GRUB rolls back on the next reboot.
 set -euo pipefail
 
-GRUBENV="/boot/grub/grubenv"
+GRUBENV=""
+TEMP_ESP_MOUNT=""
+SLOTS_DIR="/boot/slots"
 LOG_TAG="tc-health"
 
 log()  { logger -t "$LOG_TAG" "$*"; echo "[$LOG_TAG] $*"; }
 warn() { logger -t "$LOG_TAG" "WARNING: $*"; echo "[$LOG_TAG] WARNING: $*" >&2; }
 
+cleanup_temp_esp() {
+    if [[ -n "$TEMP_ESP_MOUNT" ]]; then
+        umount "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        rmdir "$TEMP_ESP_MOUNT" 2>/dev/null || true
+    fi
+}
+
+resolve_grubenv() {
+    local candidate
+    local esp_dev
+
+    for candidate in /boot/grub/grubenv /boot/efi/grub/grubenv /efi/grub/grubenv; do
+        if [[ -f "$candidate" ]]; then
+            GRUBENV="$candidate"
+            return 0
+        fi
+    done
+
+    esp_dev="$(blkid -L ESP 2>/dev/null || true)"
+    if [[ -n "$esp_dev" ]]; then
+        TEMP_ESP_MOUNT="/run/rdos-esp-$$"
+        mkdir -p "$TEMP_ESP_MOUNT"
+        if mount "$esp_dev" "$TEMP_ESP_MOUNT" 2>/dev/null; then
+            if [[ -f "$TEMP_ESP_MOUNT/grub/grubenv" ]]; then
+                GRUBENV="$TEMP_ESP_MOUNT/grub/grubenv"
+                SLOTS_DIR="$TEMP_ESP_MOUNT/slots"
+                return 0
+            fi
+            umount "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        fi
+        rmdir "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        TEMP_ESP_MOUNT=""
+    fi
+
+    return 1
+}
+
+trap cleanup_temp_esp EXIT
+
 # ---------------------------------------------------------------------------
 # Only meaningful on A/B images
 # ---------------------------------------------------------------------------
-if [[ ! -f "$GRUBENV" ]]; then
+if ! resolve_grubenv; then
     exit 0
 fi
 
@@ -64,8 +105,8 @@ if [[ "$PASS" == "true" ]]; then
 
     # Write slot version to ESP for tc-ota-updater to compare
     if [[ -f /tcversion ]]; then
-        mkdir -p /boot/slots
-        cp /tcversion "/boot/slots/${CURRENT_SLOT}-version"
+        mkdir -p "$SLOTS_DIR"
+        cp /tcversion "${SLOTS_DIR}/${CURRENT_SLOT}-version"
     fi
 else
     warn "Health check FAILED — boot_tries left at $BOOT_TRIES (GRUB will roll back after 3 attempts)"

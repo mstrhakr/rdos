@@ -6,10 +6,11 @@
 # Runs as root (via systemd service).  Safe to invoke manually for testing.
 set -euo pipefail
 
-GRUBENV="/boot/grub/grubenv"
+GRUBENV=""
+TEMP_ESP_MOUNT=""
 CONFIG_FILE_PRIMARY="/home/thinclient/tcconfig"
 CONFIG_FILE_LEGACY="/boot/tcconfig"
-GITHUB_API_RELEASES="https://api.github.com/repos/mstrhakr/RDOS/releases"
+GITHUB_API_RELEASES="https://api.github.com/repos/mstrhakr/rdos/releases"
 GITHUB_API_STABLE="${GITHUB_API_RELEASES}/latest"
 OTA_ARTIFACT_NAME="rdos-prod.raw.zst"
 STAGING_DIR="/var/tmp"
@@ -23,6 +24,58 @@ OTA_CHANNEL="stable"
 log()  { logger -t "$LOG_TAG" "$*"; echo "[$LOG_TAG] $*"; }
 warn() { logger -t "$LOG_TAG" "WARNING: $*"; echo "[$LOG_TAG] WARNING: $*" >&2; }
 die()  { logger -t "$LOG_TAG" "ERROR: $*";   echo "[$LOG_TAG] ERROR: $*"   >&2; exit 1; }
+
+cleanup_temp_esp() {
+    if [[ -n "$TEMP_ESP_MOUNT" ]]; then
+        umount "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        rmdir "$TEMP_ESP_MOUNT" 2>/dev/null || true
+    fi
+}
+
+resolve_grubenv() {
+    local candidate
+    local esp_dev
+
+    for candidate in /boot/grub/grubenv /boot/efi/grub/grubenv /efi/grub/grubenv; do
+        if [[ -f "$candidate" ]]; then
+            GRUBENV="$candidate"
+            return 0
+        fi
+    done
+
+    esp_dev="$(blkid -L ESP 2>/dev/null || true)"
+    if [[ -n "$esp_dev" ]]; then
+        TEMP_ESP_MOUNT="/run/rdos-esp-$$"
+        mkdir -p "$TEMP_ESP_MOUNT"
+        if mount "$esp_dev" "$TEMP_ESP_MOUNT" 2>/dev/null; then
+            if [[ -f "$TEMP_ESP_MOUNT/grub/grubenv" ]]; then
+                GRUBENV="$TEMP_ESP_MOUNT/grub/grubenv"
+                return 0
+            fi
+            umount "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        fi
+        rmdir "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        TEMP_ESP_MOUNT=""
+    fi
+
+    return 1
+}
+
+read_slot_version() {
+    local slot="$1"
+    local version_file
+
+    for version_file in "/boot/slots/${slot}-version" "${TEMP_ESP_MOUNT}/slots/${slot}-version"; do
+        if [[ -f "$version_file" ]]; then
+            tr -d '[:space:]' < "$version_file"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+trap cleanup_temp_esp EXIT
 
 json_unescape() {
     local value="$1"
@@ -124,8 +177,8 @@ log "Using OTA channel: $OTA_CHANNEL"
 # ---------------------------------------------------------------------------
 # Determine active and inactive slots from grubenv
 # ---------------------------------------------------------------------------
-if [[ ! -f "$GRUBENV" ]]; then
-    log "grubenv not found at $GRUBENV — not an A/B image, nothing to do."
+if ! resolve_grubenv; then
+    log "grubenv not found — not an A/B image, nothing to do."
     exit 0
 fi
 
@@ -156,12 +209,12 @@ INACTIVE_VERSION=""
 
 if [[ -f /tcversion ]]; then
     ACTIVE_VERSION=$(tr -d '[:space:]' < /tcversion)
-elif [[ -f "/boot/slots/${CURRENT_SLOT}-version" ]]; then
-    ACTIVE_VERSION=$(tr -d '[:space:]' < "/boot/slots/${CURRENT_SLOT}-version")
+elif ACTIVE_VERSION="$(read_slot_version "$CURRENT_SLOT" 2>/dev/null || true)"; then
+    :
 fi
 
-if [[ -f "/boot/slots/${INACTIVE_SLOT}-version" ]]; then
-    INACTIVE_VERSION=$(tr -d '[:space:]' < "/boot/slots/${INACTIVE_SLOT}-version")
+if INACTIVE_VERSION="$(read_slot_version "$INACTIVE_SLOT" 2>/dev/null || true)"; then
+    :
 fi
 
 log "Current slot: $CURRENT_SLOT (${ACTIVE_VERSION:-unknown}) | Inactive slot: $INACTIVE_SLOT (${INACTIVE_VERSION:-never installed})"
