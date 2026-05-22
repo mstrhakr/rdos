@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -z "${BASH_VERSION:-}" ]]; then
+  echo "This script requires bash. Run it as: bash ./build-installer-iso.sh" >&2
+  exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -26,6 +31,8 @@ STAGING_DIR="${STAGING_DIR:-}"
 # Compression level for the installer payload. 9 is a good balance (fast + small).
 # Set to 19 for maximum compression at the cost of significantly longer build times.
 ZSTD_LEVEL="${ZSTD_LEVEL:-9}"
+DEFAULT_BOOT_ENTRY="RDOS_guided"
+DEFAULT_BOOT_LABEL="RDOS guided installer (disk selection + progress UI)"
 
 BASE_ISO="$BASE_ISO_CACHE"
 ISO_ROOT="$WORKDIR/iso-root"
@@ -33,6 +40,23 @@ RAW_IMAGE="$WORKDIR/rdos.img"
 COMPRESSED_IMAGE="$ISO_ROOT/RDOS/rdos.img.zst"
 IMAGE_SIZE_METADATA="$ISO_ROOT/RDOS/rdos.img.size"
 MIN_BASE_ISO_SIZE_BYTES=400000000
+TEMP_ROOT="${TMPDIR:-/var/tmp}"
+AUTO_STAGING_DIR=""
+ORIGINAL_OUTPUT_ISO="$OUTPUT_ISO"
+
+cleanup_auto_staging() {
+  if [[ -n "$AUTO_STAGING_DIR" && -d "$AUTO_STAGING_DIR" ]]; then
+    rm -rf "$AUTO_STAGING_DIR"
+  fi
+}
+
+cleanup_stale_temp_artifacts() {
+  if [[ -d "$TEMP_ROOT" ]]; then
+    find "$TEMP_ROOT" -maxdepth 1 -mindepth 1 -type d -name 'rdos-iso.*' -exec rm -rf {} + 2>/dev/null || true
+  fi
+}
+
+trap cleanup_auto_staging EXIT INT TERM HUP
 
 usage() {
   cat <<'EOF'
@@ -209,6 +233,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$AUTO_INSTALL_DEFAULT" == "1" ]]; then
+  DEFAULT_BOOT_ENTRY="RDOS_auto"
+  DEFAULT_BOOT_LABEL="RDOS automatic install (first target disk)"
+fi
+
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required command: $1" >&2
@@ -221,9 +250,34 @@ need_cmd zstd
 need_cmd curl
 need_cmd lsblk
 need_cmd findmnt
+need_cmd rsync
 
 log_phase() {
   printf '\n[%s] %s\n' "$(date +'%H:%M:%S')" "$1"
+}
+
+copy_with_progress() {
+  local source_path="$1"
+  local target_path="$2"
+  local source_bytes=""
+  local available_bytes=""
+  local target_dir
+
+  if [[ -f "$source_path" ]]; then
+    source_bytes="$(stat -c%s "$source_path")"
+    target_dir="$(dirname "$target_path")"
+    mkdir -p "$target_dir"
+    available_bytes="$(df -PB1 "$target_dir" | awk 'NR==2 {print $4}')"
+
+    if [[ "$source_bytes" =~ ^[0-9]+$ ]] && [[ "$available_bytes" =~ ^[0-9]+$ ]] && (( available_bytes < source_bytes )); then
+      echo "Insufficient free space at $target_dir for staged copy." >&2
+      echo "Need: $source_bytes bytes, available: $available_bytes bytes." >&2
+      echo "Set --staging-dir to a larger filesystem or pass --no-staging." >&2
+      exit 1
+    fi
+  fi
+
+  rsync -h --info=progress2 --inplace --whole-file --no-perms --no-owner --no-group --protect-args "$source_path" "$target_path"
 }
 
 verify_clonezilla_iso() {
@@ -250,10 +304,9 @@ if [[ ! "$ZSTD_LEVEL" =~ ^[0-9]+$ ]] || (( ZSTD_LEVEL < 1 || ZSTD_LEVEL > 19 ));
   exit 1
 fi
 
-AUTO_STAGING_DIR=""
-ORIGINAL_OUTPUT_ISO="$OUTPUT_ISO"
 if [[ -z "$STAGING_DIR" ]] && [[ "$NO_STAGING" != "1" ]] && [[ "$SCRIPT_DIR" == /mnt/* ]] && [[ "$WORKDIR" == "$DEFAULT_WORKDIR" ]]; then
-  AUTO_STAGING_DIR="$(mktemp -d /var/tmp/rdos-iso.XXXXXX)"
+  cleanup_stale_temp_artifacts
+  AUTO_STAGING_DIR="$(mktemp -d "$TEMP_ROOT/rdos-iso.XXXXXX")"
   STAGING_DIR="$AUTO_STAGING_DIR"
 fi
 
@@ -293,6 +346,11 @@ else
   fi
 fi
 
+# Prefer the compressed payload when present; do not stage/copy the raw disk as well.
+if [[ -n "$INPUT_DISK_ZST" ]]; then
+  INPUT_DISK=""
+fi
+
 if [[ -n "$INPUT_DISK_ZST" ]]; then
   if [[ ! -f "$INPUT_DISK_ZST" ]]; then
     echo "Input compressed disk not found: $INPUT_DISK_ZST" >&2
@@ -313,24 +371,24 @@ else
   fi
 fi
 
-if [[ -z "$INPUT_DISK" ]] && [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_VHD" != "$STAGING_DIR/$(basename "$INPUT_VHD")" ]]; then
+if [[ -z "$INPUT_DISK" ]] && [[ -z "$INPUT_DISK_ZST" ]] && [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_VHD" != "$STAGING_DIR/$(basename "$INPUT_VHD")" ]]; then
   staged_input_vhd="$STAGING_DIR/$(basename "$INPUT_VHD")"
   log_phase "Copying input VHD to staging area"
-  cp -f "$INPUT_VHD" "$staged_input_vhd"
+  copy_with_progress "$INPUT_VHD" "$staged_input_vhd"
   INPUT_VHD="$staged_input_vhd"
 fi
 
 if [[ -n "$INPUT_DISK" ]] && [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_DISK" != "$STAGING_DIR/$(basename "$INPUT_DISK")" ]]; then
   staged_input_disk="$STAGING_DIR/$(basename "$INPUT_DISK")"
   log_phase "Copying input disk to staging area"
-  cp -f "$INPUT_DISK" "$staged_input_disk"
+  copy_with_progress "$INPUT_DISK" "$staged_input_disk"
   INPUT_DISK="$staged_input_disk"
 fi
 
 if [[ -n "$INPUT_DISK_ZST" ]] && [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_DISK_ZST" != "$STAGING_DIR/$(basename "$INPUT_DISK_ZST")" ]]; then
   staged_input_disk_zst="$STAGING_DIR/$(basename "$INPUT_DISK_ZST")"
   log_phase "Copying compressed disk payload to staging area"
-  cp -f "$INPUT_DISK_ZST" "$staged_input_disk_zst"
+  copy_with_progress "$INPUT_DISK_ZST" "$staged_input_disk_zst"
   INPUT_DISK_ZST="$staged_input_disk_zst"
 fi
 
@@ -351,7 +409,7 @@ fi
 
 if [[ "$need_download" == "1" ]]; then
   log_phase "Downloading Clonezilla Live base ISO"
-  curl -L "$CLONEZILLA_ISO_URL" -o "$BASE_ISO"
+  curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 "$CLONEZILLA_ISO_URL" -o "$BASE_ISO"
 fi
 
 verify_clonezilla_iso "$BASE_ISO"
@@ -360,7 +418,7 @@ verify_clonezilla_iso "$BASE_ISO"
 if ! xorriso -indev "$BASE_ISO" -find /live/filesystem.squashfs -exec report_lba >/dev/null 2>&1; then
   log_phase "Cached base ISO appears corrupted or incomplete; re-downloading"
   rm -f "$BASE_ISO"
-  curl -L "$CLONEZILLA_ISO_URL" -o "$BASE_ISO"
+  curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 "$CLONEZILLA_ISO_URL" -o "$BASE_ISO"
 
   if ! xorriso -indev "$BASE_ISO" -find /live/filesystem.squashfs -exec report_lba >/dev/null 2>&1; then
     echo "Downloaded base ISO still failed integrity sanity check." >&2
@@ -386,10 +444,10 @@ mkdir -p "$ISO_ROOT/RDOS"
 
 if [[ -n "$INPUT_DISK_ZST" ]]; then
   log_phase "Using pre-compressed A/B payload directly: $INPUT_DISK_ZST"
-  cp "$INPUT_DISK_ZST" "$COMPRESSED_IMAGE"
+  copy_with_progress "$INPUT_DISK_ZST" "$COMPRESSED_IMAGE"
 
   if [[ -f "${INPUT_DISK_ZST}.size" ]]; then
-    cp "${INPUT_DISK_ZST}.size" "$IMAGE_SIZE_METADATA"
+    copy_with_progress "${INPUT_DISK_ZST}.size" "$IMAGE_SIZE_METADATA"
   elif [[ -n "$INPUT_DISK" && -f "$INPUT_DISK" ]]; then
     stat -c%s "$INPUT_DISK" > "$IMAGE_SIZE_METADATA"
   else
@@ -398,7 +456,7 @@ if [[ -n "$INPUT_DISK_ZST" ]]; then
   fi
 elif [[ -n "$INPUT_DISK" ]]; then
   log_phase "Using raw A/B disk image directly: $INPUT_DISK"
-  cp "$INPUT_DISK" "$RAW_IMAGE"
+  copy_with_progress "$INPUT_DISK" "$RAW_IMAGE"
   log_phase "Compressing installer payload (zstd level ${ZSTD_LEVEL}, threads: all)"
   zstd -T0 "-${ZSTD_LEVEL}" -f "$RAW_IMAGE" -o "$COMPRESSED_IMAGE"
   stat -c%s "$RAW_IMAGE" > "$IMAGE_SIZE_METADATA"
@@ -412,18 +470,18 @@ else
   rm -f "$RAW_IMAGE"
 fi
 
-cp "$SCRIPT_DIR/tcfiles/installer-install.sh" "$ISO_ROOT/RDOS/install.sh"
-cp "$SCRIPT_DIR/tcfiles/tc-installer-ui.sh" "$ISO_ROOT/RDOS/tc-installer-ui.sh"
+copy_with_progress "$SCRIPT_DIR/tcfiles/installer-install.sh" "$ISO_ROOT/RDOS/install.sh"
+copy_with_progress "$SCRIPT_DIR/tcfiles/tc-installer-ui.sh" "$ISO_ROOT/RDOS/tc-installer-ui.sh"
 chmod +x "$ISO_ROOT/RDOS/install.sh"
 chmod +x "$ISO_ROOT/RDOS/tc-installer-ui.sh"
 
-CLONEZILLA_BOOT_ARGS="boot=live union=overlay username=user config components quiet loglevel=3 ocs_1_cpu_udev noswap edd=on nomodeset enforcing=0 locales= keyboard-layouts= net.ifnames=0 nosplash modprobe.blacklist=pcspkr"
+CLONEZILLA_BOOT_ARGS="boot=live union=overlay username=user config components quiet loglevel=3 noswap edd=on nomodeset enforcing=0 locales= keyboard-layouts= net.ifnames=0 nosplash modprobe.blacklist=pcspkr"
 
 for SYS_CFG in "$ISO_ROOT/syslinux/syslinux.cfg" "$ISO_ROOT/syslinux/isolinux.cfg"; do
   if [[ -f "$SYS_CFG" ]]; then
     log_phase "Writing BIOS boot config in $(basename "$SYS_CFG")"
     cat >"$SYS_CFG" <<EOF
-default RDOS_guided
+default $DEFAULT_BOOT_ENTRY
 prompt 0
 timeout 50
 
@@ -446,7 +504,7 @@ GRUB_CFG="$ISO_ROOT/boot/grub/grub.cfg"
 if [[ -f "$GRUB_CFG" ]]; then
   log_phase "Writing GRUB boot config"
   cat >"$GRUB_CFG" <<EOF
-set default="0"
+set default="$DEFAULT_BOOT_ENTRY"
 set timeout=5
 set timeout_style=menu
 
@@ -464,20 +522,26 @@ fi
 
 ISOLINUX_BIN="syslinux/isolinux.bin"
 BOOT_CAT="syslinux/boot.cat"
+EFI_BOOT_IMG=""
 
 if [[ ! -f "$ISO_ROOT/$ISOLINUX_BIN" ]]; then
   echo "Expected BIOS boot file not found: $ISOLINUX_BIN" >&2
   exit 1
 fi
 
-EFI_BOOT_REL=""
-while IFS= read -r efi_file; do
-  EFI_BOOT_REL="${efi_file#"$ISO_ROOT"/}"
-  break
-done < <(find "$ISO_ROOT" -type f \( -iname 'bootx64.efi' -o -iname 'BOOTx64.EFI' \))
+for candidate in \
+  "$ISO_ROOT/boot/grub/efi.img" \
+  "$ISO_ROOT/boot/grub/EFI.img" \
+  "$ISO_ROOT/EFI/boot/efi.img" \
+  "$ISO_ROOT/EFI/BOOT/EFI.img"; do
+  if [[ -f "$candidate" ]]; then
+    EFI_BOOT_IMG="${candidate#"$ISO_ROOT"/}"
+    break
+  fi
+done
 
-if [[ -z "$EFI_BOOT_REL" ]]; then
-  echo "Expected UEFI boot file BOOTx64.EFI was not found in extracted ISO." >&2
+if [[ -z "$EFI_BOOT_IMG" ]]; then
+  echo "Expected UEFI boot image efi.img was not found in extracted ISO." >&2
   exit 1
 fi
 
@@ -492,21 +556,22 @@ xorriso -as mkisofs \
   -boot-load-size 4 \
   -boot-info-table \
   -eltorito-alt-boot \
-  -e "$EFI_BOOT_REL" \
+  -e "$EFI_BOOT_IMG" \
   -no-emul-boot \
   "$ISO_ROOT"
 
 log_phase "Installer ISO build complete"
 echo "Created $OUTPUT_ISO"
-echo "Boot mode: guided installer default (5s timeout) with optional automatic mode."
+echo "Boot mode: ${DEFAULT_BOOT_LABEL} (5s timeout) with optional automatic mode."
 echo "Payload mode: zstd compressed."
 echo "Review target disk detection in RDOS/install.sh if you need a different policy."
 
 if [[ -n "$STAGING_DIR" ]]; then
-  log_phase "Moving staged ISO to destination: $ORIGINAL_OUTPUT_ISO"
-  mv -f "$OUTPUT_ISO" "$ORIGINAL_OUTPUT_ISO"
-  if [[ -n "$AUTO_STAGING_DIR" ]]; then
-    rm -rf "$AUTO_STAGING_DIR"
+  log_phase "Publishing staged ISO to destination: $ORIGINAL_OUTPUT_ISO"
+  if [[ -e "$ORIGINAL_OUTPUT_ISO" ]]; then
+    chmod u+w "$ORIGINAL_OUTPUT_ISO" 2>/dev/null || true
+    rm -f "$ORIGINAL_OUTPUT_ISO"
   fi
+  copy_with_progress "$OUTPUT_ISO" "$ORIGINAL_OUTPUT_ISO"
   echo "Created $ORIGINAL_OUTPUT_ISO"
 fi

@@ -231,14 +231,16 @@ if ! xorriso -indev "$OUTPUT_ISO" -find /syslinux/isolinux.bin -exec report_lba 
 fi
 log "BIOS boot asset check passed"
 
-if xorriso -indev "$OUTPUT_ISO" -find /EFI/boot/bootx64.efi -exec report_lba >/dev/null 2>&1; then
+if xorriso -indev "$OUTPUT_ISO" -find /boot/grub/efi.img -exec report_lba >/dev/null 2>&1; then
   :
-elif xorriso -indev "$OUTPUT_ISO" -find /EFI/BOOT/BOOTX64.EFI -exec report_lba >/dev/null 2>&1; then
+elif xorriso -indev "$OUTPUT_ISO" -find /boot/grub/EFI.img -exec report_lba >/dev/null 2>&1; then
   :
-elif xorriso -indev "$OUTPUT_ISO" -find /EFI/BOOT/BOOTx64.EFI -exec report_lba >/dev/null 2>&1; then
+elif xorriso -indev "$OUTPUT_ISO" -find /EFI/boot/efi.img -exec report_lba >/dev/null 2>&1; then
+  :
+elif xorriso -indev "$OUTPUT_ISO" -find /EFI/BOOT/EFI.img -exec report_lba >/dev/null 2>&1; then
   :
 else
-  echo "Validation failed: UEFI boot asset BOOTx64.EFI not found" >&2
+  echo "Validation failed: UEFI boot image efi.img not found" >&2
   exit 1
 fi
 log "UEFI boot asset check passed"
@@ -252,6 +254,11 @@ trap cleanup EXIT
 payload_file="$tmpdir/rdos.img.zst"
 log "Extracting compressed payload from ISO"
 run_with_heartbeat "Payload extract" xorriso -osirrox on -indev "$OUTPUT_ISO" -extract /RDOS/rdos.img.zst "$payload_file" >/dev/null
+
+if [[ ! -f "$payload_file" ]]; then
+  echo "Validation failed: extracted payload file missing at $payload_file" >&2
+  exit 1
+fi
 
 log "Verifying compressed payload integrity"
 run_with_heartbeat "zstd integrity test" zstd -t "$payload_file" >/dev/null

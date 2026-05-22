@@ -141,6 +141,7 @@ RUN useradd -ms /bin/bash thinclient -G video,audio,netdev,render,cdrom,plugdev
 
 COPY tcfiles/.fvwm /home/thinclient/.fvwm
 COPY tcfiles/bashrc /home/thinclient/.bashrc
+COPY tcfiles/profile /home/thinclient/.profile
 COPY tcfiles/xinitrc /home/thinclient/.xinitrc
 COPY Version /tcversion
 

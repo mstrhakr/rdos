@@ -86,7 +86,8 @@ sudo dnf install -y moby-engine ShellCheck qemu-img xorriso zstd curl util-linux
 
 This installer ISO boots, writes RDOS to the first non-removable disk that is not the USB boot media, then powers off so you can remove the flash drive.
 
-grub as the bootloader unlocks a few things most importantly uefi support, you also get a seperate fat32 boot partition where you can place the config files when provisioning.
+grub as the bootloader unlocks a few things most importantly uefi support, you also get a separate fat32 boot partition where you can place the config files when provisioning.
+The installer ISO uses the bundled `efi.img` boot image instead of pointing firmware at the raw `BOOTX64.EFI` loader, which is more reliable in Hyper-V Gen2 and similar UEFI VMs.
 Boot partition is a sizable 4GB to reduce the risk of running out of space for the kernels, with a total size of under 16GB this should fit on a 16GB USB stick if you wish to use a USB Stick for customization and capture.
 
 ## Usage

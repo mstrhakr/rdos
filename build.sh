@@ -394,8 +394,7 @@ if [[ "$BUILD_AB" == "1" ]]; then
 
     log_phase "A/B disk ready: $OUTPUT_AB"
 
-    run_with_heartbeat "Compressing A/B disk artifact (zstd level ${AB_ZSTD_LEVEL})" \
-        zstd -T0 "-${AB_ZSTD_LEVEL}" -f "$OUTPUT_AB" -o "$OUTPUT_AB_ZST"
+    zstd -T0 "-${AB_ZSTD_LEVEL}" -f "$OUTPUT_AB" -o "$OUTPUT_AB_ZST"
     stat -c%s "$OUTPUT_AB" > "${OUTPUT_AB_ZST}.size"
     log_phase "Compressed A/B disk ready: $OUTPUT_AB_ZST"
 fi

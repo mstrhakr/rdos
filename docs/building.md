@@ -176,7 +176,7 @@ What it validates:
 - output ISO exists and passes a minimum-size gate
 - ISO format (`ISO 9660`) when `file` is available
 - required payload path (`/RDOS/rdos.img.zst`) exists in ISO
-- BIOS/UEFI boot assets are present (`/syslinux/isolinux.bin` and `BOOTx64.EFI`)
+- BIOS/UEFI boot assets are present (`/syslinux/isolinux.bin` and the bundled EFI boot image `efi.img`)
 - compressed payload integrity via `zstd -t`
 
 Useful variant:
