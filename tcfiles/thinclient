@@ -223,7 +223,7 @@ status_overlay_loop() {
     local battery_device="$1"
     local threshold="$2"
     local width=620
-    local height=80
+    local height=112
     local screen_spec=""
     local screen_width=1024
     local x_offset=0
@@ -236,8 +236,11 @@ status_overlay_loop() {
     local now=""
     local overlay_percent=0
     local battery_text=""
-    local status_line=""
-    local status_parts=()
+    local date_line=""
+    local network_line=""
+    local status_text=""
+    local network_parts=()
+    local text_lines=()
 
     if ! [[ "$threshold" =~ ^[0-9]+$ ]]; then
         threshold=20
@@ -256,6 +259,23 @@ status_overlay_loop() {
     if [ "$x_offset" -lt 0 ]; then
         x_offset=0
     fi
+
+    cleanup_overlay() {
+        if [ -n "$writer_fd" ]; then
+            exec {writer_fd}>&- 2>/dev/null || true
+            writer_fd=""
+        fi
+        if [ -n "$yad_pid" ]; then
+            kill "$yad_pid" 2>/dev/null || true
+            wait "$yad_pid" 2>/dev/null || true
+            yad_pid=""
+        fi
+        if [ -n "$fifo_path" ] && [ -p "$fifo_path" ]; then
+            rm -f "$fifo_path"
+        fi
+    }
+
+    trap cleanup_overlay EXIT INT TERM
 
     fifo_path="$(mktemp -u /tmp/rdos-status-overlay.XXXXXX)"
     mkfifo "$fifo_path"
@@ -302,31 +322,47 @@ status_overlay_loop() {
 
         now="$(date '+%Y-%m-%d %H:%M')"
 
-        status_parts=()
+        date_line=""
         if is_enabled "$status_show_datetime"; then
-            status_parts+=("$now")
+            date_line="Time: $now"
         fi
-        if [ -n "$battery_text" ]; then
-            status_parts+=("$battery_text")
-        fi
+
+        network_parts=()
         if is_enabled "$status_show_wifi"; then
-            status_parts+=("$(get_wifi_status)")
+            network_parts+=("$(get_wifi_status)")
         fi
         if is_enabled "$status_show_ip"; then
-            status_parts+=("$(get_ip_status)")
+            network_parts+=("$(get_ip_status)")
         fi
         if is_enabled "$status_show_wireguard"; then
-            status_parts+=("$(get_wireguard_status)")
+            network_parts+=("$(get_wireguard_status)")
         fi
 
-        if [ "${#status_parts[@]}" -gt 0 ]; then
-            status_line="$(printf ' | %s' "${status_parts[@]}")"
-            status_line="${status_line# | }"
+        network_line=""
+        if [ "${#network_parts[@]}" -gt 0 ]; then
+            network_line="$(printf ' | %s' "${network_parts[@]}")"
+            network_line="Network: ${network_line# | }"
+        fi
+
+        text_lines=()
+        if [ -n "$date_line" ]; then
+            text_lines+=("$date_line")
+        fi
+        if [ -n "$network_line" ]; then
+            text_lines+=("$network_line")
+        fi
+        if [ -n "$battery_text" ]; then
+            text_lines+=("$battery_text")
+        fi
+
+        if [ "${#text_lines[@]}" -gt 0 ]; then
+            status_text="$(printf '%s\n' "${text_lines[@]}")"
+            status_text="${status_text%$'\n'}"
         else
-            status_line="$now"
+            status_text="Preparing status..."
         fi
 
-        printf '%s\n#%s\n' "$overlay_percent" "$status_line" >&${writer_fd} || break
+        printf '%s\n#%s\n' "$overlay_percent" "$status_text" >&${writer_fd} || break
 
         if is_enabled "$status_show_battery" && [ -n "$battery_device" ] && [ "$capacity" -le "$threshold" ] && [ "$status" != "Charging" ]; then
             if [ "$notified_low" -eq 0 ]; then
@@ -341,14 +377,7 @@ status_overlay_loop() {
         sleep 30
     done
 
-    exec {writer_fd}>&- 2>/dev/null || true
-    if [ -n "$yad_pid" ]; then
-        kill "$yad_pid" 2>/dev/null || true
-        wait "$yad_pid" 2>/dev/null || true
-    fi
-    if [ -p "$fifo_path" ]; then
-        rm -f "$fifo_path"
-    fi
+    return 0
 }
 
 start_status_overlay() {
@@ -362,6 +391,13 @@ start_status_overlay() {
         return 0
     fi
 
+    if [ -n "$STATUS_OVERLAY_PID" ] && kill -0 "$STATUS_OVERLAY_PID" 2>/dev/null; then
+        return 0
+    fi
+
+    # Clean up stale windows from a previously interrupted session.
+    pkill -f 'yad --progress.*--title=System Status' >/dev/null 2>&1 || true
+
     battery_device="$(find_battery_device || true)"
 
     status_overlay_loop "$battery_device" "$battery_low_threshold" &
@@ -374,6 +410,9 @@ stop_status_overlay() {
         wait "$STATUS_OVERLAY_PID" 2>/dev/null || true
         STATUS_OVERLAY_PID=""
     fi
+
+    # Best-effort cleanup in case a previous loop died before reaping its yad child.
+    pkill -f 'yad --progress.*--title=System Status' >/dev/null 2>&1 || true
 }
 
 stop_ui_helpers() {
@@ -604,6 +643,7 @@ if [ -f ~/tcconfig ];then
     xset b off
     xset dpms 0 "$screen_timeout" 0
     apply_wireguard_state
+    start_status_overlay
 
 
     # Handle multiple servers
@@ -707,7 +747,6 @@ if [[ "$server" != "citrix" && "$server" != "moonlight" ]]; then
         loading_text="Reconnecting to remote desktop..."
     fi
 
-    start_status_overlay
     prepare_freerdp_store
 
     freerdp_args=(

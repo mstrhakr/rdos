@@ -51,6 +51,7 @@ Style "*" ActivePlacement
 # Styles for various common programs:
 Style *lock       NoTitle, NoHandles, Sticky, WindowListSkip, ClickToFocus
 Style xbiff       NoTitle, Sticky, WindowListSkip, ClickToFocus
+Style "System Status" NoTitle, NoHandles, !Borders, Sticky, WindowListSkip, StaysOnTop, ClickToFocus
 Style xcalc       Icon xcalc.xpm, NoButton 2,ClickToFocus
 Style xmh         Icon mail1.xpm, NoIconTitle,StickyIcon
 Style xmh         NoButton 2
