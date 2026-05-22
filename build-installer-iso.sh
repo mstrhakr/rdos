@@ -265,7 +265,7 @@ copy_with_progress() {
     fi
   fi
 
-  rsync -ah --info=progress2 --no-inc-recursive --protect-args "$source_path" "$target_path"
+  rsync -h --info=progress2 --inplace --whole-file --no-perms --no-owner --no-group --protect-args "$source_path" "$target_path"
 }
 
 verify_clonezilla_iso() {
