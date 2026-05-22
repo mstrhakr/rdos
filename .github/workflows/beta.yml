@@ -1,0 +1,222 @@
+name: Beta Release (RC)
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  validate-version:
+    name: Validate & Detect RC Version
+    runs-on: [self-hosted, linux, rdos-builder]
+    if: >-
+      github.repository == 'mstrhakr/RDOS' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_branch != 'master' &&
+      github.event.workflow_run.repository.full_name == github.repository
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      rc_number: ${{ steps.version.outputs.rc_number }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Fetch master branch for comparison
+        run: |
+          git fetch origin master:master
+
+      - name: Validate PR Version vs Master
+        id: version
+        run: |
+          # Read PR Version file
+          PR_VERSION=$(cat Version | tr -d '\n' | tr -d '\r')
+          echo "pr_version=$PR_VERSION"
+          
+          # Read master Version file
+          MASTER_VERSION=$(git show master:Version | tr -d '\n' | tr -d '\r')
+          echo "master_version=$MASTER_VERSION"
+          
+          # Parse major.minor for comparison
+          PR_MAJOR=$(echo "$PR_VERSION" | cut -d. -f1)
+          PR_MINOR=$(echo "$PR_VERSION" | cut -d. -f2)
+          MASTER_MAJOR=$(echo "$MASTER_VERSION" | cut -d. -f1)
+          MASTER_MINOR=$(echo "$MASTER_VERSION" | cut -d. -f2)
+          
+          # Calculate minimum required version (master + 1 minor)
+          MIN_REQUIRED_MINOR=$((MASTER_MINOR + 1))
+          
+          echo "PR: ${PR_MAJOR}.${PR_MINOR}, Master: ${MASTER_MAJOR}.${MASTER_MINOR}"
+          echo "Required: ${MASTER_MAJOR}.${MIN_REQUIRED_MINOR} or higher"
+          
+          # Validation: PR must be at least one minor newer than master
+          if [[ "$PR_MAJOR" -lt "$MASTER_MAJOR" ]]; then
+            echo "❌ PR version major is older than master"
+            exit 1
+          elif [[ "$PR_MAJOR" -eq "$MASTER_MAJOR" ]] && [[ "$PR_MINOR" -lt "$MIN_REQUIRED_MINOR" ]]; then
+            echo "❌ PR version must be at least one minor newer than master"
+            exit 1
+          fi
+          
+          echo "✓ Version validation passed: ${PR_VERSION} >= ${MASTER_MAJOR}.${MIN_REQUIRED_MINOR}"
+
+          BASE_VERSION="${PR_VERSION}.0"
+          
+          # Find last RC tag for this version
+          LAST_RC_TAG=$(git tag -l "v${BASE_VERSION}-rc.*" --sort=-version:refname | head -1 || echo "")
+          echo "last_rc_tag=$LAST_RC_TAG"
+          
+          # Determine next RC number
+          if [[ -z "$LAST_RC_TAG" ]]; then
+            RC_NUMBER=1
+            echo "First RC for ${PR_VERSION}, starting at rc.1"
+          else
+            # Extract RC number from tag (e.g., v2.4.0-rc.2 -> 2)
+            LAST_RC=$(echo "$LAST_RC_TAG" | rev | cut -d. -f1 | rev)
+            RC_NUMBER=$((LAST_RC + 1))
+            echo "Incrementing RC from ${LAST_RC} to ${RC_NUMBER}"
+          fi
+          
+          TAG="v${BASE_VERSION}-rc.${RC_NUMBER}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=${BASE_VERSION}" >> $GITHUB_OUTPUT
+          echo "rc_number=$RC_NUMBER" >> $GITHUB_OUTPUT
+          echo "Final tag: $TAG"
+
+  build-and-test:
+    name: Collect Prebuilt Artifacts (for RC)
+    needs: validate-version
+    runs-on: [self-hosted, linux, rdos-builder]
+    env:
+      RUNNER_ARTIFACT_ROOT: /var/tmp/rdos-artifacts
+    timeout-minutes: 180
+    if: >-
+      github.repository == 'mstrhakr/RDOS' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_branch != 'master' &&
+      github.event.workflow_run.repository.full_name == github.repository
+    steps:
+      - name: Fetch artifacts from runner storage
+        run: |
+          set -euo pipefail
+          SOURCE_DIR="${RUNNER_ARTIFACT_ROOT}/${{ github.event.workflow_run.head_sha }}"
+          test -f "$SOURCE_DIR/rdos-prod.raw.zst"
+          test -f "$SOURCE_DIR/rdos-installer.iso"
+          cp "$SOURCE_DIR/rdos-prod.raw.zst" ./rdos-prod.raw.zst
+          cp "$SOURCE_DIR/rdos-installer.iso" ./rdos-installer.iso
+          ls -lh ./rdos-prod.raw.zst ./rdos-installer.iso
+
+      - name: Rename artifacts with version
+        id: rename
+        run: |
+          VERSION="${{ needs.validate-version.outputs.version }}"
+          RC_NUMBER="${{ needs.validate-version.outputs.rc_number }}"
+          ISO_VERSIONED="rdos-installer-${VERSION}-rc.${RC_NUMBER}.iso"
+
+          mv rdos-installer.iso "$ISO_VERSIONED"
+
+          echo "prod-raw-zst=rdos-prod.raw.zst" >> $GITHUB_OUTPUT
+          echo "iso-versioned=$ISO_VERSIONED" >> $GITHUB_OUTPUT
+
+          ls -lh rdos-prod.raw.zst "$ISO_VERSIONED"
+
+      - name: Generate OTA manifest (beta channel)
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.validate-version.outputs.version }}"
+          RC_NUMBER="${{ needs.validate-version.outputs.rc_number }}"
+          OTA_VERSION="${VERSION}-rc.${RC_NUMBER}"
+          OTA_IMG="rdos-prod.raw.zst"
+
+          SHA256=$(sha256sum "$OTA_IMG" | awk '{print $1}')
+
+          cat > manifest.json <<EOF
+          {
+            "version": "${OTA_VERSION}",
+            "channel": "beta",
+            "sha256": "${SHA256}",
+            "artifact": "${OTA_IMG}",
+            "min_base": "3.0"
+          }
+          EOF
+
+          ls -lh "$OTA_IMG" "$ISO_VERSIONED" manifest.json
+
+      - name: Upload RC artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdos-rc-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}
+          path: |
+            rdos-prod.raw.zst
+            rdos-installer-*.iso
+            manifest.json
+          retention-days: 30
+
+  create-rc-release:
+    name: Create RC GitHub Release
+    needs: [validate-version, build-and-test]
+    runs-on: [self-hosted, linux, rdos-builder]
+    if: >-
+      github.repository == 'mstrhakr/RDOS' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_branch != 'master' &&
+      github.event.workflow_run.repository.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: rdos-rc-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}
+          path: ./rc-artifacts
+
+      - name: Create git tag
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          TAG="${{ needs.validate-version.outputs.tag }}"
+          git tag -a "$TAG" -m "Release Candidate $TAG"
+          git push origin "$TAG"
+
+      - name: Create GitHub RC Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.validate-version.outputs.tag }}
+          name: RC ${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}
+          body: |
+            Release Candidate: **${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}**
+            
+            This is a pre-release build for testing and validation.
+            
+            - **Production Raw (compressed)**: rdos-prod.raw.zst (OTA update payload)
+            - **Installer ISO**: rdos-installer-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}.iso (Clonezilla-based installer)
+            - **Manifest**: manifest.json (beta OTA metadata with SHA256 checksum)
+            
+            When this PR is merged to master, a stable release will be automatically generated.
+            
+            See [docs/building.md](docs/building.md) and [Readme.md](Readme.md) for deployment instructions.
+          files: |
+            rc-artifacts/rdos-prod.raw.zst
+            rc-artifacts/rdos-installer-*.iso
+            rc-artifacts/manifest.json
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

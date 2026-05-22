@@ -1,0 +1,7 @@
+# Managed by setup-build-sudoers.sh for RDOS local build helpers.
+# Remove with: ./setup-build-sudoers.sh --remove
+# Only exact pipeline commands are authorized.
+localuser ALL=(root) NOPASSWD: /usr/bin/docker build . -t *
+localuser ALL=(root) NOPASSWD: /usr/bin/docker build --no-cache . -t *
+localuser ALL=(root) NOPASSWD: /path/to/d2vm convert * -o * --bootloader grub --boot-size * --size * --network-manager none *
+localuser ALL=(root) NOPASSWD: /path/to/build-ab-disk.sh --prod-vhd * --recovery-vhd * --output *

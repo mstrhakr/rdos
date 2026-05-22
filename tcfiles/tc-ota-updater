@@ -1,0 +1,381 @@
+#!/bin/bash
+# tc-ota-updater — RDOS nightly OTA update client.
+# Checks for a newer release on GitHub, downloads the root image,
+# writes it to the inactive slot, and stages a recovery-pass reboot.
+#
+# Runs as root (via systemd service).  Safe to invoke manually for testing.
+set -euo pipefail
+
+GRUBENV=""
+TEMP_ESP_MOUNT=""
+CONFIG_FILE_PRIMARY="/home/thinclient/tcconfig"
+CONFIG_FILE_LEGACY="/boot/tcconfig"
+GITHUB_API_RELEASES="https://api.github.com/repos/mstrhakr/rdos/releases"
+GITHUB_API_STABLE="${GITHUB_API_RELEASES}/latest"
+OTA_ARTIFACT_NAME="rdos-prod.raw.zst"
+STAGING_DIR="/var/tmp"
+STAGING_FILE="$STAGING_DIR/rdos-ota.img.zst"
+STAGING_PARTIAL="${STAGING_FILE}.partial"
+LOG_TAG="tc-ota"
+REQUIRED_FREE_KB=$((5 * 1024 * 1024))   # 5 GB minimum free in STAGING_DIR
+MANUAL_CHECK=false
+OTA_CHANNEL="stable"
+
+log()  { logger -t "$LOG_TAG" "$*"; echo "[$LOG_TAG] $*"; }
+warn() { logger -t "$LOG_TAG" "WARNING: $*"; echo "[$LOG_TAG] WARNING: $*" >&2; }
+die()  { logger -t "$LOG_TAG" "ERROR: $*";   echo "[$LOG_TAG] ERROR: $*"   >&2; exit 1; }
+
+cleanup_temp_esp() {
+    if [[ -n "$TEMP_ESP_MOUNT" ]]; then
+        umount "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        rmdir "$TEMP_ESP_MOUNT" 2>/dev/null || true
+    fi
+}
+
+resolve_grubenv() {
+    local candidate
+    local esp_dev
+
+    for candidate in /boot/grub/grubenv /boot/efi/grub/grubenv /efi/grub/grubenv; do
+        if [[ -f "$candidate" ]]; then
+            GRUBENV="$candidate"
+            return 0
+        fi
+    done
+
+    esp_dev="$(blkid -L ESP 2>/dev/null || true)"
+    if [[ -n "$esp_dev" ]]; then
+        TEMP_ESP_MOUNT="/run/rdos-esp-$$"
+        mkdir -p "$TEMP_ESP_MOUNT"
+        if mount "$esp_dev" "$TEMP_ESP_MOUNT" 2>/dev/null; then
+            if [[ -f "$TEMP_ESP_MOUNT/grub/grubenv" ]]; then
+                GRUBENV="$TEMP_ESP_MOUNT/grub/grubenv"
+                return 0
+            fi
+            umount "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        fi
+        rmdir "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        TEMP_ESP_MOUNT=""
+    fi
+
+    return 1
+}
+
+read_slot_version() {
+    local slot="$1"
+    local version_file
+
+    for version_file in "/boot/slots/${slot}-version" "${TEMP_ESP_MOUNT}/slots/${slot}-version"; do
+        if [[ -f "$version_file" ]]; then
+            tr -d '[:space:]' < "$version_file"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+trap cleanup_temp_esp EXIT
+
+json_unescape() {
+    local value="$1"
+
+    value="${value//\\\//\/}"
+    value="${value//\\\"/\"}"
+    value="${value//\\\\/\\}"
+    printf '%s\n' "$value"
+}
+
+json_get_string() {
+    local json="$1"
+    local key="$2"
+    local raw
+
+    raw=$(printf '%s' "$json" | tr -d '\n' | sed -nE "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"(([^\"\\\\]|\\\\.)*)\".*/\\1/p" | head -n1)
+    [[ -n "$raw" ]] || return 1
+    json_unescape "$raw"
+}
+
+json_get_asset_url() {
+    local json="$1"
+    local asset_name="$2"
+    local compact
+    local entry
+    local raw
+
+    compact="$(printf '%s' "$json" | tr -d '\n')"
+
+    while IFS= read -r entry; do
+        if printf '%s' "$entry" | grep -Fq "\"name\":\"${asset_name}\""; then
+            raw=$(printf '%s' "$entry" | sed -nE 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p' | head -n1)
+            [[ -n "$raw" ]] || return 1
+            json_unescape "$raw"
+            return 0
+        fi
+    done < <(printf '%s\n' "$compact" | sed 's/},{/}\n{/g')
+
+    return 1
+}
+
+json_get_first_rc_tag() {
+    local json="$1"
+    local tag
+
+    tag=$(printf '%s' "$json" | tr -d '\n' | grep -oE '"tag_name":"v[^"]+-rc\.[0-9]+"' | head -n1 | cut -d'"' -f4)
+    [[ -n "$tag" ]] || return 1
+    printf '%s\n' "$tag"
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --manual)
+            MANUAL_CHECK=true
+            shift
+            ;;
+        *)
+            die "Unknown argument: $1"
+            ;;
+    esac
+done
+
+# ---------------------------------------------------------------------------
+# Read user config (auto_update_enabled, maintenance_window, ota_channel)
+# ---------------------------------------------------------------------------
+auto_update_enabled="true"
+for config_file in "$CONFIG_FILE_PRIMARY" "$CONFIG_FILE_LEGACY"; do
+    if [[ -f "$config_file" ]]; then
+        val=$(awk -F= '/^auto_update_enabled=/{print $2; exit}' "$config_file" 2>/dev/null || true)
+        val="${val#\"}"
+        val="${val%\"}"
+        [[ -n "$val" ]] && auto_update_enabled="$val"
+
+        val=$(awk -F= '/^ota_channel=/{print $2; exit}' "$config_file" 2>/dev/null || true)
+        val="${val#\"}"
+        val="${val%\"}"
+        [[ -n "$val" ]] && OTA_CHANNEL="$val"
+        break
+    fi
+done
+
+OTA_CHANNEL="${OTA_CHANNEL,,}"
+case "$OTA_CHANNEL" in
+    stable|beta)
+        ;;
+    *)
+        warn "Invalid ota_channel '$OTA_CHANNEL', defaulting to stable."
+        OTA_CHANNEL="stable"
+        ;;
+esac
+
+if [[ "$MANUAL_CHECK" != "true" ]] && [[ "${auto_update_enabled,,}" != "true" && "${auto_update_enabled,,}" != "1" ]]; then
+    log "Auto-update disabled in config, exiting."
+    exit 0
+fi
+
+log "Using OTA channel: $OTA_CHANNEL"
+
+# ---------------------------------------------------------------------------
+# Determine active and inactive slots from grubenv
+# ---------------------------------------------------------------------------
+if ! resolve_grubenv; then
+    log "grubenv not found — not an A/B image, nothing to do."
+    exit 0
+fi
+
+CURRENT_SLOT=$(grub-editenv "$GRUBENV" list 2>/dev/null | awk -F= '/^current_slot=/{print $2}')
+if [[ "$CURRENT_SLOT" != "a" && "$CURRENT_SLOT" != "b" ]]; then
+    log "Cannot determine current slot from grubenv (current_slot='${CURRENT_SLOT:-}'), skipping."
+    exit 0
+fi
+
+INACTIVE_SLOT="b"
+[[ "$CURRENT_SLOT" == "b" ]] && INACTIVE_SLOT="a"
+INACTIVE_LABEL="ROOT_$(echo "$INACTIVE_SLOT" | tr '[:lower:]' '[:upper:]')"
+
+# ---------------------------------------------------------------------------
+# Bail if a recovery pass is already pending (previous OTA not yet committed)
+# ---------------------------------------------------------------------------
+PENDING=$(grub-editenv "$GRUBENV" list 2>/dev/null | awk -F= '/^pending_recovery=/{print $2}')
+if [[ "$PENDING" == "true" ]]; then
+    log "A recovery pass is already pending — skipping until after next reboot."
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Read the currently running version and the inactive slot version
+# ---------------------------------------------------------------------------
+ACTIVE_VERSION=""
+INACTIVE_VERSION=""
+
+if [[ -f /tcversion ]]; then
+    ACTIVE_VERSION=$(tr -d '[:space:]' < /tcversion)
+elif ACTIVE_VERSION="$(read_slot_version "$CURRENT_SLOT" 2>/dev/null || true)"; then
+    :
+fi
+
+if INACTIVE_VERSION="$(read_slot_version "$INACTIVE_SLOT" 2>/dev/null || true)"; then
+    :
+fi
+
+log "Current slot: $CURRENT_SLOT (${ACTIVE_VERSION:-unknown}) | Inactive slot: $INACTIVE_SLOT (${INACTIVE_VERSION:-never installed})"
+
+# ---------------------------------------------------------------------------
+# Query GitHub API for the latest release
+# ---------------------------------------------------------------------------
+if [[ "$OTA_CHANNEL" == "beta" ]]; then
+    log "Checking GitHub for latest beta (RC) release..."
+    RELEASE_LIST_JSON=$(curl -fsSL --connect-timeout 10 --max-time 30 "${GITHUB_API_RELEASES}?per_page=20") || {
+        warn "Failed to reach GitHub API, skipping update check."
+        exit 0
+    }
+
+    RC_TAG="$(json_get_first_rc_tag "$RELEASE_LIST_JSON" || true)"
+    if [[ -z "$RC_TAG" ]]; then
+        log "No beta RC release found, skipping update check."
+        exit 0
+    fi
+
+    RELEASE_JSON=$(curl -fsSL --connect-timeout 10 --max-time 30 "${GITHUB_API_RELEASES}/tags/${RC_TAG}") || {
+        warn "Failed to fetch beta release '$RC_TAG', skipping update check."
+        exit 0
+    }
+else
+    log "Checking GitHub for latest stable release..."
+    RELEASE_JSON=$(curl -fsSL --connect-timeout 10 --max-time 30 "$GITHUB_API_STABLE") || {
+        warn "Failed to reach GitHub API, skipping update check."
+        exit 0
+    }
+fi
+
+# ---------------------------------------------------------------------------
+# Download manifest.json from the release assets
+# ---------------------------------------------------------------------------
+MANIFEST_URL="$(json_get_asset_url "$RELEASE_JSON" "manifest.json" || true)"
+
+if [[ -z "$MANIFEST_URL" ]]; then
+    warn "manifest.json not found in latest release assets, skipping."
+    exit 0
+fi
+
+MANIFEST=$(curl -fsSL --connect-timeout 10 --max-time 30 "$MANIFEST_URL") || {
+    warn "Failed to download manifest.json, skipping."
+    exit 0
+}
+
+REMOTE_VERSION="$(json_get_string "$MANIFEST" "version" || true)"
+MANIFEST_CHANNEL="$(json_get_string "$MANIFEST" "channel" || true)"
+EXPECTED_SHA256="$(json_get_string "$MANIFEST" "sha256" || true)"
+MANIFEST_ARTIFACT="$(json_get_string "$MANIFEST" "artifact" || true)"
+
+if [[ -z "$REMOTE_VERSION" || -z "$EXPECTED_SHA256" ]]; then
+    warn "Incomplete manifest.json (version/sha256 missing), skipping."
+    exit 0
+fi
+
+if [[ -n "$MANIFEST_ARTIFACT" && "$MANIFEST_ARTIFACT" != "$OTA_ARTIFACT_NAME" ]]; then
+    warn "Manifest artifact '$MANIFEST_ARTIFACT' does not match required OTA artifact '$OTA_ARTIFACT_NAME', skipping."
+    exit 0
+fi
+
+if [[ -n "$MANIFEST_CHANNEL" ]]; then
+    MANIFEST_CHANNEL="${MANIFEST_CHANNEL,,}"
+    if [[ "$MANIFEST_CHANNEL" != "$OTA_CHANNEL" ]]; then
+        warn "Manifest channel '$MANIFEST_CHANNEL' does not match configured ota_channel '$OTA_CHANNEL', skipping."
+        exit 0
+    fi
+fi
+
+log "Remote version: $REMOTE_VERSION | Expected SHA256: ${EXPECTED_SHA256:0:12}..."
+
+# ---------------------------------------------------------------------------
+# Version comparison — only proceed if remote is strictly newer
+# ---------------------------------------------------------------------------
+version_gt() {
+    # Returns 0 (true) if $1 is strictly greater than $2 using sort -V
+    [[ "$(printf '%s\n' "$1" "$2" | sort -V | head -1)" != "$1" ]]
+}
+
+if ! version_gt "$REMOTE_VERSION" "${ACTIVE_VERSION:-0.0.0}"; then
+    log "No update available ($REMOTE_VERSION <= ${ACTIVE_VERSION:-none}), exiting."
+    exit 0
+fi
+
+log "Update available: ${ACTIVE_VERSION:-none} → $REMOTE_VERSION"
+
+# ---------------------------------------------------------------------------
+# Find the OTA image download URL
+# ---------------------------------------------------------------------------
+OTA_URL="$(json_get_asset_url "$RELEASE_JSON" "$OTA_ARTIFACT_NAME" || true)"
+
+if [[ -z "$OTA_URL" ]]; then
+    warn "OTA artifact '$OTA_ARTIFACT_NAME' not found in release assets, skipping."
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Disk space check
+# ---------------------------------------------------------------------------
+FREE_KB=$(df -k "$STAGING_DIR" | awk 'NR==2 {print $4}')
+if [[ "$FREE_KB" -lt "$REQUIRED_FREE_KB" ]]; then
+    warn "Insufficient free space in $STAGING_DIR: ${FREE_KB}KB < ${REQUIRED_FREE_KB}KB required."
+    exit 0
+fi
+
+# Find the inactive slot block device
+SLOT_DEV=$(blkid -L "$INACTIVE_LABEL" 2>/dev/null || true)
+if [[ -z "$SLOT_DEV" ]]; then
+    die "Cannot find block device with label $INACTIVE_LABEL"
+fi
+
+# ---------------------------------------------------------------------------
+# Download the OTA image
+# ---------------------------------------------------------------------------
+log "Downloading OTA image: $OTA_URL"
+rm -f "$STAGING_PARTIAL"
+curl -fL --connect-timeout 10 --progress-bar "$OTA_URL" -o "$STAGING_PARTIAL" || {
+    rm -f "$STAGING_PARTIAL"
+    die "Download failed"
+}
+mv "$STAGING_PARTIAL" "$STAGING_FILE"
+
+# ---------------------------------------------------------------------------
+# SHA256 verification
+# ---------------------------------------------------------------------------
+log "Verifying SHA256..."
+ACTUAL_SHA256=$(sha256sum "$STAGING_FILE" | awk '{print $1}')
+if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
+    rm -f "$STAGING_FILE"
+    die "SHA256 mismatch! Expected $EXPECTED_SHA256, got $ACTUAL_SHA256"
+fi
+log "SHA256 verified."
+
+# ---------------------------------------------------------------------------
+# Write to inactive slot
+# ---------------------------------------------------------------------------
+log "Writing image to $SLOT_DEV ($INACTIVE_LABEL)..."
+zstdcat "$STAGING_FILE" | dd of="$SLOT_DEV" bs=4M conv=fsync status=progress
+rm -f "$STAGING_FILE"
+log "Write complete."
+
+# ---------------------------------------------------------------------------
+# Stage the recovery pass via grubenv
+# ---------------------------------------------------------------------------
+grub-editenv "$GRUBENV" set \
+    pending_recovery=true \
+    previous_slot="$CURRENT_SLOT" \
+    pending_slot="$INACTIVE_SLOT"
+
+log "OTA staging complete. System will reboot to recovery to commit slot $INACTIVE_SLOT."
+
+# ---------------------------------------------------------------------------
+# Schedule a reboot (defer if an RDP session is active)
+# ---------------------------------------------------------------------------
+if pgrep -x xfreerdp3 >/dev/null 2>&1; then
+    log "Active RDP session detected — scheduling reboot for 03:00."
+    systemd-run --on-calendar="*-*-* 03:00:00" --unit="rdos-ota-reboot" \
+        /bin/systemctl reboot 2>/dev/null || \
+        log "Could not schedule deferred reboot; reboot manually when convenient."
+else
+    log "No active RDP session — rebooting now."
+    systemctl reboot
+fi

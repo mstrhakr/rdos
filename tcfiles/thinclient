@@ -8,7 +8,7 @@ shutdown_thinclient(){
         exit
     elif [[ $exit_type == "Sleep" ||  $exit_type == "sleep" ]]; then
         systemctl suspend
-        $0 "$@" &
+        $0 &
         exit
     elif [[ $exit_type == "Restart" || $exit_type == "restart" || $exit_type == "reboot" ]]; then
         systemctl reboot
@@ -19,48 +19,551 @@ shutdown_thinclient(){
 
 # Universal variables
 PROTOCOL_DETECT="://"
-VERSION=`cat /tcversion`
+VERSION=$(< /tcversion)
+keylayout="${keylayout:-us}"
+exit_type="${exit_type:-Shutdown}"
+helpdesk="${helpdesk:-the helpdesk}"
+volume="${volume:-100}"
+microphone="${microphone:-100}"
+brightness="${brightness:-50}"
+screen_timeout="${screen_timeout:-600}"
+login_timeout="${login_timeout:-600}"
+battery_low_threshold="${battery_low_threshold:-20}"
+cert_policy="${cert_policy:-tofu}"
+connect_splash_timeout="${connect_splash_timeout:-12}"
+status_overlay_enabled="${status_overlay_enabled:-true}"
+status_show_datetime="${status_show_datetime:-true}"
+status_show_battery="${status_show_battery:-true}"
+status_show_wifi="${status_show_wifi:-false}"
+status_show_ip="${status_show_ip:-false}"
+status_show_wireguard="${status_show_wireguard:-false}"
+wireguard_enabled="${wireguard_enabled:-true}"
+LOADING_PID=""
+LOADING_FD=""
+STATUS_OVERLAY_PID=""
 
-# Run second phase of the build if present
-if [[ -f /usr/bin/firstboot ]]; then
-    xterm -bg black -fg white -hold -e sudo /usr/bin/firstboot
+start_loading_splash() {
+    local message="$1"
+    local fifo
+    local overlay_width="1280"
+    local overlay_height="720"
+    local screen_size
+
+    stop_loading_splash
+
+    if command -v xrandr >/dev/null 2>&1; then
+        screen_size="$(xrandr 2>/dev/null | awk '/\*/ {print $1; exit}')"
+        if [[ "$screen_size" =~ ^[0-9]+x[0-9]+$ ]]; then
+            overlay_width="${screen_size%x*}"
+            overlay_height="${screen_size#*x}"
+        fi
+    fi
+
+    fifo=$(mktemp -u)
+    mkfifo "$fifo"
+    yad --progress --on-top --undecorated --skip-taskbar --no-buttons --pulsate \
+        --borders=0 --mouse \
+        --width="$overlay_width" --height="$overlay_height" --posx=0 --posy=0 \
+        --title="Loading" --text="\n\nLoading...\n\n$message" <"$fifo" >/dev/null 2>&1 &
+    LOADING_PID=$!
+
+    # If the fullscreen-style overlay fails to start, fall back to compact centered spinner.
+    sleep 0.1
+    if ! kill -0 "$LOADING_PID" >/dev/null 2>&1; then
+        yad --progress --center --on-top --undecorated --skip-taskbar --no-buttons --pulsate \
+            --width=460 --title="Loading" --text="$message" <"$fifo" >/dev/null 2>&1 &
+        LOADING_PID=$!
+    fi
+
+    exec {LOADING_FD}>"$fifo"
+    rm -f "$fifo"
+    printf '0\n' >&$LOADING_FD || true
+}
+
+stop_loading_splash() {
+    if [[ -n "$LOADING_FD" ]]; then
+        exec {LOADING_FD}>&-
+        LOADING_FD=""
+    fi
+
+    if [[ -n "$LOADING_PID" ]]; then
+        kill "$LOADING_PID" >/dev/null 2>&1 || true
+        wait "$LOADING_PID" >/dev/null 2>&1 || true
+        LOADING_PID=""
+    fi
+}
+
+find_battery_device() {
+    local device
+
+    for device in /sys/class/power_supply/*; do
+        [ -d "$device" ] || continue
+        if [ -r "$device/type" ] && [ "$(< "$device/type")" = "Battery" ] && [ -r "$device/capacity" ]; then
+            printf '%s\n' "$device"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+is_enabled() {
+    case "${1,,}" in
+        1|true|yes|on)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+get_wifi_status() {
+    local iface=""
+    local candidate
+    local ssid=""
+
+    for candidate in /sys/class/net/*; do
+        [ -d "$candidate/wireless" ] || continue
+        iface="$(basename "$candidate")"
+        if [ -r "$candidate/operstate" ] && [ "$(< "$candidate/operstate")" = "up" ]; then
+            break
+        fi
+    done
+
+    if [ -z "$iface" ]; then
+        printf '%s\n' "WiFi n/a"
+        return 0
+    fi
+
+    if [ -r "/sys/class/net/$iface/operstate" ] && [ "$(< "/sys/class/net/$iface/operstate")" != "up" ]; then
+        printf '%s\n' "WiFi off"
+        return 0
+    fi
+
+    if command -v iwgetid >/dev/null 2>&1; then
+        ssid="$(iwgetid "$iface" -r 2>/dev/null || true)"
+    fi
+    if [ -z "$ssid" ] && command -v iw >/dev/null 2>&1; then
+        ssid="$(iw dev "$iface" link 2>/dev/null | awk -F': ' '/SSID/ {print $2; exit}')"
+    fi
+
+    if [ -n "$ssid" ]; then
+        printf '%s\n' "WiFi ${iface}:${ssid}"
+        return 0
+    fi
+
+    if [ -r "/sys/class/net/$iface/carrier" ] && [ "$(< "/sys/class/net/$iface/carrier")" = "1" ]; then
+        printf '%s\n' "WiFi ${iface}:connected"
+    else
+        printf '%s\n' "WiFi ${iface}:disconnected"
+    fi
+}
+
+get_ip_status() {
+    local route_output=""
+    local ip_addr=""
+
+    route_output="$(ip -4 route get 1.1.1.1 2>/dev/null || true)"
+    ip_addr="$(awk '/src/ {for(i=1;i<=NF;i++){if($i=="src"){print $(i+1); exit}}}' <<<"$route_output")"
+
+    if [ -z "$ip_addr" ]; then
+        ip_addr="$(hostname --all-ip-addresses 2>/dev/null | awk '{print $1}')"
+    fi
+
+    if [ -n "$ip_addr" ]; then
+        printf '%s\n' "IP $ip_addr"
+    else
+        printf '%s\n' "IP none"
+    fi
+}
+
+get_wireguard_status() {
+    local interfaces=""
+    local iface
+    local up_ifaces=""
+
+    if ! command -v wg >/dev/null 2>&1; then
+        printf '%s\n' "WG n/a"
+        return 0
+    fi
+
+    interfaces="$(wg show interfaces 2>/dev/null || true)"
+    if [ -z "$interfaces" ]; then
+        printf '%s\n' "WG down"
+        return 0
+    fi
+
+    for iface in $interfaces; do
+        if ip link show dev "$iface" 2>/dev/null | grep -q "state UP"; then
+            if [ -z "$up_ifaces" ]; then
+                up_ifaces="$iface"
+            else
+                up_ifaces="$up_ifaces,$iface"
+            fi
+        fi
+    done
+
+    if [ -n "$up_ifaces" ]; then
+        printf '%s\n' "WG up(${up_ifaces})"
+    else
+        printf '%s\n' "WG down"
+    fi
+}
+
+status_any_items_enabled() {
+    is_enabled "$status_show_datetime" || \
+    is_enabled "$status_show_battery" || \
+    is_enabled "$status_show_wifi" || \
+    is_enabled "$status_show_ip" || \
+    is_enabled "$status_show_wireguard"
+}
+
+status_overlay_loop() {
+    local battery_device="$1"
+    local threshold="$2"
+    local width=620
+    local height=112
+    local screen_spec=""
+    local screen_width=1024
+    local x_offset=0
+    local fifo_path=""
+    local yad_pid=""
+    local writer_fd=""
+    local notified_low=0
+    local capacity=0
+    local status="Unknown"
+    local now=""
+    local overlay_percent=0
+    local battery_text=""
+    local date_line=""
+    local network_line=""
+    local status_text=""
+    local network_parts=()
+    local text_lines=()
+
+    if ! [[ "$threshold" =~ ^[0-9]+$ ]]; then
+        threshold=20
+    fi
+
+    screen_spec="$(xrandr --current 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i ~ /^[0-9]+x[0-9]+\+[0-9]+\+[0-9]+$/){print $i; exit}}}')"
+    if [ -n "$screen_spec" ]; then
+        screen_width="${screen_spec%x*}"
+    fi
+
+    if ! [[ "$screen_width" =~ ^[0-9]+$ ]]; then
+        screen_width=1024
+    fi
+
+    x_offset=$((screen_width - width - 12))
+    if [ "$x_offset" -lt 0 ]; then
+        x_offset=0
+    fi
+
+    cleanup_overlay() {
+        if [ -n "$writer_fd" ]; then
+            exec {writer_fd}>&- 2>/dev/null || true
+            writer_fd=""
+        fi
+        if [ -n "$yad_pid" ]; then
+            kill "$yad_pid" 2>/dev/null || true
+            wait "$yad_pid" 2>/dev/null || true
+            yad_pid=""
+        fi
+        if [ -n "$fifo_path" ] && [ -p "$fifo_path" ]; then
+            rm -f "$fifo_path"
+        fi
+    }
+
+    trap cleanup_overlay EXIT INT TERM
+
+    fifo_path="$(mktemp -u /tmp/rdos-status-overlay.XXXXXX)"
+    mkfifo "$fifo_path"
+
+    yad --progress \
+        --title="System Status" \
+        --text="Preparing status" \
+        --percentage=0 \
+        --geometry="${width}x${height}+${x_offset}+12" \
+        --no-buttons \
+        --undecorated \
+        --on-top \
+        --skip-taskbar \
+        --sticky \
+        <"$fifo_path" >/dev/null 2>&1 &
+    yad_pid=$!
+
+    exec {writer_fd}>"$fifo_path"
+
+    while kill -0 "$yad_pid" 2>/dev/null; do
+        if [ -n "$battery_device" ] && [ -r "$battery_device/capacity" ]; then
+            capacity="$(< "$battery_device/capacity")"
+        else
+            capacity=0
+        fi
+
+        if [ -n "$battery_device" ] && [ -r "$battery_device/status" ]; then
+            status="$(< "$battery_device/status")"
+        else
+            status="n/a"
+        fi
+
+        if ! [[ "$capacity" =~ ^[0-9]+$ ]]; then
+            capacity=0
+        fi
+
+        if is_enabled "$status_show_battery" && [ -n "$battery_device" ]; then
+            overlay_percent="$capacity"
+            battery_text="Battery ${capacity}% (${status})"
+        else
+            overlay_percent=0
+            battery_text=""
+        fi
+
+        now="$(date '+%Y-%m-%d %H:%M')"
+
+        date_line=""
+        if is_enabled "$status_show_datetime"; then
+            date_line="Time: $now"
+        fi
+
+        network_parts=()
+        if is_enabled "$status_show_wifi"; then
+            network_parts+=("$(get_wifi_status)")
+        fi
+        if is_enabled "$status_show_ip"; then
+            network_parts+=("$(get_ip_status)")
+        fi
+        if is_enabled "$status_show_wireguard"; then
+            network_parts+=("$(get_wireguard_status)")
+        fi
+
+        network_line=""
+        if [ "${#network_parts[@]}" -gt 0 ]; then
+            network_line="$(printf ' | %s' "${network_parts[@]}")"
+            network_line="Network: ${network_line# | }"
+        fi
+
+        text_lines=()
+        if [ -n "$date_line" ]; then
+            text_lines+=("$date_line")
+        fi
+        if [ -n "$network_line" ]; then
+            text_lines+=("$network_line")
+        fi
+        if [ -n "$battery_text" ]; then
+            text_lines+=("$battery_text")
+        fi
+
+        if [ "${#text_lines[@]}" -gt 0 ]; then
+            status_text="$(printf '%s\n' "${text_lines[@]}")"
+            status_text="${status_text%$'\n'}"
+        else
+            status_text="Preparing status..."
+        fi
+
+        printf '%s\n#%s\n' "$overlay_percent" "$status_text" >&${writer_fd} || break
+
+        if is_enabled "$status_show_battery" && [ -n "$battery_device" ] && [ "$capacity" -le "$threshold" ] && [ "$status" != "Charging" ]; then
+            if [ "$notified_low" -eq 0 ]; then
+                yad --warning --on-top --skip-taskbar --timeout=10 --title="Low Battery" \
+                    --text="Battery is low (${capacity}%). Please connect power." >/dev/null 2>&1 &
+                notified_low=1
+            fi
+        elif [ "$capacity" -gt "$threshold" ] || [ "$status" = "Charging" ]; then
+            notified_low=0
+        fi
+
+        sleep 30
+    done
+
+    return 0
+}
+
+start_status_overlay() {
+    local battery_device=""
+
+    if ! is_enabled "$status_overlay_enabled"; then
+        return 0
+    fi
+
+    if ! status_any_items_enabled; then
+        return 0
+    fi
+
+    if [ -n "$STATUS_OVERLAY_PID" ] && kill -0 "$STATUS_OVERLAY_PID" 2>/dev/null; then
+        return 0
+    fi
+
+    # Clean up stale windows from a previously interrupted session.
+    pkill -f 'yad --progress.*--title=System Status' >/dev/null 2>&1 || true
+
+    battery_device="$(find_battery_device || true)"
+
+    status_overlay_loop "$battery_device" "$battery_low_threshold" &
+    STATUS_OVERLAY_PID=$!
+}
+
+stop_status_overlay() {
+    if [ -n "$STATUS_OVERLAY_PID" ]; then
+        kill "$STATUS_OVERLAY_PID" 2>/dev/null || true
+        wait "$STATUS_OVERLAY_PID" 2>/dev/null || true
+        STATUS_OVERLAY_PID=""
+    fi
+
+    # Best-effort cleanup in case a previous loop died before reaping its yad child.
+    pkill -f 'yad --progress.*--title=System Status' >/dev/null 2>&1 || true
+}
+
+stop_ui_helpers() {
+    stop_loading_splash
+    stop_status_overlay
+}
+
+apply_wireguard_state() {
+    local requested
+
+    requested="${wireguard_enabled,,}"
+    case "$requested" in
+        1|true|yes|on)
+            requested="true"
+            ;;
+        *)
+            requested="false"
+            ;;
+    esac
+
+    # Root helper enforces disabled state when no WireGuard config exists.
+    sudo -n /usr/bin/tc-configure-wireguard --set-enabled "$requested" >/dev/null 2>&1 || true
+}
+
+prepare_freerdp_store() {
+    export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+    mkdir -p "$XDG_CONFIG_HOME/freerdp" >/dev/null 2>&1 || true
+}
+
+set_freerdp_cert_policy() {
+    local requested_policy="$1"
+    local arg
+    local filtered_args=()
+
+    for arg in "${freerdp_args[@]}"; do
+        case "$arg" in
+            /cert:*|/cert-deny|/cert-ignore|/cert-name:*|/cert-tofu|/cert-fingerprint:*|/cert-fingerprint:*)
+                continue
+                ;;
+            --cert-deny|--cert-ignore|--cert-tofu|--ignore-certificate|--certificate-name|--certificate-name:*)
+                continue
+                ;;
+            *)
+                filtered_args+=("$arg")
+                ;;
+        esac
+    done
+
+    freerdp_args=("${filtered_args[@]}" "/cert:${requested_policy}")
+}
+
+run_freerdp_session() {
+    local splash_text="$1"
+    local loading_timeout_pid=""
+
+    : > session.log
+    start_loading_splash "$splash_text"
+    (sleep "$connect_splash_timeout"; stop_loading_splash) &
+    loading_timeout_pid=$!
+
+    if [[ -n "$password" ]]; then
+        # Keep credentials out of process arguments when possible.
+        printf '%s\n' "$password" | WLOG_APPENDER=file WLOG_FILEAPPENDER_OUTPUT_FILE_NAME=session.log WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=. xfreerdp3 "${freerdp_args[@]}" /from-stdin
+    else
+        WLOG_APPENDER=file WLOG_FILEAPPENDER_OUTPUT_FILE_NAME=session.log WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=. xfreerdp3 "${freerdp_args[@]}"
+    fi
+
+    kill "$loading_timeout_pid" >/dev/null 2>&1 || true
+    stop_loading_splash
+}
+
+session_has_unknown_host_key_error() {
+    grep -Eiq 'certificate verification failure|unknown certificate|self-signed certificate|unable to get local issuer certificate|CERTIFICATE_VERIFY_FAILED|host key' session.log
+}
+
+prompt_trust_unknown_host_key() {
+    yad --question --center --title="Server Identity" --width=620 \
+        --button="Cancel":1 --button="Trust and Save Key":0 \
+        --text="The server identity key is not trusted yet.\n\nServer: $server\n\nIf you trust this server, choose 'Trust and Save Key' to save the key and reconnect now." >/dev/null 2>&1
+}
+
+trap stop_ui_helpers EXIT
+
+# Verify boot slot health and commit if healthy (A/B images only, no-op on single-slot)
+if [[ -f /usr/bin/tc-health-check ]]; then
+    sudo -n /usr/bin/tc-health-check &>/dev/null &
 fi
 
 # Rename thinclient
 hostname=$(< /etc/hostname)
 if [[ $hostname == "thinclient" || -f ~/dynamic_hostname ]]; then
     if [ -f /sys/class/net/eth0/address ];then
-        read newhost </sys/class/net/eth0/address
+        read -r newhost </sys/class/net/eth0/address
         newhost=TC-${newhost//[:]/}
     elif [ -f /sys/class/net/wlan0/address ];then
-        read newhost </sys/class/net/wlan0/address
+        read -r newhost </sys/class/net/wlan0/address
         newhost=TC-${newhost//[:]/}
     else
         newhost="thinclient"
     fi
 
     if [[ "$hostname" != "$newhost" ]]; then
-        sudo set-hostname $newhost
+        sudo -n /usr/bin/set-hostname "$newhost"
         hostname=$newhost
+    fi
+fi
+
+# Check for a USB drive containing config files and offer to import them.
+# Runs before config is loaded so any imported config takes effect this session.
+if /usr/bin/tc-import-usb --scan 2>/dev/null; then
+    if /usr/bin/tc-import-usb --interactive; then
+        $0 "$@" &
+        exit 0
     fi
 fi
 
 # This module is to load configs in a safe manner, if someone malicious were to add commands to the bash config files they will not be executed
 load_config ()
 {
+    unquote_config_value() {
+        local decoded="$1"
+        decoded="${decoded#\"}"
+        decoded="${decoded%\"}"
+        decoded="${decoded//\\\"/\"}"
+        decoded="${decoded//\\\\/\\}"
+        printf '%s\n' "$decoded"
+    }
+
+    is_allowed_config_key() {
+        case "$1" in
+            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|cert_policy|connect_splash_timeout|status_overlay_enabled|status_show_datetime|status_show_battery|status_show_wifi|status_show_ip|status_show_wireguard|wireguard_enabled|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns|auto_update_enabled|maintenance_window|ota_channel|autologon|username|password|rdpusername|rdpserver)
+                return 0
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+    }
+
     if [[ -f "$1" ]]; then
         while IFS='=' read -r key value || [[ -n "$key" ]]; do
             # Ignore empty lines and comments
             [[ -z "$key" || "$key" =~ ^# ]] && continue
-            
-            # Ensure the key is a valid variable name and replace hostname if needed
-            if [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+
+            # Only permit known config keys to avoid environment variable injection.
+            if is_allowed_config_key "$key"; then
                 # Replace tchostname with the up to date hostname
                 value=${value/tc_hostname/"$hostname"}
 
-                # Remove quotes to mimic source behavior
-                value="${value#\"}"  # Strip leading quote
-                value="${value%\"}"  # Strip trailing quote
+                # Decode config values produced by tc-settings quote_config_value().
+                value="$(unquote_config_value "$value")"
 
                 # Assign only if value is not empty
                 if [[ -n "$value" ]]; then
@@ -69,12 +572,21 @@ load_config ()
                     unset "$key"
                 fi
             else
-                echo "Skipping potentially unsafe entry: $key"
+                echo "Skipping unsupported config key: $key"
             fi
         done < "$1"
     else
         echo "$1 does not exist, ignoring import"
     fi
+}
+
+download_config ()
+{
+    curl --fail --silent --show-error --location \
+        --connect-timeout 2 \
+        --max-time 8 \
+        --retry 1 \
+        --output "$1" "$2"
 }
 
 # Config file (down)loading and also the start of the main UI routine
@@ -84,24 +596,24 @@ if [ -f ~/tcconfig ];then
 
     if [[ $config_url ]]; then
         config_url_invalid="$config_url"
-        curl -fLo ~/tcconfig $config_url
         # If downloads fail we try the last successful one just in case someone made a typo, if its successful we backup the working URL
-        if [ $? -ne 0 ]; then
+        if ! download_config ~/tcconfig "$config_url"; then
             echo "Download failed, trying backup URL"
             load_config ~/config_url
-            curl -fLo ~/tcconfig $config_url
-            config_url="Config URL $config_url_invalid failed to download, the above settings are from a backup."  # This was a dilemma since it can pick either one from the file depending on external servers, lets just warn instead. In an automatic scenario this is not saved, even if the admin ends up saving this the backup URL should revert it again.
+            if ! download_config ~/tcconfig "$config_url"; then
+                config_url="Config URL $config_url_invalid failed to download, the above settings are from a backup."  # This was a dilemma since it can pick either one from the file depending on external servers, lets just warn instead. In an automatic scenario this is not saved, even if the admin ends up saving this the backup URL should revert it again.
+            fi
         else
             # Double check what we received has a config_url before replacing our known one
             if grep -F "config_url=" ~/tcconfig ;then
                 echo "Valid config received, updating config_url"
-                echo config_url=$config_url > ~/config_url
+                echo "config_url=$config_url" > ~/config_url
                 # Quick reload in case things changed, spares the user the reboot
                 load_config ~/tcconfig
             else
                 # Something didn't go right and we did not use the new URL successfully
                 load_config ~/config_url
-                curl -fLo ~/tcconfig $config_url
+                download_config ~/tcconfig "$config_url"
                 load_config ~/tcconfig
                 if [ "$config_url_invalid" == "$config_url" ]; then
                     config_url="Config URL $config_url_invalid was invalid and a backup was used." # This was a dilemma since it can pick either one from the file depending on external servers, lets just warn instead. In an automatic scenario this is not saved, even if the admin ends up saving this the backup URL should revert it again.
@@ -111,33 +623,27 @@ if [ -f ~/tcconfig ];then
     fi
 
     load_config ~/tcconfig_override
-    original_param=$param
     # Some values used to be hardcoded but are important, we define the old hardcoded variables here in case they are missing from production configs
     if [[ -z "$exit_type" ]]; then
         exit_type="Shutdown"
     fi
 
-    if [[ -z "$login_timeout" ]]; then
-        login_timeout="600"
-    fi
-
     # Give the fake please wait option to allow manual logon
     if [[ "$autologon" == "true" ]]; then
-        yad --center --title=Loading --button="Please wait" --timeout=1
-        if [ "$?" == "0" ];then
+        if yad --center --title=Loading --button="Please wait" --timeout=1; then
             autologon="false"
-        else # We can't trust these inputs just like with the login form, so we wrap them (I do it here because for the login form I want it to be very early in the chain directly after the form, and we cant do it twice)
-            username=$(printf '%q' "$username")
-            password=$(printf '%q' "$password")
         fi
     fi
 
     # Apply system configuration
-    pamixer -u --allow-boost --set-volume $volume
-    pamixer -u --default-source --allow-boost --set-volume $microphone
-    light -S $brightness
-    setxkbmap $keylayout
-    xset dpms 0 $screen_timeout 0
+    pamixer -u --allow-boost --set-volume "$volume"
+    pamixer -u --default-source --allow-boost --set-volume "$microphone"
+    light -S "$brightness"
+    setxkbmap "$keylayout"
+    xset b off
+    xset dpms 0 "$screen_timeout" 0
+    apply_wireguard_state
+    start_status_overlay
 
 
     # Handle multiple servers
@@ -150,12 +656,12 @@ if [ -f ~/tcconfig ];then
         done
 
         yad_list=$(echo -e "$yad_list" | sed '/^$/d')
-        selected=$(echo -e "$yad_list" | yad --list --center --window-icon=changes-preven --button=$exit_type:1 --button=Select:0 --timeout=$login_timeout --title="Network Login | $VERSION" --column="Server Name" --width 300 --height 300)
+        selected=$(echo -e "$yad_list" | yad --list --center --window-icon=changes-preven --button="$exit_type":1 --button=Select:0 --timeout="$login_timeout" --title="Network Login | $VERSION" --column="Server Name" --width 300 --height 300)
         OUTPUT_RESULTS=$?
         if ((OUTPUT_RESULTS != 0)); then
             shutdown_thinclient
         fi
-        server=$(echo "$selected" | sed 's/[|[:space:]]*$//')
+        server="${selected%"${selected##*[![:space:]|]}"}"
     else
         server="${servers[0]}"
     fi
@@ -168,7 +674,7 @@ if [ -f ~/tcconfig ];then
                 if [[ -n "$param" && "$(cat ~/.ICAClient/param)" != "$param" ]]; then
                     echo Store URL incorrect, trying to reconfigure
                     rm -rf ~/.ICAClient
-                    /opt/Citrix/ICAClient/util/storebrowse -a "$param" && echo $param > ~/.ICAClient/param
+                    /opt/Citrix/ICAClient/util/storebrowse -a "$param" && echo "$param" > ~/.ICAClient/param
                     if [ ! -f ~/.ICAClient/param ];then
                         echo "Something went wrong, we have no configuration. Restarting..."
                         $0 "$@" &
@@ -187,7 +693,7 @@ if [ -f ~/tcconfig ];then
         yad --center --title=Loading --button="Please wait" --timeout=1
         if [ "$?" == "70" ];then
             if [ -f /usr/bin/moonlight ];then
-                /usr/bin/moonlight $param
+                /usr/bin/moonlight "$param"
                 shutdown_thinclient
             fi
         fi
@@ -196,7 +702,7 @@ if [ -f ~/tcconfig ];then
     # RDP File support, this will break the server string for the other modes so we do it last
     if [[ "$server" == *"$PROTOCOL_DETECT"* ]]; then
         curl -m 5 -fLs "$server" | enconv -L none -x UTF-8 > ~/destination.tmp && [ -s ~/destination.tmp ] && mv ~/destination.tmp ~/destination.rdp
-        rdp_destination="~/destination.rdp"
+        rdp_destination="$HOME/destination.rdp"
     else
         rdp_destination="/v:"$server
     fi
@@ -205,160 +711,140 @@ if [ -f ~/tcconfig ];then
         echo "Autologon is enabled, skipping login form"
     else
         # Login Dialogue
-        OUTPUT=$(yad --form --center --window-icon=changes-prevent --image=dialog-password --button=$exit_type:1 --button=Login:0 --timeout=$login_timeout --title="Network Login | $VERSION" \
+        OUTPUT=$(yad --form --center --window-icon=changes-prevent --image=dialog-password --button="$exit_type":1 --button="Settings":2 --button=Login:0 --timeout="$login_timeout" --title="Network Login | $VERSION" \
             --text="Enter your network credentials below" \
             --separator=$'\x1F' \
             --field="Username" \
             --field="Password":h)
         OUTPUT_RESULTS=$?
+        if ((OUTPUT_RESULTS == 2)); then
+            /usr/bin/tc-settings --settings || true
+            $0 "$@" &
+            exit 0
+        fi
         if ((OUTPUT_RESULTS != 0)); then
             shutdown_thinclient
         fi
-        Blank=""
-        username=$(printf '%q' "$(awk -F'\x1F' '{print $1}' <<<"$OUTPUT")")
-        password=$(printf '%q' "$(awk -F'\x1F' '{print $2}' <<<"$OUTPUT")")
+        username="$(awk -F'\x1F' '{print $1}' <<<"$OUTPUT")"
+        password="$(awk -F'\x1F' '{print $2}' <<<"$OUTPUT")"
     fi
 fi
 
-# Password commands
-if [ "$password" = $adminpass"kill" ];then
-    exit 0
-fi
-
-if [ "$password" = $adminpass"terminal" ];then
-    xterm -bg black -fg white
-    $0
-    exit 0
-fi
-
-if [ "$password" = "ping" ];then
-    if [[ "$server" == *"$PROTOCOL_DETECT"* ]]; then
-        mtr $(cat ~/destination.rdp | grep "full address:s:" | sed 's/full address:s://g' | sed 's/:.*//g' | tr -d '\r' | tr -d '\n')
-    else
-        mtr $( echo "$server" | sed 's/:.*//g' )
-    fi
-    if (($? != 0)); then
-        yad --title="Error" --text "Something went wrong, will open the ping tool with localhost as the destination instead" --button="Ok"
-        mtr
-    fi
-    $0
-    exit 0
-fi
-
-if [ "$password" = "ip" ];then
-    yad --title="Network Information"  --center --text="Hostname: $hostname\nLocal IP: $(hostname --all-ip-addresses || hostname -I)\nPublic IP: $(curl -4 ifconfig.me)\n$(resolvectl status | grep "DNS Servers" | sed -e 's/^[ \t]*//')\nGateway: $(ip route | awk '/default/ { print $3 }')" --button="Ok"
-    $0
-    exit 0
-fi
-
-# This section handles the default configuration and configuration dialogue
+# First time setup is handled before the login flow so new images land in a guided wizard.
 if [ ! -f ~/tcconfig ];then
-    yad --info --ellipsize=middle --center --title="User Friendly Thin Client $VERSION by Henk.Tech" --text="You have not yet configured your thin client and a configuration screen will now open.\nTo access this configuration screen at a later time use config as the login password.\nYou can also use the login password terminal to access the terminal.\n\nNOTE: If you enter an admin password you will need to type this in front of the commands,\nthis version stores that password in plain text so do not submit your usual administrator passwords.\n\nCommands:\nconfig: Configuration screen\nterminal: Interactive Terminal\nping (Without password): My Traceroute\nip (Without password): Show IP information\nkill: Shut down this tool"
-    password=config
-    helpdesk="the helpdesk"
-    volume="100"
-    microphone="100"
-    brightness="50"
-    login_timeout="600"
-    screen_timeout="600"
-    exit_type="Shutdown"
-fi
-
-if [ "$password" = $adminpass"config" ];then
-    server=$server_list
-    OUTPUT=$(yad --form --center --window-icon=changes-allow --image=preferences-system --title="Configuration Utility | $VERSION" \
-        --text="This will replace the configuration file with the provided settings" \
-        --separator=$'\x1F' \
-        --field="RDP Configuration":lbl --align=center "" \
-        --field="Server" "$server" \
-        --field="Domain" "$domain" \
-        --field="Parameters" "$original_param" \
-        --field="Dialog Configuration":lbl --align=center "" \
-        --field="Admin Password":h "$adminpass" \
-        --field="Helpdesk Contact" "$helpdesk" \
-        --field="Login Timeout in Seconds" "$login_timeout" \
-        --field="OS Configuration":lbl --align=center "" \
-        --field="Speaker Volume" "$volume" \
-        --field="Microphone Volume" "$microphone" \
-        --field="Screen Brightness" "$brightness" \
-        --field="Screen Standby Timeout in Seconds" "$screen_timeout" \
-        --field="Keyboard Layout" "$keylayout" \
-        --field="Exit Type (Shutdown/Sleep/Restart)" "$exit_type" \
-        --field="Remote Configuration":lbl --align=center "" \
-        --field="Remote Config Location" "$config_url" )
-    OUTPUT_RESULTS=$?
-    if ((OUTPUT_RESULTS == 0)); then
-        echo server=\"$(awk -F'\x1F' '{print $2}' <<<$OUTPUT)\" > ~/tcconfig
-        echo domain=\"$(awk -F'\x1F' '{print $3}' <<<$OUTPUT)\" >> ~/tcconfig
-        echo param=\"$(awk -F'\x1F' '{print $4}' <<<$OUTPUT)\" >> ~/tcconfig
-        echo adminpass=\"$(awk -F'\x1F' '{print $6}' <<<$OUTPUT)\" >> ~/tcconfig
-        echo helpdesk=\"$(awk -F'\x1F' '{print $7}' <<<$OUTPUT)\" >> ~/tcconfig
-        echo login_timeout=\"$(awk -F'\x1F' '{print $8}' <<<$OUTPUT)\" >> ~/tcconfig
-        echo volume=\"$(awk -F'\x1F' '{print $10}' <<<$OUTPUT)\" >> ~/tcconfig
-        echo microphone=\"$(awk -F'\x1F' '{print $11}' <<<$OUTPUT)\" >> ~/tcconfig
-        echo brightness=\"$(awk -F'\x1F' '{print $12}' <<<$OUTPUT)\" >> ~/tcconfig
-        echo screen_timeout=\"$(awk -F'\x1F' '{print $13}' <<<$OUTPUT)\" >> ~/tcconfig
-        echo keylayout=\"$(awk -F'\x1F' '{print $14}' <<<$OUTPUT)\" >> ~/tcconfig
-        echo exit_type=\"$(awk -F'\x1F' '{print $15}' <<<$OUTPUT)\" >> ~/tcconfig
-        echo config_url=\"$(awk -F'\x1F' '{print $17}' <<<$OUTPUT)\" >> ~/tcconfig
-    else
-        yad --error --title="Error" --center --ellipsize=middle --text="Configuration cancelled or failed"
+    if /usr/bin/tc-settings --wizard; then
+        $0 "$@" &
+        exit 0
     fi
-    $0 "$@" &
-    exit 0
+    shutdown_thinclient
 fi
 
 # We passed all the UI's and now try to launch RDP
 echo "Start of session" > session.log
 if [[ "$server" != "citrix" && "$server" != "moonlight" ]]; then
-    # Because we are about to bash -c we sanetize the inputs which bash -c will convert back properly
-    # Conditional because xfreerdp breaks if we do this with an empty variable
-    if [[ -n "$rdp_destination" ]]; then
-        rdp_destination=$(printf '%q' "$rdp_destination")
+    loading_text="Connecting to remote desktop..."
+    if [[ "${RDOS_RECONNECTING:-0}" == "1" ]]; then
+        loading_text="Reconnecting to remote desktop..."
     fi
 
+    prepare_freerdp_store
+
+    freerdp_args=(
+        "$rdp_destination"
+        /multimon
+        +multitouch
+        /f
+        /network:auto
+        /sound:rate:44100,channel:2
+        /dynamic-resolution
+        /usb:auto
+        +drives
+        +auto-reconnect
+        +multitransport
+        "/client-hostname:$hostname"
+    )
+
+    selected_cert_policy="tofu"
+    case "$cert_policy" in
+        ignore)
+            selected_cert_policy="ignore"
+            ;;
+        ask|prompt)
+            selected_cert_policy="deny"
+            ;;
+        deny|tofu|fingerprint:*)
+            selected_cert_policy="$cert_policy"
+            ;;
+        *)
+            selected_cert_policy="tofu"
+            ;;
+    esac
+
+    if [[ -n "$username" ]]; then
+        freerdp_args+=("/u:$username")
+    fi
     if [[ -n "$domain" ]]; then
-        domain=$(printf '%q' "$domain")
+        freerdp_args+=("/d:$domain")
     fi
 
     if [[ -n "$param" ]]; then
-        param=$(printf '%q' "$param")
+        read -r -a extra_params <<< "$param"
+        freerdp_args+=("${extra_params[@]}")
     fi
 
-    if [[ -n "$hostname" ]]; then
-        hostname=$(printf '%q' "$hostname")
-    fi
-    # Username and Password are already sanetized during input, we don't do it twice but we do need to append the correct prefix
-    if [[ -n "$username" ]]; then
-        username="/u:$username"
-    fi
-    if [[ -n "$password" ]]; then
-        password="/p:$password"
-    fi
-    if [[ -n "$domain" ]]; then
-        domain="/d:$domain"
-    fi
-    bash -c "WLOG_APPENDER=file WLOG_FILEAPPENDER_OUTPUT_FILE_NAME=session.log WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=. xfreerdp3 $rdp_destination $domain $username $password /multimon +multitouch /cert:ignore /f /network:auto /sound:rate:44100,channel:2 /dynamic-resolution /usb:auto +drives +auto-reconnect +multitransport /client-hostname:$hostname $param" # Somehow this only works when wrapped in bash otherwise it cant understand the positional argument
+    # Ensure configured cert policy wins over any legacy cert flags in advanced parameters.
+    set_freerdp_cert_policy "$selected_cert_policy"
+
+    cert_prompted="false"
+    while true; do
+        run_freerdp_session "$loading_text"
+
+        if grep -Fq "BY_USER" session.log; then
+            break
+        fi
+
+        if [ "$cert_prompted" != "true" ] && session_has_unknown_host_key_error; then
+            if prompt_trust_unknown_host_key; then
+                cert_prompted="true"
+                RDOS_CERT_PROMPTED=1
+                echo "User accepted unknown host key prompt, retrying with TOFU policy"
+                set_freerdp_cert_policy "tofu"
+                loading_text="Saving server key and reconnecting..."
+                continue
+            fi
+        fi
+
+        break
+    done
+
+    stop_status_overlay
 fi
 
 # RDP is no longer running, we diagnose why
 if ! grep -F "BY_USER" session.log; then
-    grep -F "ERRCONNECT_LOGON_FAILURE" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="The Login attempt has failed.\nPlease try again or contact $helpdesk if the issue persists."
-    grep -F "ERRCONNECT_WRONG_PASSWORD" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="You have entered incorrect login information.\nPlease try again."
-    grep -F "ERRCONNECT_CONNECT_FAILED" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="We could not establish a connection with the server $server, restart your device and contact $helpdesk if the issue persists after 5 minutes."
-    grep -F "ERRCONNECT_DNS_NAME_NOT_FOUND" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="We could not find a server called $server, restart your device and contact $helpdesk if the issue persists after 5 minutes."
-    grep -F "ERRCONNECT_AUTHENTICATION_FAILED" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="The server was unable to verify your credentials.\nIf you still experience this error after 10 minutes please contact $helpdesk."
-    grep -F "ERRCONNECT_CONNECT_TRANSPORT_FAILED" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="We have encountered a server issue.\nThis can have the following causes.\n\nThe server is unable to take your connection at this time.\nYour account does not have permissions to access the server but was not locked out.\nThe server $server is not the correct server.\nThere was another issue on this machine or network that prevented the connection from succeeding.\n\nPlease reboot your device, if you are still unable to login after this contact $helpdesk"
-    grep -F "ERRCONNECT_PASSWORD_MUST_CHANGE" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="Your password has expired and needs to be changed, please contact $helpdesk for assistance."
-    grep -F "ERRCONNECT_ACCOUNT_DISABLED" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="You can not login with this account.\nContact $helpdesk for more information."
-    grep -F "ERRCONNECT_ACCOUNT_LOCKED_OUT" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="Your account has been locked out because of to many failed attempts, please contact $helpdesk and ask for an account unlock (Accounts may unlock automatically after enough time has passed)."
-    grep -F "ERRCONNECT_ACCOUNT_RESTRICTION" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="You are unable to login because of an account restriction.\nFor example you may not be allowed to login at this hour or day.\nPlease contact $helpdesk for more information."
-    grep -F "ERRINFO_SERVER" session.log && yad --error --title="Error" --timeout=900 --center --ellipsize=middle --text="Server connection failed.\nPlease try again, restart your device and otherwise contact $helpdesk for assistance."
-    grep -F "ERRINFO_LICENSE" session.log && yad --error --title="Error" --timeout=900 --center --ellipsize=middle --text="To many accounts are currently logged in.\n Please inform $helpdesk ."
-    grep -F "ERRINFO_OUT_OF_MEMORY" session.log && yad --error --title="Error" --timeout=900 --center --ellipsize=middle --text="The server $server ran out of memory.\n Please inform $helpdesk ."
-    grep -F "ERRINFO_CB_DESTINATION_NOT_FOUND" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="The server $server could not be reached, restart your device and contact $helpdesk if the issue persists."
-    grep -F "ERRINFO_CB_DESTINATION_POOL_NOT_FREE" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="The server $server did not have a session available for you.\nTry again in 10 minutes and contact $helpdesk if the issue persists."
-    grep -F "ERRINFO_CB_CONNECTION_ERROR_INVALID_SETTINGS" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="Invalid settings.\n Please contact $helpdesk and inform them the settings used are \n$server\n$param."
+    error_displayed="false"
+    grep -F "ERRCONNECT_LOGON_FAILURE" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="The Login attempt has failed.\nPlease try again or contact $helpdesk if the issue persists." && error_displayed="true"
+    grep -F "ERRCONNECT_WRONG_PASSWORD" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="You have entered incorrect login information.\nPlease try again." && error_displayed="true"
+    grep -F "ERRCONNECT_CONNECT_FAILED" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="We could not establish a connection with the server $server, restart your device and contact $helpdesk if the issue persists after 5 minutes." && error_displayed="true"
+    grep -F "ERRCONNECT_DNS_NAME_NOT_FOUND" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="We could not find a server called $server, restart your device and contact $helpdesk if the issue persists after 5 minutes." && error_displayed="true"
+    grep -F "ERRCONNECT_AUTHENTICATION_FAILED" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="The server was unable to verify your credentials.\nIf you still experience this error after 10 minutes please contact $helpdesk." && error_displayed="true"
+    grep -F "ERRCONNECT_CONNECT_TRANSPORT_FAILED" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="We have encountered a server issue.\nThis can have the following causes.\n\nThe server is unable to take your connection at this time.\nYour account does not have permissions to access the server but was not locked out.\nThe server $server is not the correct server.\nThere was another issue on this machine or network that prevented the connection from succeeding.\n\nPlease reboot your device, if you are still unable to login after this contact $helpdesk" && error_displayed="true"
+    grep -F "ERRCONNECT_PASSWORD_MUST_CHANGE" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="Your password has expired and needs to be changed, please contact $helpdesk for assistance." && error_displayed="true"
+    grep -F "ERRCONNECT_ACCOUNT_DISABLED" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="You can not login with this account.\nContact $helpdesk for more information." && error_displayed="true"
+    grep -F "ERRCONNECT_ACCOUNT_LOCKED_OUT" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="Your account has been locked out because of to many failed attempts, please contact $helpdesk and ask for an account unlock (Accounts may unlock automatically after enough time has passed)." && error_displayed="true"
+    grep -F "ERRCONNECT_ACCOUNT_RESTRICTION" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="You are unable to login because of an account restriction.\nFor example you may not be allowed to login at this hour or day.\nPlease contact $helpdesk for more information." && error_displayed="true"
+    grep -F "ERRINFO_SERVER" session.log && yad --error --title="Error" --timeout=900 --center --ellipsize=middle --text="Server connection failed.\nPlease try again, restart your device and otherwise contact $helpdesk for assistance." && error_displayed="true"
+    grep -F "ERRINFO_LICENSE" session.log && yad --error --title="Error" --timeout=900 --center --ellipsize=middle --text="To many accounts are currently logged in.\n Please inform $helpdesk ." && error_displayed="true"
+    grep -F "ERRINFO_OUT_OF_MEMORY" session.log && yad --error --title="Error" --timeout=900 --center --ellipsize=middle --text="The server $server ran out of memory.\n Please inform $helpdesk ." && error_displayed="true"
+    grep -F "ERRINFO_CB_DESTINATION_NOT_FOUND" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="The server $server could not be reached, restart your device and contact $helpdesk if the issue persists." && error_displayed="true"
+    grep -F "ERRINFO_CB_DESTINATION_POOL_NOT_FREE" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="The server $server did not have a session available for you.\nTry again in 10 minutes and contact $helpdesk if the issue persists." && error_displayed="true"
+    grep -F "ERRINFO_CB_CONNECTION_ERROR_INVALID_SETTINGS" session.log && yad --error --timeout=900 --title="Error" --center --ellipsize=middle --text="Invalid settings.\n Please contact $helpdesk and inform them the settings used are \n$server\n$param." && error_displayed="true"
+
+    if [ "$error_displayed" != "true" ]; then
+        fallback_details="$(tail -n 10 session.log 2>/dev/null || true)"
+        yad --error --timeout=900 --title="Error" --center --ellipsize=middle \
+            --text="The connection closed unexpectedly before login completed.\n\nPlease try again. If this keeps happening, contact $helpdesk and share this detail:\n${fallback_details:-No detailed log output found.}"
+    fi
 else
     echo "User logged out"
     user_signout="true"
@@ -370,4 +856,8 @@ fi
 
 # Restart the application, this will fetch updated configs and return us to the login screen
 password=""
-$0 "$@" &
+if [[ "$user_signout" == "true" ]]; then
+    RDOS_RECONNECTING=0 $0 "$@" &
+else
+    RDOS_RECONNECTING=1 $0 "$@" &
+fi

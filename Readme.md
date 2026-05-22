@@ -1,18 +1,27 @@
-# User Friendly ThinClient
+# Remote Desktop Operating System
 
-![UFTC Login Screen](login.png)
+```ascii
+                 ███████████   ██████████      ███████     █████████ 
+                ▒▒███▒▒▒▒▒███ ▒▒███▒▒▒▒███   ███▒▒▒▒▒███  ███▒▒▒▒▒███
+                 ▒███    ▒███  ▒███   ▒▒███ ███     ▒▒███▒███    ▒▒▒ 
+                 ▒██████████   ▒███    ▒███▒███      ▒███▒▒█████████ 
+                 ▒███▒▒▒▒▒███  ▒███    ▒███▒███      ▒███ ▒▒▒▒▒▒▒▒███
+                 ▒███    ▒███  ▒███    ███ ▒▒███     ███  ███    ▒███
+                 █████   █████ ██████████   ▒▒▒███████▒  ▒▒█████████ 
+                ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒▒▒▒▒▒      ▒▒▒▒▒▒▒     ▒▒▒▒▒▒▒▒▒  
+```
 
-UFTC was born out of my passion for IT, I have always wanted the ability to have thin clients in my home lab yet nothing online I could use for free was what I wanted.
-Many organizations I supported across IT departments always wanted the same thing, a lightweight locked down thinclient with a simple login screen.
+![RDOS Login Screen](login.png)
 
-This project is geared towards that use case, repurpose machines into thin clients or save money by using your own consistent thinclient image with mini PC's.
-Super simple to setup, and easy for the end user.
+RDOS, short for Remote Desktop Operating System, is a lightweight Linux appliance built for remote desktop deployments. The goal is straightforward: turn generic PCs, laptops, and mini systems into consistent, locked-down remote desktop endpoints that are easy to deploy, easy to support, and predictable for end users.
 
-- Henk.Tech
+The project is aimed at environments that want a simple login-driven thin client experience without carrying around a full general-purpose desktop. RDOS focuses on fast provisioning, sensible defaults, and operational tools that help support staff diagnose issues without exposing unnecessary local functionality.
+
+RDOS was originally forked from Henk's UFTC project. The codebase has since diverged substantially, but the project continues to acknowledge and credit that original foundation.
 
 ## Features
 
-- Simple UI, your users only see a login screen and a shutdown button just like you'd want!
+- Purpose-built thin client UI with a login screen, core tools, and minimal local surface area.
 - Admin options are present but hidden behind secret passwords.
 - Users can use the "ping" password to ping the remote server including a full trace route. You don't have to guess where the connection goes wrong just let them send you a picture.
 - Error messages that make sense and include your own helpdesk info, your users know exactly who to contact and what to say (Written by an experienced sysadmin who also does first line support).
@@ -24,42 +33,95 @@ Super simple to setup, and easy for the end user.
 - auto-maintenance command for system updates (Own risk especially on auto update mode, if a bad update releases and you enabled automatic updates you have to manually roll back your machines).
 - No remote access ports and minimal packages to reduce the attack surface even if the machine is outdated (The UI can be navigated easily over the phone, VNC is not neccesary. Instead if you need to assist users request remote access within the remote desktop.)
 
+## Project lineage
+
+RDOS began as a fork of [henk717/uftc](https://github.com/henk717/uftc).
+
+That project established the original direction for a lightweight remote desktop thin client. RDOS keeps explicit attribution to that work while evolving into a separate codebase with different goals, build flows, and longer-term platform plans.
+
 ## Build your own image
 
 To succesfully build the image this project must be git cloned with a Linux system, if not the line endings and file permissions may not be correct.
 
 Image building requires docker and can be done inside of WSL2 if desired.
 
+On Windows, line endings are a common source of shell-script failures. This repository includes `.gitattributes` to enforce LF endings for Linux-consumed files.
+
+If you are approaching this repo as a developer, see [docs/building.md](docs/building.md) for a step by step explanation of what gets built and how to package a basic installer ISO.
+
+To install the full host-side build dependency set for local builds, WSL, or self-hosted runners:
+
+```bash
+bash ./setup-build-deps.sh
 ```
+
+From Windows, you can invoke the same helper through WSL with:
+
+```cmd
+setup-build-deps.cmd
+```
+
+```bash
 ./build.sh
 ```
 
-grub as the bootloader unlocks a few things most importantly uefi support, you also get a seperate fat32 boot partition where you can place the config files when provisioning.
-Boot partition is a sizable 4GB to reduce the risk of running out of space for the kernels, with a total size of under 16GB this should fit on a 16GB USB stick if you wish to use a USB Stick for customization and capture.
+To build a super basic installer ISO (auto install + power off):
 
-Important: The modern kernel could not be included in the build process, boot your generated image in a VM once so it can finalize the build. Release images have this step completed.
+```bash
+./build-installer-iso.sh
+```
+
+Installer ISO dependencies:
+
+```bash
+# Debian/Ubuntu
+sudo apt-get update
+sudo apt-get install -y docker.io shellcheck qemu-utils xorriso zstd curl util-linux parted gdisk dosfstools rsync grub-pc-bin grub-efi-amd64-bin grub-common e2fsprogs file
+
+# Fedora
+sudo dnf install -y moby-engine ShellCheck qemu-img xorriso zstd curl util-linux parted gdisk dosfstools rsync grub2-pc-modules grub2-efi-x64-modules grub2-tools-extra e2fsprogs file
+```
+
+`qemu-img` is provided by `qemu-utils` on Debian/Ubuntu.
+
+This installer ISO boots, writes RDOS to the first non-removable disk that is not the USB boot media, then powers off so you can remove the flash drive.
+
+grub as the bootloader unlocks a few things most importantly uefi support, you also get a separate fat32 boot partition where you can place the config files when provisioning.
+The installer ISO uses the bundled `efi.img` boot image instead of pointing firmware at the raw `BOOTX64.EFI` loader, which is more reliable in Hyper-V Gen2 and similar UEFI VMs.
+Boot partition is a sizable 4GB to reduce the risk of running out of space for the kernels, with a total size of under 16GB this should fit on a 16GB USB stick if you wish to use a USB Stick for customization and capture.
 
 ## Usage
 
 ### Installation from the ISO
 
-For easy installation an ISO based on clonezilla is available, this iso can be burned to a CD, flashed to USB with Rufus or be loaded from a Ventoy/Easy2boot USB stick.
+You can build an ISO from your local `rdos.vhd` using `./build-installer-iso.sh`.
 
-While a full copy of Clonezilla is bundled that allows you to capture your own images the recommended way of installing the official image is by using the first option in the boot menu. This will automatically use the recommended CloneZilla options.
+The generated `rdos-installer.iso` is designed to be minimal: it boots directly into unattended install mode, restores RDOS to the first non-removable target disk (excluding the boot USB), and powers off when done.
+
+If you saw a `Permission denied` error while editing extracted boot files during ISO build, update to the latest `build-installer-iso.sh` from this repo (that behavior is handled in the current script).
+
+Flash it to USB with Rufus, Ventoy, or your preferred ISO writer, boot the target system from USB, wait for poweroff, then remove the flash drive.
+
+Safety note: this installer is intentionally simple and destructive. It will erase the selected target disk without an interactive confirmation.
+
+References used for this flow:
+
+- Clonezilla Live docs: <https://clonezilla.org/live-doc.php>
+- Clonezilla advanced boot parameters (`ocs_live_run`, batch mode): <https://clonezilla.org/show-live-doc-content.php?topic=clonezilla-live/doc/99_Misc>
 
 ### Network deployment using Clonezilla on the ISO
 
 Because a full copy of Clonezilla is bundled on the disk you can use this to facilitate PXE deployments over the network using a tempoary private bittorrent server. A full copy of Clonezilla is normally not present on clonezilla made disks, because of this we will need to apply a small workaround to be able to use this option.
 
-##### Requirements:
+#### Requirements
 
 - The PXE server should be one of your target machines with the smallest amount of disk space and an identical type of drive.
 - This source machine should be correctly installed and configured as desired without disabling dynamic_hostname.
 - Every PXE booting machine will be wiped, ensure no machines that are not part of the deployment will PXE boot during this time.
 
-##### Instructions:
+#### Instructions
 
-0. Install and configure the source machine with UFTC.
+0. Install and configure the source machine with RDOS.
 1. Load CloneZilla from the installation disk using the Start Clonezilla option.
 2. Enter Shell
 3. Type the following command : sudo rm /home/partimag && sudo mkdir /home/partimag && sudo mkdir /home/partimag/live
@@ -73,9 +135,6 @@ Because a full copy of Clonezilla is bundled on the disk you can use this to fac
 11. Choose from-device
 12. Choose disk-2-mdisks
 13. Choose the correct source disk of your thinclient (This needs to be identical on the targets)
-14. Choose -fsck
-15. Choose -k0
-16. Choose -reboot (or -shutdown if you prefer, but rebooting is recommended as it is easier to see if the install was succesfull and in their default configuration the thinclients will automatically turn off)
 17. Choose bittorrent (This is the fastest and most reliable option, it will help all your thinclients seed to other thin clients during the setup speeding up the process and allowing proper error checking)
 
 After these steps your source thinclient is now a deployment server for the other machines in your network. Ensure that the target thinclients boot from the network. After you are done you can finish yes to the question if all jobs finished to shut down the PXE server.
@@ -94,46 +153,91 @@ The recommended method of flashing VHD's directly is using RescueZilla on a Vent
 ### WiFi
 
 WiFi can be enabled by placing a suitable wpa_supplicant.conf on the boot partition.
+If you are on the running thin client, there is also a built-in WiFi Wizard available from the login screen, the configuration screen, or by entering `wifi` as the login password.
+Wireless association is handled by `wpa_supplicant` and DHCP/DNS are handled by `systemd-networkd` and `systemd-resolved`.
 Here is a template (Don't forget to change the country, I put china as the example due to the broadest range):
 
-```
+```ini
 ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
 update_config=1
 country=CN
 network={
-	ssid="SSID GOES HERE"
-	psk="Password goes here"
-	bgscan="simple:30:-65:15"
+    ssid="SSID GOES HERE"
+    psk="Password goes here"
+    bgscan="simple:30:-65:15"
 }
 ```
 
+### WireGuard VPN
+
+WireGuard tunnel configs can be imported from USB drives through the same USB import flow as the other runtime configs.
+Name the tunnel file like `wg0.conf` and place it on the USB drive root, then use the Import USB Config tool or let the thin client auto-detect it at startup.
+WireGuard import is USB-only for now; there is no remote URL configuration path yet.
+
+### Wallpaper
+
+RDOS now supports a desktop wallpaper with clear precedence:
+
+- Runtime override from the boot partition: `/boot/wallpaper.(png|jpg|jpeg|webp|bmp|xpm)`
+- Per-user override: `~/wallpaper.(png|jpg|jpeg|webp|bmp|xpm)`
+- Built-in fallback baked into the image: `/usr/share/rdos/wallpaper-default.png`
+
+The source file for the baked-in default is `tcfiles/wallpaper-default.png` in this repository.
+Replace that file with your own image before building if you want a different default.
+
+Wallpaper rendering uses aspect-preserving fit (`feh --bg-max`) by default, so the full image stays visible without distortion. Depending on display ratio differences, this may add letterboxing.
+
 ### Manual configuration
 
-If the thinclient is not preconfigured on the boot partition it will automatically boot its configuration screen.
-Fill in the fields you require for your deployment, if your server is not connected to a domain leave this blank.
-The parameters field are for additional xfreerdp parameters.
-The helpdesk field will be used in the middle of error message sentences, for example "Please contact HELPDESK if this is not resolved after 5 minutes."
+If the thinclient is not preconfigured on the boot partition it will automatically open a multi-step first boot wizard.
+The first boot wizard focuses on the essentials only: connection details, DHCP vs static IPv4, optional WiFi setup, and support information.
+Sensible defaults are applied automatically for display, timeout, keyboard, and audio settings.
 
-### Automatic configuration
+After first boot, use the `Settings` button on the login screen to open the full settings page. If an admin password is configured, you will get a separate unlock prompt before the panel opens.
 
-Just like the WiFi the settings for the thinclient software can also be preconfigured by placing a tcconfig file in the boot partition.
+Default settings password: `rdos`
+
+The first-time setup wizard shows this default and lets you replace it during the Support step.
+
+The full settings page breaks options into separate sections for connection, network, device behavior, support settings, and common tools.
+
 The template for this file is as follows (pay attention to the line endings, they need to be linux compatible):
 
-```
+```ini
 server="server1|server2|server3"
 domain=""
 param=""
-adminpass=""
+adminpass="rdos"
 helpdesk="the helpdesk"
 login_timeout="600"
 volume="100"
 microphone="100"
 brightness="50"
 screen_timeout="600"
+battery_low_threshold="20"
+status_overlay_enabled="true"
+status_show_datetime="true"
+status_show_battery="true"
+status_show_wifi="false"
+status_show_ip="false"
+status_show_wireguard="false"
+wireguard_enabled="true"
 keylayout=""
 exit_type="Shutdown"
 config_url=""
+network_mode="dhcp"
+network_interface=""
+static_address=""
+static_prefix="24"
+static_gateway=""
+static_dns=""
 ```
+
+Static IPv4 notes:
+
+- Set `network_mode="static"` to enable static addressing.
+- Set `network_interface` to the exact adapter name such as `eth0` or `wlan0`.
+- Set `static_address` and `static_prefix` at minimum. `static_gateway` and `static_dns` are optional.
 
 ### Remote configuration (Own risk)
 
@@ -150,17 +254,18 @@ You implement this functionality strictly on your own risk. If left blank this f
 
 ### RDP Files
 
-UFTC supports existing RDP files if downloaded from a central location, to do this simply put the RDP URL as the server name.
+RDOS supports existing RDP files if downloaded from a central location, to do this simply put the RDP URL as the server name.
 
 ### Moonlight Mode
+
 Moonlight is included as a self contained 50mb binary and can be activated by using moonlight as the server address.
 Moonlight focuses on remotely connecting to a pre-configured single session PC and provides low latency multimedia as well as game controller support.
 If you are looking to use this thin client for a living room PC or media heavy display moonlight may provide a suitable option.
-For use with the Sunlight or Apollo server. 
+For use with the Sunlight or Apollo server.
 
 ### Multiple Servers
 
-Starting at version 1.10 UFTC supports specifying multiple RDP servers (and optionally also citrix if neither uses additional parameters).
+Starting at version 1.10 RDOS supports specifying multiple RDP servers (and optionally also citrix if neither uses additional parameters).
 To set this up use the regular server field and seperate the servers with |
 
 ### Root Account
@@ -174,7 +279,9 @@ When self building you can pass a -p parameter to enable the root password.
 
 ### Password commands
 
-config : Re-open the config dialogue
+config : Open the full settings page
+
+settings : Open the full settings page
 
 terminal: Open the terminal
 
@@ -182,11 +289,15 @@ ping (without your admin password in front): Ping the RDP server with a full tra
 
 ip (without your admin password in front): Shows the devices network information
 
+wifi (without your admin password in front): Opens the WiFi Wizard
+
 ## Terms of Use
+
+The following terms originated with the upstream UFTC project and are retained here for clarity and attribution until this repository adopts its own finalized licensing model.
 
 - I currently don't know which formal license is the best fit, when using this software please respect the following:
 - I am not responsible for what happens with your deployment, its designed to be as robust as I could make it. But should unforseen consequences, bugs or updates happen I am not liable as you accept you use and deploy this on your own risk especially if you enabled automatic updates and your company is now offline due to a bad/incompatible debian update.
 - The software is free for both personal and business use and may not be resold. Preinstallation on physical hardware is allowed as long as it is made clear that it runs software based on this free repository.
 - You have the freedom to make modifications to this software as long as you do not sell them (Henk.Tech does have the right to sell private modified builds). If distributed publically for free the source code must be provided (If it was modified manually list your changes and how to apply them, don't just post the image). For private internal modifications within your deployment this requirement does not apply  ( MSP's using it for a customer they manage counts as internal), but if anyone asks what software is running point them to the public repo.
-- Please share your success stories in https://github.com/henk717/uftc/discussions/categories/show-and-tell , while I give out the software for free my reward is the satisfaction of knowing that my work made a positive difference in your organization. Of course for security reasons it is fine if you leave the company name out, deployment size will do.
+- Please share your success stories in <https://github.com/henk717/uftc/discussions/categories/show-and-tell>, while I give out the software for free my reward is the satisfaction of knowing that my work made a positive difference in your organization. Of course for security reasons it is fine if you leave the company name out, deployment size will do.
 - If I pick a formal license that embodies these terms your repo/deployment is retroactively licensed under the license of this (parent) repo on the condition that the new license is an open source license similar to the above (If not the above freedoms apply for any version prior to the license change).

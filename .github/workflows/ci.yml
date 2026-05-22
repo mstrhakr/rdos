@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pretest:
+    name: Pretest (Self-Hosted)
+    runs-on: [self-hosted, linux, rdos-builder]
+    timeout-minutes: 20
+    if: >-
+      github.event_name != 'pull_request' ||
+      (
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+      )
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Verify pretest dependencies
+        run: |
+          set -euo pipefail
+          for cmd in bash shellcheck; do
+            if ! command -v "$cmd" >/dev/null 2>&1; then
+              echo "Missing required command: $cmd" >&2
+              exit 1
+            fi
+          done
+
+      - name: Run pretest
+        run: |
+          chmod +x ci/*.sh
+          bash ./ci/pipeline.sh pretest --mode ci --shellcheck-severity error --no-deps
+
+  build-and-validate:
+    name: Build + Validate (Self-Hosted)
+    needs: pretest
+    runs-on: [self-hosted, linux, rdos-builder]
+    env:
+      RUNNER_ARTIFACT_ROOT: /var/tmp/rdos-artifacts
+    timeout-minutes: 180
+    if: >-
+      github.event_name != 'pull_request' ||
+      (
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+      )
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Verify runner toolchain
+        run: |
+          set -euo pipefail
+          for cmd in bash docker xorriso qemu-img zstd curl lsblk findmnt shellcheck sgdisk mkfs.fat mkfs.ext4 rsync losetup grub-install grub-editenv blkid partprobe; do
+            if ! command -v "$cmd" >/dev/null 2>&1; then
+              echo "Missing required command: $cmd" >&2
+              exit 1
+            fi
+          done
+
+      - name: Ensure permissions
+        run: |
+          chmod +x build.sh build-installer-iso.sh d2vm
+          chmod +x ci/*.sh
+
+      - name: Run full pipeline
+        run: |
+          bash ./ci/pipeline.sh all --mode ci --shellcheck-severity error
+
+      - name: Compress production raw artifact
+        run: |
+          set -euo pipefail
+          cleanup() {
+            rm -f rdos-root.img
+          }
+          trap cleanup EXIT
+
+          FIRST_SECTOR=$(sgdisk -i 2 rdos-prod.raw | awk -F': *' '/^First sector:/ {print $2}' | awk '{print $1}')
+          LAST_SECTOR=$(sgdisk -i 2 rdos-prod.raw | awk -F': *' '/^Last sector:/ {print $2}' | awk '{print $1}')
+          if [[ -z "$FIRST_SECTOR" || -z "$LAST_SECTOR" ]]; then
+            echo "Failed to determine partition 2 offsets from rdos-prod.raw" >&2
+            exit 1
+          fi
+
+          SECTOR_COUNT=$((LAST_SECTOR - FIRST_SECTOR + 1))
+          dd if=rdos-prod.raw of=rdos-root.img bs=512 skip="$FIRST_SECTOR" count="$SECTOR_COUNT" iflag=fullblock status=progress
+          zstd -T0 -9 -f rdos-root.img -o rdos-prod.raw.zst
+          ls -lh rdos-prod.raw.zst
+
+      - name: Persist artifacts on runner
+        run: |
+          set -euo pipefail
+          TARGET_DIR="${RUNNER_ARTIFACT_ROOT}/${GITHUB_SHA}"
+          mkdir -p "$TARGET_DIR"
+          install -m 0644 rdos-prod.raw.zst "$TARGET_DIR/rdos-prod.raw.zst"
+          install -m 0644 rdos-installer.iso "$TARGET_DIR/rdos-installer.iso"
+          ls -lh "$TARGET_DIR/rdos-prod.raw.zst" "$TARGET_DIR/rdos-installer.iso"
+
+      - name: Upload compressed production raw artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdos-prod-raw-zst
+          path: rdos-prod.raw.zst
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdos-installer-iso
+          path: rdos-installer.iso
+          if-no-files-found: error
+          retention-days: 7

@@ -117,7 +117,7 @@ if ! shopt -oq posix; then
 fi
 
 TTY="$(/usr/bin/tty | sed 's:.*/::')"
-if [[ ! ${DISPLAY} && ${TERM} == 'linux' && ${TTY} == 'tty1' ]]; then
+if [[ -z ${DISPLAY} && ( ${TTY} == 'tty1' || ${TTY} == 'console' || ${TTY} == 'ttyS0' ) ]]; then
   unset TTY
   udiskie &
   exec startx

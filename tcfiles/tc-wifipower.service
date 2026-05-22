@@ -1,12 +1,12 @@
 [Unit]
 Description=Disable Wifi Powersave
-ConditionPathExists=/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
-After=dhcpcd.service
+ConditionPathExistsGlob=/etc/wpa_supplicant/wpa_supplicant-*.conf
+After=network.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/sbin/iw wlan0 set power_save off
+ExecStart=/usr/bin/tc-configure-wifi --disable-powersave
 
 [Install]
 WantedBy=multi-user.target

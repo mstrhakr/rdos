@@ -1,11 +1,13 @@
+.git
+.installer-cache/
+.installer-work/
+
 *.log
 *.vhd
 *.deb
 *.Identifier
 tcconfig*
 *.AppImage
-.installer-*
 *.iso
-*.img
+*.img*
 *.raw
-*.img.zst*

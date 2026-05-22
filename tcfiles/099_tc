@@ -1,4 +1,32 @@
-# Allow any user to factory reset and set the hostname, this way it can be done by thin client admins without needing to know the image password
-ALL ALL=(ALL) NOPASSWD: /usr/bin/set-hostname
-ALL ALL=(ALL) NOPASSWD: /usr/bin/firstboot
-ALL ALL=(ALL) NOPASSWD: /usr/bin/auto-maintenance
+# Passwordless sudoers for thinclient user — strict, explicit commands only.
+# Each line grants access to a specific tool or tool+args combination.
+
+# Hostname management (initial setup and hostname changes)
+thinclient ALL=(root) NOPASSWD: /usr/bin/set-hostname
+
+# Auto maintenance tasks (firmware updates, housekeeping)
+thinclient ALL=(root) NOPASSWD: /usr/bin/auto-maintenance
+
+# Network configuration (apply tcconfig with optional reload)
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-network --apply-tcconfig /home/thinclient/tcconfig --reload
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-network --apply-tcconfig /home/thinclient/tcconfig
+
+# WiFi configuration and scanning (no wildcards; scripts handle arguments)
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wifi
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wifi --disable-powersave
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-scan-wifi
+
+# WireGuard tunneling (enable/disable and configuration)
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wireguard
+
+# OTA update pipeline
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-ota-updater
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-ota-updater --manual
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-ota-configure-timer
+
+# OTA health check and rollback
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-health-check
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-ota-rollback
+
+# GRUB environment (boot slot management, A/B boot selection)
+thinclient ALL=(root) NOPASSWD: /usr/bin/grub-editenv

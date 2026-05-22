@@ -1,0 +1,114 @@
+#!/bin/bash
+# tc-health-check — Verify the current boot slot is healthy and commit it.
+# Called by thinclient shortly after the desktop session starts.
+# On success: sets grubenv boot_tries=99 (committed) and writes the slot version.
+# On failure: leaves boot_tries as-is so GRUB rolls back on the next reboot.
+set -euo pipefail
+
+GRUBENV=""
+TEMP_ESP_MOUNT=""
+SLOTS_DIR="/boot/slots"
+LOG_TAG="tc-health"
+
+log()  { logger -t "$LOG_TAG" "$*"; echo "[$LOG_TAG] $*"; }
+warn() { logger -t "$LOG_TAG" "WARNING: $*"; echo "[$LOG_TAG] WARNING: $*" >&2; }
+
+cleanup_temp_esp() {
+    if [[ -n "$TEMP_ESP_MOUNT" ]]; then
+        umount "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        rmdir "$TEMP_ESP_MOUNT" 2>/dev/null || true
+    fi
+}
+
+resolve_grubenv() {
+    local candidate
+    local esp_dev
+
+    for candidate in /boot/grub/grubenv /boot/efi/grub/grubenv /efi/grub/grubenv; do
+        if [[ -f "$candidate" ]]; then
+            GRUBENV="$candidate"
+            return 0
+        fi
+    done
+
+    esp_dev="$(blkid -L ESP 2>/dev/null || true)"
+    if [[ -n "$esp_dev" ]]; then
+        TEMP_ESP_MOUNT="/run/rdos-esp-$$"
+        mkdir -p "$TEMP_ESP_MOUNT"
+        if mount "$esp_dev" "$TEMP_ESP_MOUNT" 2>/dev/null; then
+            if [[ -f "$TEMP_ESP_MOUNT/grub/grubenv" ]]; then
+                GRUBENV="$TEMP_ESP_MOUNT/grub/grubenv"
+                SLOTS_DIR="$TEMP_ESP_MOUNT/slots"
+                return 0
+            fi
+            umount "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        fi
+        rmdir "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        TEMP_ESP_MOUNT=""
+    fi
+
+    return 1
+}
+
+trap cleanup_temp_esp EXIT
+
+# ---------------------------------------------------------------------------
+# Only meaningful on A/B images
+# ---------------------------------------------------------------------------
+if ! resolve_grubenv; then
+    exit 0
+fi
+
+CURRENT_SLOT=$(grub-editenv "$GRUBENV" list 2>/dev/null | awk -F= '/^current_slot=/{print $2}')
+if [[ "$CURRENT_SLOT" != "a" && "$CURRENT_SLOT" != "b" ]]; then
+    exit 0
+fi
+
+BOOT_TRIES=$(grub-editenv "$GRUBENV" list 2>/dev/null | awk -F= '/^boot_tries=/{print $2}')
+if [[ "$BOOT_TRIES" == "99" ]]; then
+    # Already committed — nothing to do.
+    exit 0
+fi
+
+log "Running health check for slot $CURRENT_SLOT (boot_tries=${BOOT_TRIES:-?})"
+
+# ---------------------------------------------------------------------------
+# Health checks
+# ---------------------------------------------------------------------------
+PASS=true
+EXPECTED_ROOT_LABEL="ROOT_$(echo "$CURRENT_SLOT" | tr '[:lower:]' '[:upper:]')"
+ACTIVE_ROOT_LABEL="$(findmnt -no LABEL / 2>/dev/null || true)"
+
+# Verify we actually booted the slot GRUB selected.
+if [[ "$ACTIVE_ROOT_LABEL" != "$EXPECTED_ROOT_LABEL" ]]; then
+    warn "Active root label '$ACTIVE_ROOT_LABEL' does not match expected slot label '$EXPECTED_ROOT_LABEL'"
+    PASS=false
+fi
+
+# RDP client binary present and executable
+if [[ ! -x /usr/bin/xfreerdp3 ]]; then
+    warn "xfreerdp3 binary missing or not executable"
+    PASS=false
+fi
+
+# Surface missing routing for diagnostics, but do not roll back healthy offline devices.
+if ! ip route show default >/dev/null 2>&1 || [[ -z "$(ip route show default 2>/dev/null)" ]]; then
+    warn "No default route detected during health check"
+fi
+
+# ---------------------------------------------------------------------------
+# Commit or leave for GRUB rollback
+# ---------------------------------------------------------------------------
+if [[ "$PASS" == "true" ]]; then
+    log "Health check passed — committing slot $CURRENT_SLOT"
+    grub-editenv "$GRUBENV" set boot_tries=99
+
+    # Write slot version to ESP for tc-ota-updater to compare
+    if [[ -f /tcversion ]]; then
+        mkdir -p "$SLOTS_DIR"
+        cp /tcversion "${SLOTS_DIR}/${CURRENT_SLOT}-version"
+    fi
+else
+    warn "Health check FAILED — boot_tries left at $BOOT_TRIES (GRUB will roll back after 3 attempts)"
+    exit 1
+fi

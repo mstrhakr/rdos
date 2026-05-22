@@ -1,0 +1,194 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  detect-version:
+    name: Detect Version & Auto-Increment Patch
+    runs-on: [self-hosted, linux, rdos-builder]
+    if: >-
+      github.repository == 'mstrhakr/RDOS' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'master'
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Detect Version & Patch Number
+        id: version
+        run: |
+          # Read major.minor from Version file
+          VERSION_FILE=$(cat Version | tr -d '\n' | tr -d '\r')
+          echo "version_base=$VERSION_FILE"
+
+          # Only consider stable tags (vX.Y.Z), not RC tags.
+          LAST_TAG=$(git tag -l "v*" --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || echo "")
+          echo "last_tag=$LAST_TAG"
+
+          # If no tags exist, start at patch 0
+          if [[ -z "$LAST_TAG" ]]; then
+            PATCH=0
+            echo "First release, starting at patch 0"
+          else
+            # Extract major.minor from last tag (e.g., v2.3.5 -> 2.3)
+            LAST_MAJOR_MINOR=$(echo "$LAST_TAG" | sed 's/^v//' | cut -d. -f1-2)
+
+            # Check if Version file changed (major.minor different from last tag)
+            if [[ "$VERSION_FILE" == "$LAST_MAJOR_MINOR" ]]; then
+              # Version unchanged, increment patch
+              LAST_PATCH=$(echo "$LAST_TAG" | rev | cut -d. -f1 | rev)
+              PATCH=$((LAST_PATCH + 1))
+              echo "Version unchanged (${VERSION_FILE}), incrementing patch to $PATCH"
+            else
+              # Version changed, reset patch to 0
+              PATCH=0
+              echo "Version changed (${VERSION_FILE}), resetting patch to 0"
+            fi
+          fi
+          
+          TAG="v${VERSION_FILE}.${PATCH}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; this run would duplicate a release tag."
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=${VERSION_FILE}.${PATCH}" >> $GITHUB_OUTPUT
+          echo "Final tag: $TAG"
+
+  build-and-test:
+    name: Collect Prebuilt Artifacts (for Release)
+    needs: detect-version
+    runs-on: [self-hosted, linux, rdos-builder]
+    env:
+      RUNNER_ARTIFACT_ROOT: /var/tmp/rdos-artifacts
+    timeout-minutes: 180
+    if: >-
+      github.repository == 'mstrhakr/RDOS' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'master'
+    steps:
+      - name: Fetch artifacts from runner storage
+        run: |
+          set -euo pipefail
+          SOURCE_DIR="${RUNNER_ARTIFACT_ROOT}/${{ github.event.workflow_run.head_sha }}"
+          test -f "$SOURCE_DIR/rdos-prod.raw.zst"
+          test -f "$SOURCE_DIR/rdos-installer.iso"
+          cp "$SOURCE_DIR/rdos-prod.raw.zst" ./rdos-prod.raw.zst
+          cp "$SOURCE_DIR/rdos-installer.iso" ./rdos-installer.iso
+          ls -lh ./rdos-prod.raw.zst ./rdos-installer.iso
+
+      - name: Rename artifacts with version
+        id: rename
+        run: |
+          VERSION="${{ needs.detect-version.outputs.version }}"
+          ISO_VERSIONED="rdos-installer-${VERSION}.iso"
+
+          mv rdos-installer.iso "$ISO_VERSIONED"
+
+          echo "prod-raw-zst=rdos-prod.raw.zst" >> $GITHUB_OUTPUT
+          echo "iso-versioned=$ISO_VERSIONED" >> $GITHUB_OUTPUT
+
+          ls -lh rdos-prod.raw.zst "$ISO_VERSIONED"
+
+      - name: Generate OTA image and manifest
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.detect-version.outputs.version }}"
+          OTA_IMG="rdos-prod.raw.zst"
+
+          echo "Computing SHA256..."
+          SHA256=$(sha256sum "$OTA_IMG" | awk '{print $1}')
+
+          echo "Writing manifest.json..."
+          cat > manifest.json <<EOF
+          {
+            "version": "${VERSION}",
+            "channel": "stable",
+            "sha256": "${SHA256}",
+            "artifact": "${OTA_IMG}",
+            "min_base": "3.0"
+          }
+          EOF
+
+          ls -lh "$OTA_IMG" manifest.json
+
+      - name: Upload versioned artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdos-release-${{ needs.detect-version.outputs.version }}
+          path: |
+            rdos-prod.raw.zst
+            rdos-installer-*.iso
+            manifest.json
+          retention-days: 30
+
+  create-release:
+    name: Create GitHub Release
+    needs: [detect-version, build-and-test]
+    runs-on: [self-hosted, linux, rdos-builder]
+    if: >-
+      github.repository == 'mstrhakr/RDOS' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'master'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: rdos-release-${{ needs.detect-version.outputs.version }}
+          path: ./release-artifacts
+
+      - name: Create git tag
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          TAG="${{ needs.detect-version.outputs.tag }}"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.detect-version.outputs.tag }}
+          name: Release ${{ needs.detect-version.outputs.version }}
+          body: |
+            RDOS Release ${{ needs.detect-version.outputs.version }}
+            
+            - **Production Raw (compressed)**: rdos-prod.raw.zst (OTA update payload)
+            - **Installer ISO**: rdos-installer-${{ needs.detect-version.outputs.version }}.iso (Clonezilla-based installer)
+            - **Manifest**: manifest.json (OTA update metadata with SHA256 checksum)
+            
+            See [docs/building.md](docs/building.md) and [Readme.md](Readme.md) for deployment instructions.
+          files: |
+            release-artifacts/rdos-prod.raw.zst
+            release-artifacts/rdos-installer-*.iso
+            release-artifacts/manifest.json
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

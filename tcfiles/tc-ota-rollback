@@ -1,0 +1,89 @@
+#!/bin/bash
+# tc-ota-rollback — Emergency manual rollback to the previous slot.
+# Prompts for confirmation, swaps grubenv, and reboots.
+set -euo pipefail
+
+GRUBENV=""
+TEMP_ESP_MOUNT=""
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+cleanup_temp_esp() {
+    if [[ -n "$TEMP_ESP_MOUNT" ]]; then
+        umount "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        rmdir "$TEMP_ESP_MOUNT" 2>/dev/null || true
+    fi
+}
+
+resolve_grubenv() {
+    local candidate
+    local esp_dev
+
+    for candidate in /boot/grub/grubenv /boot/efi/grub/grubenv /efi/grub/grubenv; do
+        if [[ -f "$candidate" ]]; then
+            GRUBENV="$candidate"
+            return 0
+        fi
+    done
+
+    esp_dev="$(blkid -L ESP 2>/dev/null || true)"
+    if [[ -n "$esp_dev" ]]; then
+        TEMP_ESP_MOUNT="/run/rdos-esp-$$"
+        mkdir -p "$TEMP_ESP_MOUNT"
+        if mount "$esp_dev" "$TEMP_ESP_MOUNT" 2>/dev/null; then
+            if [[ -f "$TEMP_ESP_MOUNT/grub/grubenv" ]]; then
+                GRUBENV="$TEMP_ESP_MOUNT/grub/grubenv"
+                return 0
+            fi
+            umount "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        fi
+        rmdir "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        TEMP_ESP_MOUNT=""
+    fi
+
+    return 1
+}
+
+trap cleanup_temp_esp EXIT
+
+if ! resolve_grubenv; then
+    die "grubenv not found — not an A/B image."
+fi
+
+CURRENT_SLOT=$(grub-editenv "$GRUBENV" list 2>/dev/null | awk -F= '/^current_slot=/{print $2}')
+PREVIOUS_SLOT=$(grub-editenv "$GRUBENV" list 2>/dev/null | awk -F= '/^previous_slot=/{print $2}')
+
+if [[ -z "$CURRENT_SLOT" || -z "$PREVIOUS_SLOT" ]]; then
+    die "Cannot read slot info from grubenv."
+fi
+
+if [[ "$CURRENT_SLOT" == "$PREVIOUS_SLOT" ]]; then
+    die "Current slot ($CURRENT_SLOT) and previous slot ($PREVIOUS_SLOT) are the same — nothing to roll back to."
+fi
+
+CURRENT_VERSION=""
+PREVIOUS_VERSION=""
+[[ -f "/boot/slots/${CURRENT_SLOT}-version"  ]] && CURRENT_VERSION=$(cat "/boot/slots/${CURRENT_SLOT}-version")
+[[ -f "/boot/slots/${PREVIOUS_SLOT}-version" ]] && PREVIOUS_VERSION=$(cat "/boot/slots/${PREVIOUS_SLOT}-version")
+
+# Confirmation dialog (works headless and with yad)
+if command -v yad >/dev/null 2>&1 && [[ -n "${DISPLAY:-}" ]]; then
+    yad --question --center --title="OTA Rollback" --width=480 \
+        --button="Cancel":1 --button="Roll Back Now":0 \
+        --text="Roll back from slot <b>$CURRENT_SLOT</b> (${CURRENT_VERSION:-unknown}) to slot <b>$PREVIOUS_SLOT</b> (${PREVIOUS_VERSION:-unknown})?\n\nThe device will reboot immediately." \
+        >/dev/null 2>&1 || exit 0
+else
+    echo "Roll back from slot $CURRENT_SLOT (${CURRENT_VERSION:-unknown}) to slot $PREVIOUS_SLOT (${PREVIOUS_VERSION:-unknown})?"
+    read -r -p "Type 'yes' to confirm: " CONFIRM
+    [[ "${CONFIRM,,}" == "yes" ]] || { echo "Aborted."; exit 0; }
+fi
+
+echo "Rolling back to slot $PREVIOUS_SLOT..."
+grub-editenv "$GRUBENV" set \
+    current_slot="$PREVIOUS_SLOT" \
+    previous_slot="$CURRENT_SLOT" \
+    boot_tries=0 \
+    pending_recovery=false
+
+sync
+systemctl reboot

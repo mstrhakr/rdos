@@ -1,0 +1,13 @@
+[Unit]
+Description=RDOS OTA Update Client
+Documentation=https://github.com/mstrhakr/rdos
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/tc-ota-updater
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tc-ota
+TimeoutStartSec=3600

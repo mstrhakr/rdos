@@ -1,14 +1,15 @@
 [Unit]
 Description=Copy ThinClient Configuration
 ConditionPathExists=/boot/tcconfig
-Before=dhcpcd.service
 After=systemd-rfkill.service
+Before=network-pre.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/mv /boot/tcconfig /home/thinclient/tcconfig
-ExecStartPost=/bin/chown thinclient:thinclient /home/thinclient/tcconfig
+ExecStart=/usr/bin/install -m 600 -o thinclient -g thinclient /boot/tcconfig /home/thinclient/tcconfig
+ExecStartPost=/bin/rm -f /boot/tcconfig
+ExecStartPost=/usr/bin/tc-ota-configure-timer
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=network-pre.target

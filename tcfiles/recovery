@@ -1,0 +1,167 @@
+#!/bin/bash
+# RDOS OTA slot-swap agent.
+# Runs as PID 1 (passed to kernel via init=/usr/bin/recovery) when GRUB detects
+# a staged update (pending_recovery=true in grubenv).
+#
+# Flow:
+#   1. Mount /proc, /sys, /dev
+#   2. Mount the ESP (FAT32, LABEL=ESP)
+#   3. Read grubenv: pending_slot, previous_slot
+#   4. Verify the pending slot filesystem (e2fsck)
+#   5. Expand the filesystem to fill the partition (resize2fs)
+#   6. Extract the kernel/initrd from the slot's /boot
+#   7. Copy them to the ESP as vmlinuz-{slot} / initrd-{slot}.img
+#   8. Commit grubenv: current_slot=pending, pending_recovery=false, boot_tries=0
+#   9. Reboot
+# On any failure, roll back to previous_slot and reboot.
+
+set -uo pipefail
+
+ESP_LABEL="ESP"
+ESP_MOUNT="/mnt/esp"
+SLOT_MOUNT="/mnt/slot"
+
+log()  { echo "[recovery] $*"; }
+warn() { echo "[recovery] WARNING: $*" >&2; }
+
+# ---------------------------------------------------------------------------
+# Basic init setup (we are PID 1, kernel has not yet set up userspace)
+# ---------------------------------------------------------------------------
+mount -t proc     none /proc 2>/dev/null || true
+mount -t sysfs    none /sys  2>/dev/null || true
+mount -t devtmpfs none /dev  2>/dev/null || true
+
+# Give the kernel a moment to populate /dev/disk/by-label symlinks
+sleep 3
+
+# ---------------------------------------------------------------------------
+# Mount the ESP
+# ---------------------------------------------------------------------------
+mkdir -p "$ESP_MOUNT" "$SLOT_MOUNT"
+
+mount_esp() {
+    if mount LABEL="$ESP_LABEL" "$ESP_MOUNT" 2>/dev/null; then
+        return 0
+    fi
+    # Fall back: find first vfat partition
+    local dev
+    dev=$(blkid -t TYPE=vfat -o device 2>/dev/null | head -1)
+    if [ -n "$dev" ]; then
+        mount "$dev" "$ESP_MOUNT" && return 0
+    fi
+    return 1
+}
+
+if ! mount_esp; then
+    log "Cannot mount ESP — giving up, rebooting in 10 s"
+    sleep 10
+    echo b > /proc/sysrq-trigger 2>/dev/null || reboot -f
+fi
+
+GRUBENV="${ESP_MOUNT}/grub/grubenv"
+
+# ---------------------------------------------------------------------------
+# Helper: commit a slot and reboot
+# ---------------------------------------------------------------------------
+reboot_to_slot() {
+    local slot="$1"
+    log "Rebooting to slot $slot"
+    grub-editenv "$GRUBENV" set \
+        current_slot="$slot" \
+        pending_recovery=false \
+        boot_tries=0 2>/dev/null || true
+    umount "$ESP_MOUNT" 2>/dev/null || true
+    sync
+    echo b > /proc/sysrq-trigger 2>/dev/null || reboot -f
+    sleep 5
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
+# Read grubenv
+# ---------------------------------------------------------------------------
+if [ ! -f "$GRUBENV" ]; then
+    log "grubenv not found at $GRUBENV — rebooting to slot a"
+    reboot_to_slot a
+fi
+
+PENDING_SLOT=$(grub-editenv "$GRUBENV" list 2>/dev/null | awk -F= '/^pending_slot=/{print $2}')
+PREVIOUS_SLOT=$(grub-editenv "$GRUBENV" list 2>/dev/null | awk -F= '/^previous_slot=/{print $2}')
+PREVIOUS_SLOT="${PREVIOUS_SLOT:-a}"
+
+log "Pending slot: '${PENDING_SLOT}', Previous slot: '${PREVIOUS_SLOT}'"
+
+if [ -z "$PENDING_SLOT" ] || [ "$PENDING_SLOT" = "$PREVIOUS_SLOT" ]; then
+    log "No pending slot to activate"
+    reboot_to_slot "$PREVIOUS_SLOT"
+fi
+
+SLOT_LABEL="ROOT_$(echo "$PENDING_SLOT" | tr '[:lower:]' '[:upper:]')"
+
+# ---------------------------------------------------------------------------
+# Find the pending slot block device
+# ---------------------------------------------------------------------------
+SLOT_DEV=$(blkid -L "$SLOT_LABEL" 2>/dev/null || true)
+if [ -z "$SLOT_DEV" ]; then
+    log "Cannot find device with label $SLOT_LABEL"
+    reboot_to_slot "$PREVIOUS_SLOT"
+fi
+
+log "Verifying filesystem on $SLOT_DEV ($SLOT_LABEL)"
+
+# ---------------------------------------------------------------------------
+# Filesystem verification
+# ---------------------------------------------------------------------------
+if ! e2fsck -pf "$SLOT_DEV"; then
+    log "Filesystem check failed — rolling back to slot $PREVIOUS_SLOT"
+    reboot_to_slot "$PREVIOUS_SLOT"
+fi
+
+# Expand filesystem to fill the partition (OTA image may be smaller than slot)
+log "Expanding filesystem to fill partition"
+resize2fs "$SLOT_DEV" 2>/dev/null || warn "resize2fs failed (non-fatal)"
+
+# ---------------------------------------------------------------------------
+# Mount the pending slot and extract kernel + initrd
+# ---------------------------------------------------------------------------
+if ! mount -o ro "$SLOT_DEV" "$SLOT_MOUNT"; then
+    log "Cannot mount $SLOT_DEV — rolling back"
+    reboot_to_slot "$PREVIOUS_SLOT"
+fi
+
+# Find kernel image (prefer versioned, fall back to symlink)
+VMLINUZ=$(find "$SLOT_MOUNT/boot" -maxdepth 1 -name 'vmlinuz-*' 2>/dev/null | sort -V | tail -1)
+INITRD=$(find  "$SLOT_MOUNT/boot" -maxdepth 1 -name 'initrd.img-*' 2>/dev/null | sort -V | tail -1)
+
+[ -z "$VMLINUZ" ] && [ -f "$SLOT_MOUNT/boot/vmlinuz"   ] && VMLINUZ="$SLOT_MOUNT/boot/vmlinuz"
+[ -z "$INITRD"  ] && [ -f "$SLOT_MOUNT/boot/initrd.img" ] && INITRD="$SLOT_MOUNT/boot/initrd.img"
+
+if [ ! -f "$VMLINUZ" ] || [ ! -f "$INITRD" ]; then
+    log "Kernel or initrd not found in $SLOT_MOUNT/boot — rolling back"
+    umount "$SLOT_MOUNT" || true
+    reboot_to_slot "$PREVIOUS_SLOT"
+fi
+
+log "Installing kernel for slot $PENDING_SLOT from $VMLINUZ"
+cp "$VMLINUZ" "${ESP_MOUNT}/vmlinuz-${PENDING_SLOT}"
+cp "$INITRD"  "${ESP_MOUNT}/initrd-${PENDING_SLOT}.img"
+
+umount "$SLOT_MOUNT"
+
+# ---------------------------------------------------------------------------
+# Commit the new boot target
+# ---------------------------------------------------------------------------
+log "Committing slot $PENDING_SLOT"
+grub-editenv "$GRUBENV" set \
+    current_slot="$PENDING_SLOT" \
+    previous_slot="$PREVIOUS_SLOT" \
+    pending_recovery=false \
+    boot_tries=0 \
+    pending_slot=""
+
+sync
+log "Recovery complete — rebooting to slot $PENDING_SLOT"
+umount "$ESP_MOUNT" || true
+sync
+echo b > /proc/sysrq-trigger 2>/dev/null || reboot -f
+sleep 5
