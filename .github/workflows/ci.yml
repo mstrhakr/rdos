@@ -92,8 +92,8 @@ jobs:
           }
           trap cleanup EXIT
 
-          FIRST_SECTOR=$(sgdisk -i 2 rdos-prod.raw | awk -F': *' '/^First sector:/ {print $2}')
-          LAST_SECTOR=$(sgdisk -i 2 rdos-prod.raw | awk -F': *' '/^Last sector:/ {print $2}')
+          FIRST_SECTOR=$(sgdisk -i 2 rdos-prod.raw | awk -F': *' '/^First sector:/ {print $2}' | awk '{print $1}')
+          LAST_SECTOR=$(sgdisk -i 2 rdos-prod.raw | awk -F': *' '/^Last sector:/ {print $2}' | awk '{print $1}')
           if [[ -z "$FIRST_SECTOR" || -z "$LAST_SECTOR" ]]; then
             echo "Failed to determine partition 2 offsets from rdos-prod.raw" >&2
             exit 1
