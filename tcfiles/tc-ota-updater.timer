@@ -1,6 +1,6 @@
 [Unit]
 Description=RDOS OTA Update Timer
-Documentation=https://github.com/mstrhakr/RDOS
+Documentation=https://github.com/mstrhakr/rdos
 ConditionACPower=true
 
 [Timer]

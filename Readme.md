@@ -185,7 +185,7 @@ Sensible defaults are applied automatically for display, timeout, keyboard, and 
 
 After first boot, use the `Settings` button on the login screen to open the full settings page. If an admin password is configured, you will get a separate unlock prompt before the panel opens.
 
-Default settings password: `RDOS`
+Default settings password: `rdos`
 
 The first-time setup wizard shows this default and lets you replace it during the Support step.
 
@@ -200,7 +200,7 @@ The template for this file is as follows (pay attention to the line endings, the
 server="server1|server2|server3"
 domain=""
 param=""
-adminpass="RDOS"
+adminpass="rdos"
 helpdesk="the helpdesk"
 login_timeout="600"
 volume="100"
