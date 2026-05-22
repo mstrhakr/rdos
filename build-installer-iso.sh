@@ -364,7 +364,7 @@ else
   fi
 fi
 
-if [[ -z "$INPUT_DISK" ]] && [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_VHD" != "$STAGING_DIR/$(basename "$INPUT_VHD")" ]]; then
+if [[ -z "$INPUT_DISK" ]] && [[ -z "$INPUT_DISK_ZST" ]] && [[ -n "$STAGING_DIR" ]] && [[ "$INPUT_VHD" != "$STAGING_DIR/$(basename "$INPUT_VHD")" ]]; then
   staged_input_vhd="$STAGING_DIR/$(basename "$INPUT_VHD")"
   log_phase "Copying input VHD to staging area"
   copy_with_progress "$INPUT_VHD" "$staged_input_vhd"
