@@ -23,6 +23,8 @@ OUTPUT_ISO="${OUTPUT_ISO:-rdos-installer.iso}"
 DEFAULT_WORKDIR=".installer-work"
 WORKDIR="${WORKDIR:-$DEFAULT_WORKDIR}"
 BASE_ISO_CACHE="${BASE_ISO_CACHE:-.installer-cache/clonezilla-base.iso}"
+BASE_ISO_CACHE_KEY_FILE_DEFAULT="${BASE_ISO_CACHE}.cache-key"
+BASE_ISO_CACHE_KEY_FILE="${BASE_ISO_CACHE_KEY_FILE:-$BASE_ISO_CACHE_KEY_FILE_DEFAULT}"
 AUTO_INSTALL_DEFAULT="${AUTO_INSTALL_DEFAULT:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 BUILD_SCRIPT="${BUILD_SCRIPT:-./build.sh}"
@@ -35,6 +37,7 @@ DEFAULT_BOOT_ENTRY="RDOS_guided"
 DEFAULT_BOOT_LABEL="RDOS guided installer (disk selection + progress UI)"
 
 BASE_ISO="$BASE_ISO_CACHE"
+BASE_ISO_CACHE_KEY="$CLONEZILLA_VERSION|$CLONEZILLA_ISO_URL"
 ISO_ROOT="$WORKDIR/iso-root"
 RAW_IMAGE="$WORKDIR/rdos.img"
 COMPRESSED_IMAGE="$ISO_ROOT/RDOS/rdos.img.zst"
@@ -394,6 +397,7 @@ fi
 
 mkdir -p "$WORKDIR"
 mkdir -p "$(dirname "$BASE_ISO")"
+mkdir -p "$(dirname "$BASE_ISO_CACHE_KEY_FILE")"
 
 need_download=0
 if [[ ! -f "$BASE_ISO" ]]; then
@@ -404,6 +408,21 @@ else
     echo "Cached base ISO looks too small ($base_size bytes). Re-downloading..."
     rm -f "$BASE_ISO"
     need_download=1
+  fi
+fi
+
+if [[ "$need_download" == "0" ]]; then
+  if [[ ! -f "$BASE_ISO_CACHE_KEY_FILE" ]]; then
+    echo "Cached base ISO metadata is missing. Re-downloading..."
+    rm -f "$BASE_ISO"
+    need_download=1
+  else
+    cached_cache_key="$(cat "$BASE_ISO_CACHE_KEY_FILE" 2>/dev/null || true)"
+    if [[ "$cached_cache_key" != "$BASE_ISO_CACHE_KEY" ]]; then
+      echo "Cached base ISO does not match requested Clonezilla version/source. Re-downloading..."
+      rm -f "$BASE_ISO" "$BASE_ISO_CACHE_KEY_FILE"
+      need_download=1
+    fi
   fi
 fi
 
@@ -425,6 +444,8 @@ if ! xorriso -indev "$BASE_ISO" -find /live/filesystem.squashfs -exec report_lba
     exit 1
   fi
 fi
+
+printf '%s\n' "$BASE_ISO_CACHE_KEY" > "$BASE_ISO_CACHE_KEY_FILE"
 
 log_phase "Extracting base ISO"
 rm -rf "$ISO_ROOT"
