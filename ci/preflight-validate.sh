@@ -133,6 +133,7 @@ shell_files=(
   setup-build-sudoers.sh
   tcfiles/auto-maintenance.debian
   tcfiles/installer-install.sh
+  tcfiles/profile
   tcfiles/recovery
   tcfiles/set-hostname
   tcfiles/thinclient
