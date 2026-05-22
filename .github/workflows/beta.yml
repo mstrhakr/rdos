@@ -112,11 +112,11 @@ jobs:
         run: |
           set -euo pipefail
           SOURCE_DIR="${RUNNER_ARTIFACT_ROOT}/${{ github.event.workflow_run.head_sha }}"
-          test -f "$SOURCE_DIR/rdos.vhd"
+          test -f "$SOURCE_DIR/rdos-prod.raw.zst"
           test -f "$SOURCE_DIR/rdos-installer.iso"
-          cp "$SOURCE_DIR/rdos.vhd" ./rdos.vhd
+          cp "$SOURCE_DIR/rdos-prod.raw.zst" ./rdos-prod.raw.zst
           cp "$SOURCE_DIR/rdos-installer.iso" ./rdos-installer.iso
-          ls -lh ./rdos.vhd ./rdos-installer.iso
+          ls -lh ./rdos-prod.raw.zst ./rdos-installer.iso
 
       - name: Rename artifacts with version
         id: rename
@@ -124,23 +124,23 @@ jobs:
           VERSION="${{ needs.validate-version.outputs.version }}"
           RC_NUMBER="${{ needs.validate-version.outputs.rc_number }}"
           
-          VHD_VERSIONED="rdos-${VERSION}-rc.${RC_NUMBER}.vhd"
+          PROD_RAW_ZST_VERSIONED="rdos-prod-${VERSION}-rc.${RC_NUMBER}.raw.zst"
           ISO_VERSIONED="rdos-installer-${VERSION}-rc.${RC_NUMBER}.iso"
           
-          mv rdos.vhd "$VHD_VERSIONED"
+          mv rdos-prod.raw.zst "$PROD_RAW_ZST_VERSIONED"
           mv rdos-installer.iso "$ISO_VERSIONED"
           
-          echo "vhd-versioned=$VHD_VERSIONED" >> $GITHUB_OUTPUT
+          echo "prod-raw-zst-versioned=$PROD_RAW_ZST_VERSIONED" >> $GITHUB_OUTPUT
           echo "iso-versioned=$ISO_VERSIONED" >> $GITHUB_OUTPUT
           
-          ls -lh "$VHD_VERSIONED" "$ISO_VERSIONED"
+          ls -lh "$PROD_RAW_ZST_VERSIONED" "$ISO_VERSIONED"
 
       - name: Upload RC artifact
         uses: actions/upload-artifact@v4
         with:
           name: rdos-rc-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}
           path: |
-            rdos-*.vhd
+            rdos-prod-*.raw.zst
             rdos-installer-*.iso
           retention-days: 30
 
@@ -185,14 +185,14 @@ jobs:
             
             This is a pre-release build for testing and validation.
             
-            - **VHD**: rdos-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}.vhd (14GB bootable disk image)
+            - **Production Raw (compressed)**: rdos-prod-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}.raw.zst (OTA update payload)
             - **Installer ISO**: rdos-installer-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}.iso (Clonezilla-based installer)
             
             When this PR is merged to master, a stable release will be automatically generated.
             
             See [docs/building.md](docs/building.md) and [Readme.md](Readme.md) for deployment instructions.
           files: |
-            rc-artifacts/rdos-*.vhd
+            rc-artifacts/rdos-prod-*.raw.zst
             rc-artifacts/rdos-installer-*.iso
           draft: false
           prerelease: true

@@ -84,20 +84,38 @@ jobs:
         run: |
           bash ./ci/pipeline.sh all --mode ci --shellcheck-severity error
 
+      - name: Compress production raw artifact
+        run: |
+          set -euo pipefail
+          LOOP=""
+          cleanup() {
+            set +e
+            if [[ -n "$LOOP" ]]; then
+              sudo losetup -d "$LOOP" >/dev/null 2>&1 || true
+            fi
+            rm -f rdos-root.img
+          }
+          trap cleanup EXIT
+
+          LOOP=$(sudo losetup --find --show --partscan rdos-prod.raw)
+          sudo dd if="${LOOP}p2" bs=4M of=rdos-root.img status=progress
+          zstd -T0 -9 -f rdos-root.img -o rdos-prod.raw.zst
+          ls -lh rdos-prod.raw.zst
+
       - name: Persist artifacts on runner
         run: |
           set -euo pipefail
           TARGET_DIR="${RUNNER_ARTIFACT_ROOT}/${GITHUB_SHA}"
           mkdir -p "$TARGET_DIR"
-          install -m 0644 rdos-ab.img "$TARGET_DIR/rdos-ab.img"
+          install -m 0644 rdos-prod.raw.zst "$TARGET_DIR/rdos-prod.raw.zst"
           install -m 0644 rdos-installer.iso "$TARGET_DIR/rdos-installer.iso"
-          ls -lh "$TARGET_DIR/rdos-ab.img" "$TARGET_DIR/rdos-installer.iso"
+          ls -lh "$TARGET_DIR/rdos-prod.raw.zst" "$TARGET_DIR/rdos-installer.iso"
 
-      - name: Upload A/B disk artifact
+      - name: Upload compressed production raw artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rdos-ab
-          path: rdos-ab.img
+          name: rdos-prod-raw-zst
+          path: rdos-prod.raw.zst
           if-no-files-found: error
           retention-days: 7
 

@@ -90,42 +90,32 @@ jobs:
         run: |
           set -euo pipefail
           SOURCE_DIR="${RUNNER_ARTIFACT_ROOT}/${{ github.event.workflow_run.head_sha }}"
-          test -f "$SOURCE_DIR/rdos-ab.img"
+          test -f "$SOURCE_DIR/rdos-prod.raw.zst"
           test -f "$SOURCE_DIR/rdos-installer.iso"
-          cp "$SOURCE_DIR/rdos-ab.img" ./rdos-ab.img
+          cp "$SOURCE_DIR/rdos-prod.raw.zst" ./rdos-prod.raw.zst
           cp "$SOURCE_DIR/rdos-installer.iso" ./rdos-installer.iso
-          ls -lh ./rdos-ab.img ./rdos-installer.iso
+          ls -lh ./rdos-prod.raw.zst ./rdos-installer.iso
 
       - name: Rename artifacts with version
         id: rename
         run: |
           VERSION="${{ needs.detect-version.outputs.version }}"
-          AB_VERSIONED="rdos-ab-${VERSION}.img"
+          PROD_RAW_ZST_VERSIONED="rdos-prod-${VERSION}.raw.zst"
           ISO_VERSIONED="rdos-installer-${VERSION}.iso"
           
-          mv rdos-ab.img "$AB_VERSIONED"
+          mv rdos-prod.raw.zst "$PROD_RAW_ZST_VERSIONED"
           mv rdos-installer.iso "$ISO_VERSIONED"
           
-          echo "ab-versioned=$AB_VERSIONED" >> $GITHUB_OUTPUT
+          echo "prod-raw-zst-versioned=$PROD_RAW_ZST_VERSIONED" >> $GITHUB_OUTPUT
           echo "iso-versioned=$ISO_VERSIONED" >> $GITHUB_OUTPUT
           
-          ls -lh "$AB_VERSIONED" "$ISO_VERSIONED"
+          ls -lh "$PROD_RAW_ZST_VERSIONED" "$ISO_VERSIONED"
 
       - name: Generate OTA image and manifest
         run: |
           set -euo pipefail
           VERSION="${{ needs.detect-version.outputs.version }}"
-          AB_IMG="rdos-ab-${VERSION}.img"
-          OTA_IMG="rdos-${VERSION}.img.zst"
-
-          echo "Extracting ROOT_A partition (partition 3) from A/B disk..."
-          LOOP=$(sudo losetup --find --show --partscan "$AB_IMG")
-          sudo dd if="${LOOP}p3" bs=4M of=rdos-root.img status=progress
-          sudo losetup -d "$LOOP"
-
-          echo "Compressing root image with zstd..."
-          zstd -T0 -9 -f rdos-root.img -o "$OTA_IMG"
-          rm -f rdos-root.img
+          OTA_IMG="rdos-prod-${VERSION}.raw.zst"
 
           echo "Computing SHA256..."
           SHA256=$(sha256sum "$OTA_IMG" | awk '{print $1}')
@@ -148,9 +138,8 @@ jobs:
         with:
           name: rdos-release-${{ needs.detect-version.outputs.version }}
           path: |
-            rdos-ab-*.img
+            rdos-prod-*.raw.zst
             rdos-installer-*.iso
-            rdos-*.img.zst
             manifest.json
           retention-days: 30
 
@@ -192,16 +181,14 @@ jobs:
           body: |
             RDOS Release ${{ needs.detect-version.outputs.version }}
             
-            - **A/B Disk**: rdos-ab-${{ needs.detect-version.outputs.version }}.img (raw A/B + recovery installer payload)
+            - **Production Raw (compressed)**: rdos-prod-${{ needs.detect-version.outputs.version }}.raw.zst (OTA update payload)
             - **Installer ISO**: rdos-installer-${{ needs.detect-version.outputs.version }}.iso (Clonezilla-based installer)
-            - **OTA Image**: rdos-${{ needs.detect-version.outputs.version }}.img.zst (compressed root partition for OTA updates)
             - **Manifest**: manifest.json (OTA update metadata with SHA256 checksum)
             
             See [docs/building.md](docs/building.md) and [Readme.md](Readme.md) for deployment instructions.
           files: |
-            release-artifacts/rdos-ab-*.img
+            release-artifacts/rdos-prod-*.raw.zst
             release-artifacts/rdos-installer-*.iso
-            release-artifacts/rdos-*.img.zst
             release-artifacts/manifest.json
           draft: false
           prerelease: false
