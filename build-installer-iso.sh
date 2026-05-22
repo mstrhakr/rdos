@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -z "${BASH_VERSION:-}" ]]; then
+  echo "This script requires bash. Run it as: bash ./build-installer-iso.sh" >&2
+  exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -252,7 +257,7 @@ copy_with_progress() {
   local target_dir
 
   if [[ -f "$source_path" ]]; then
-    source_bytes="$(wc -c <"$source_path")"
+    source_bytes="$(stat -c%s "$source_path")"
     target_dir="$(dirname "$target_path")"
     mkdir -p "$target_dir"
     available_bytes="$(df -PB1 "$target_dir" | awk 'NR==2 {print $4}')"
@@ -332,6 +337,11 @@ else
   else
     log_phase "Skipping VHD build; using existing $INPUT_VHD"
   fi
+fi
+
+# Prefer the compressed payload when present; do not stage/copy the raw disk as well.
+if [[ -n "$INPUT_DISK_ZST" ]]; then
+  INPUT_DISK=""
 fi
 
 if [[ -n "$INPUT_DISK_ZST" ]]; then
