@@ -92,6 +92,7 @@ Style "*" PositionPlacement Center
 ######################## Initialization Functions ############################
 AddToFunc StartFunction
 + I Module FvwmBacker
++ I Exec exec /usr/bin/tc-set-background
 + I exec thinclient
 
 ######################## Menus ###################

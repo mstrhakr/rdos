@@ -1,0 +1,114 @@
+#!/bin/bash
+
+set -euo pipefail
+
+wallpaper_mode="max"
+
+normalize_wallpaper_mode() {
+    case "${1,,}" in
+        fill|cover)
+            printf '%s\n' "fill"
+            ;;
+        max|fit|contain)
+            printf '%s\n' "max"
+            ;;
+        scale|stretch)
+            printf '%s\n' "scale"
+            ;;
+        center)
+            printf '%s\n' "center"
+            ;;
+        tile)
+            printf '%s\n' "tile"
+            ;;
+        *)
+            printf '%s\n' "max"
+            ;;
+    esac
+}
+
+load_wallpaper_mode() {
+    local key
+    local value
+
+    [ -f "$HOME/tcconfig" ] || return 0
+
+    while IFS='=' read -r key value || [ -n "$key" ]; do
+        [ -z "$key" ] && continue
+        case "$key" in
+            \#*)
+                continue
+                ;;
+        esac
+
+        if [ "$key" = "wallpaper_mode" ]; then
+            value="${value#\"}"
+            value="${value%\"}"
+            value="${value//\\\"/\"}"
+            value="${value//\\\\/\\}"
+            wallpaper_mode="$(normalize_wallpaper_mode "$value")"
+            return 0
+        fi
+    done < "$HOME/tcconfig"
+}
+
+# Prefer deployment-provided wallpaper files from /boot, then a per-user override.
+find_background() {
+    local candidate
+
+    for candidate in \
+        /boot/wallpaper.png \
+        /boot/wallpaper.jpg \
+        /boot/wallpaper.jpeg \
+        /boot/wallpaper.webp \
+        /boot/wallpaper.bmp \
+        /boot/wallpaper.xpm \
+        "$HOME/wallpaper.png" \
+        "$HOME/wallpaper.jpg" \
+        "$HOME/wallpaper.jpeg" \
+        "$HOME/wallpaper.webp" \
+        "$HOME/wallpaper.bmp" \
+        "$HOME/wallpaper.xpm" \
+        /usr/share/rdos/wallpaper-default.png \
+        /usr/share/rdos/wallpaper-default.jpg \
+        /usr/share/rdos/wallpaper-default.jpeg \
+        /usr/share/rdos/wallpaper-default.webp \
+        /usr/share/rdos/wallpaper-default.bmp \
+        /usr/share/rdos/wallpaper-default.xpm; do
+        if [ -f "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+if command -v feh >/dev/null 2>&1; then
+    load_wallpaper_mode
+
+    if bg_file="$(find_background)"; then
+        case "$wallpaper_mode" in
+            fill)
+                feh --no-fehbg --bg-fill "$bg_file" >/dev/null 2>&1 || true
+                ;;
+            scale)
+                feh --no-fehbg --bg-scale "$bg_file" >/dev/null 2>&1 || true
+                ;;
+            center)
+                feh --no-fehbg --bg-center "$bg_file" >/dev/null 2>&1 || true
+                ;;
+            tile)
+                feh --no-fehbg --bg-tile "$bg_file" >/dev/null 2>&1 || true
+                ;;
+            *)
+                # Default: aspect-preserving fit so the full image is visible.
+                feh --no-fehbg --bg-max "$bg_file" >/dev/null 2>&1 || true
+                ;;
+        esac
+    else
+        xsetroot -solid black >/dev/null 2>&1 || true
+    fi
+else
+    xsetroot -solid black >/dev/null 2>&1 || true
+fi

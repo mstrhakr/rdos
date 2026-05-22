@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && apt-get install -y \
         sudo curl wget \
         xterm xinit x11-xserver-utils \
-        fvwm yad light \
+        fvwm yad light feh \
         freerdp3-x11 \
         wpasupplicant iw rfkill net-tools ethtool wireguard-tools \
         systemd-resolved \
@@ -86,6 +86,7 @@ COPY tcfiles/tc-ota-updater /usr/bin/tc-ota-updater
 COPY tcfiles/tc-ota-configure-timer /usr/bin/tc-ota-configure-timer
 COPY tcfiles/tc-health-check /usr/bin/tc-health-check
 COPY tcfiles/tc-ota-rollback /usr/bin/tc-ota-rollback
+COPY tcfiles/tc-set-background /usr/bin/tc-set-background
 COPY tcfiles/099_tc /etc/sudoers.d/099_tc
 COPY tcfiles/usb-access.rules /etc/udev/rules.d/usb-access.rules
 RUN chown root:root /etc/sudoers.d/099_tc && chmod 440 /etc/sudoers.d/099_tc
@@ -103,9 +104,13 @@ RUN chmod +x \
         /usr/bin/tc-ota-updater \
         /usr/bin/tc-ota-configure-timer \
         /usr/bin/tc-health-check \
-        /usr/bin/tc-ota-rollback
+        /usr/bin/tc-ota-rollback \
+        /usr/bin/tc-set-background
 # Allow mtr to send raw ICMP packets without root (capability survives into the final image)
 RUN setcap cap_net_raw+ep /usr/bin/mtr-packet
+
+RUN install -d -m 755 /usr/share/rdos
+COPY tcfiles/wallpaper-default.png /usr/share/rdos/wallpaper-default.png
 
 RUN mkdir -p /etc/systemd/system/getty@tty1.service.d
 COPY tcfiles/autologin /etc/systemd/system/getty@tty1.service.d/override.conf

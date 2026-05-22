@@ -135,9 +135,6 @@ Because a full copy of Clonezilla is bundled on the disk you can use this to fac
 11. Choose from-device
 12. Choose disk-2-mdisks
 13. Choose the correct source disk of your thinclient (This needs to be identical on the targets)
-14. Choose -fsck
-15. Choose -k0
-16. Choose -reboot (or -shutdown if you prefer, but rebooting is recommended as it is easier to see if the install was succesfull and in their default configuration the thinclients will automatically turn off)
 17. Choose bittorrent (This is the fastest and most reliable option, it will help all your thinclients seed to other thin clients during the setup speeding up the process and allowing proper error checking)
 
 After these steps your source thinclient is now a deployment server for the other machines in your network. Ensure that the target thinclients boot from the network. After you are done you can finish yes to the question if all jobs finished to shut down the PXE server.
@@ -177,6 +174,19 @@ WireGuard tunnel configs can be imported from USB drives through the same USB im
 Name the tunnel file like `wg0.conf` and place it on the USB drive root, then use the Import USB Config tool or let the thin client auto-detect it at startup.
 WireGuard import is USB-only for now; there is no remote URL configuration path yet.
 
+### Wallpaper
+
+RDOS now supports a desktop wallpaper with clear precedence:
+
+- Runtime override from the boot partition: `/boot/wallpaper.(png|jpg|jpeg|webp|bmp|xpm)`
+- Per-user override: `~/wallpaper.(png|jpg|jpeg|webp|bmp|xpm)`
+- Built-in fallback baked into the image: `/usr/share/rdos/wallpaper-default.png`
+
+The source file for the baked-in default is `tcfiles/wallpaper-default.png` in this repository.
+Replace that file with your own image before building if you want a different default.
+
+Wallpaper rendering uses aspect-preserving fit (`feh --bg-max`) by default, so the full image stays visible without distortion. Depending on display ratio differences, this may add letterboxing.
+
 ### Manual configuration
 
 If the thinclient is not preconfigured on the boot partition it will automatically open a multi-step first boot wizard.
@@ -191,9 +201,6 @@ The first-time setup wizard shows this default and lets you replace it during th
 
 The full settings page breaks options into separate sections for connection, network, device behavior, support settings, and common tools.
 
-### Automatic configuration
-
-Just like the WiFi the settings for the thinclient software can also be preconfigured by placing a tcconfig file in the boot partition.
 The template for this file is as follows (pay attention to the line endings, they need to be linux compatible):
 
 ```ini

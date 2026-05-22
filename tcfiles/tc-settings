@@ -140,6 +140,7 @@ load_config() {
     status_show_wifi="false"
     status_show_ip="false"
     status_show_wireguard="false"
+    wallpaper_mode="max"
     wireguard_enabled="true"
     keylayout="us"
     exit_type="Shutdown"
@@ -163,7 +164,7 @@ load_config() {
         value="$(unquote_config_value "$value")"
 
         case "$key" in
-            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|status_overlay_enabled|status_show_datetime|status_show_battery|status_show_wifi|status_show_ip|status_show_wireguard|wireguard_enabled|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns|auto_update_enabled|maintenance_window|ota_channel)
+            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|status_overlay_enabled|status_show_datetime|status_show_battery|status_show_wifi|status_show_ip|status_show_wireguard|wallpaper_mode|wireguard_enabled|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns|auto_update_enabled|maintenance_window|ota_channel)
                 printf -v "$key" '%s' "$value"
                 ;;
         esac
@@ -193,6 +194,7 @@ save_config() {
         printf 'status_show_wifi=%s\n' "$(quote_config_value "$status_show_wifi")"
         printf 'status_show_ip=%s\n' "$(quote_config_value "$status_show_ip")"
         printf 'status_show_wireguard=%s\n' "$(quote_config_value "$status_show_wireguard")"
+        printf 'wallpaper_mode=%s\n' "$(quote_config_value "$wallpaper_mode")"
         printf 'wireguard_enabled=%s\n' "$(quote_config_value "$wireguard_enabled")"
         printf 'keylayout=%s\n' "$(quote_config_value "$keylayout")"
         printf 'exit_type=%s\n' "$(quote_config_value "$exit_type")"
@@ -260,6 +262,69 @@ network_mode_label() {
     else
         printf 'Automatic (DHCP)'
     fi
+}
+
+normalize_wallpaper_mode() {
+    case "${1,,}" in
+        fill|cover)
+            printf '%s\n' "fill"
+            ;;
+        max|fit|contain)
+            printf '%s\n' "max"
+            ;;
+        scale|stretch)
+            printf '%s\n' "scale"
+            ;;
+        center)
+            printf '%s\n' "center"
+            ;;
+        tile)
+            printf '%s\n' "tile"
+            ;;
+        *)
+            printf '%s\n' "max"
+            ;;
+    esac
+}
+
+wallpaper_mode_label() {
+    case "$(normalize_wallpaper_mode "$wallpaper_mode")" in
+        fill)
+            printf '%s\n' "Fill (crop edges)"
+            ;;
+        scale)
+            printf '%s\n' "Stretch (scale)"
+            ;;
+        center)
+            printf '%s\n' "Center (no scaling)"
+            ;;
+        tile)
+            printf '%s\n' "Tile"
+            ;;
+        *)
+            printf '%s\n' "Fit (keep whole image)"
+            ;;
+    esac
+}
+
+wallpaper_mode_from_label() {
+    case "$1" in
+        "Fill (crop edges)")
+            printf '%s\n' "fill"
+            ;;
+        "Stretch (scale)")
+            printf '%s\n' "scale"
+            ;;
+        "Center (no scaling)")
+            printf '%s\n' "center"
+            ;;
+        "Tile")
+            printf '%s\n' "tile"
+            ;;
+        *)
+            printf '%s\n' "max"
+            ;;
+    esac
 }
 
 selected_interface_label() {
@@ -604,6 +669,7 @@ edit_experience_section() {
             --field="Show IP Address:CHK" "$(bool_to_checkbox "$status_show_ip")" \
             --field="Show WireGuard Status:CHK" "$(bool_to_checkbox "$status_show_wireguard")" \
             --field="WireGuard Enabled:CHK" "$(bool_to_checkbox "$wireguard_enabled")" \
+            --field="Wallpaper Mode:CB" "$(build_choice_list "$(wallpaper_mode_label)" "Fit (keep whole image)" "Fill (crop edges)" "Stretch (scale)" "Center (no scaling)" "Tile")" \
             --field="Keyboard Layout" "$keylayout" \
             --field="Exit Type:CB" "$(build_choice_list "$exit_type" "Shutdown" "Sleep" "Restart" "Exit")")
     else
@@ -624,6 +690,7 @@ edit_experience_section() {
             --field="Show IP Address:CHK" "$(bool_to_checkbox "$status_show_ip")" \
             --field="Show WireGuard Status:CHK" "$(bool_to_checkbox "$status_show_wireguard")" \
             --field="WireGuard Enabled:RO" "Disabled (no config present)" \
+            --field="Wallpaper Mode:CB" "$(build_choice_list "$(wallpaper_mode_label)" "Fit (keep whole image)" "Fill (crop edges)" "Stretch (scale)" "Center (no scaling)" "Tile")" \
             --field="Keyboard Layout" "$keylayout" \
             --field="Exit Type:CB" "$(build_choice_list "$exit_type" "Shutdown" "Sleep" "Restart" "Exit")")
     fi
@@ -649,12 +716,14 @@ edit_experience_section() {
 
     if [ "$wg_available" = "true" ]; then
         wireguard_enabled="$(normalize_bool "$(awk -F'\x1F' '{print $13}' <<<"$output")")"
-        keylayout="$(awk -F'\x1F' '{print $14}' <<<"$output")"
-        exit_type="$(awk -F'\x1F' '{print $15}' <<<"$output")"
+        wallpaper_mode="$(wallpaper_mode_from_label "$(awk -F'\x1F' '{print $14}' <<<"$output")")"
+        keylayout="$(awk -F'\x1F' '{print $15}' <<<"$output")"
+        exit_type="$(awk -F'\x1F' '{print $16}' <<<"$output")"
     else
         wireguard_enabled="false"
-        keylayout="$(awk -F'\x1F' '{print $14}' <<<"$output")"
-        exit_type="$(awk -F'\x1F' '{print $15}' <<<"$output")"
+        wallpaper_mode="$(wallpaper_mode_from_label "$(awk -F'\x1F' '{print $14}' <<<"$output")")"
+        keylayout="$(awk -F'\x1F' '{print $15}' <<<"$output")"
+        exit_type="$(awk -F'\x1F' '{print $16}' <<<"$output")"
     fi
 
     if ! [[ "$battery_low_threshold" =~ ^[0-9]+$ ]]; then
@@ -747,6 +816,11 @@ save_all_changes() {
     fi
 
     save_config
+
+    if command -v /usr/bin/tc-set-background >/dev/null 2>&1 && [ -n "${DISPLAY:-}" ]; then
+        /usr/bin/tc-set-background >/dev/null 2>&1 || true
+    fi
+
     apply_ota_timer_config || true
     apply_network_config
     apply_wireguard_config || true
