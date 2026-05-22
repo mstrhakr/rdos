@@ -251,9 +251,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-payload_file="$tmpdir/rdos.img.zst"
+payload_extract_dir="$tmpdir/payload"
+mkdir -p "$payload_extract_dir"
+payload_file="$payload_extract_dir/rdos.img.zst"
 log "Extracting compressed payload from ISO"
-run_with_heartbeat "Payload extract" xorriso -osirrox on -indev "$OUTPUT_ISO" -extract /RDOS/rdos.img.zst "$payload_file" >/dev/null
+run_with_heartbeat "Payload extract" xorriso -osirrox on -indev "$OUTPUT_ISO" -extract /RDOS/rdos.img.zst "$payload_extract_dir" >/dev/null
+
+if [[ ! -f "$payload_file" ]]; then
+  echo "Validation failed: extracted payload file missing at $payload_file" >&2
+  exit 1
+fi
 
 log "Verifying compressed payload integrity"
 run_with_heartbeat "zstd integrity test" zstd -t "$payload_file" >/dev/null
