@@ -31,6 +31,8 @@ STAGING_DIR="${STAGING_DIR:-}"
 # Compression level for the installer payload. 9 is a good balance (fast + small).
 # Set to 19 for maximum compression at the cost of significantly longer build times.
 ZSTD_LEVEL="${ZSTD_LEVEL:-9}"
+DEFAULT_BOOT_ENTRY="RDOS_guided"
+DEFAULT_BOOT_LABEL="RDOS guided installer (disk selection + progress UI)"
 
 BASE_ISO="$BASE_ISO_CACHE"
 ISO_ROOT="$WORKDIR/iso-root"
@@ -231,6 +233,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$AUTO_INSTALL_DEFAULT" == "1" ]]; then
+  DEFAULT_BOOT_ENTRY="RDOS_auto"
+  DEFAULT_BOOT_LABEL="RDOS automatic install (first target disk)"
+fi
+
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required command: $1" >&2
@@ -402,7 +409,7 @@ fi
 
 if [[ "$need_download" == "1" ]]; then
   log_phase "Downloading Clonezilla Live base ISO"
-  curl -L "$CLONEZILLA_ISO_URL" -o "$BASE_ISO"
+  curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 "$CLONEZILLA_ISO_URL" -o "$BASE_ISO"
 fi
 
 verify_clonezilla_iso "$BASE_ISO"
@@ -411,7 +418,7 @@ verify_clonezilla_iso "$BASE_ISO"
 if ! xorriso -indev "$BASE_ISO" -find /live/filesystem.squashfs -exec report_lba >/dev/null 2>&1; then
   log_phase "Cached base ISO appears corrupted or incomplete; re-downloading"
   rm -f "$BASE_ISO"
-  curl -L "$CLONEZILLA_ISO_URL" -o "$BASE_ISO"
+  curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 "$CLONEZILLA_ISO_URL" -o "$BASE_ISO"
 
   if ! xorriso -indev "$BASE_ISO" -find /live/filesystem.squashfs -exec report_lba >/dev/null 2>&1; then
     echo "Downloaded base ISO still failed integrity sanity check." >&2
@@ -474,7 +481,7 @@ for SYS_CFG in "$ISO_ROOT/syslinux/syslinux.cfg" "$ISO_ROOT/syslinux/isolinux.cf
   if [[ -f "$SYS_CFG" ]]; then
     log_phase "Writing BIOS boot config in $(basename "$SYS_CFG")"
     cat >"$SYS_CFG" <<EOF
-default RDOS_guided
+default $DEFAULT_BOOT_ENTRY
 prompt 0
 timeout 50
 
@@ -497,7 +504,7 @@ GRUB_CFG="$ISO_ROOT/boot/grub/grub.cfg"
 if [[ -f "$GRUB_CFG" ]]; then
   log_phase "Writing GRUB boot config"
   cat >"$GRUB_CFG" <<EOF
-set default="0"
+set default="$DEFAULT_BOOT_ENTRY"
 set timeout=5
 set timeout_style=menu
 
@@ -555,7 +562,7 @@ xorriso -as mkisofs \
 
 log_phase "Installer ISO build complete"
 echo "Created $OUTPUT_ISO"
-echo "Boot mode: guided installer default (5s timeout) with optional automatic mode."
+echo "Boot mode: ${DEFAULT_BOOT_LABEL} (5s timeout) with optional automatic mode."
 echo "Payload mode: zstd compressed."
 echo "Review target disk detection in RDOS/install.sh if you need a different policy."
 
