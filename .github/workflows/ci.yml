@@ -87,18 +87,20 @@ jobs:
       - name: Compress production raw artifact
         run: |
           set -euo pipefail
-          LOOP=""
           cleanup() {
-            set +e
-            if [[ -n "$LOOP" ]]; then
-              sudo losetup -d "$LOOP" >/dev/null 2>&1 || true
-            fi
             rm -f rdos-root.img
           }
           trap cleanup EXIT
 
-          LOOP=$(sudo losetup --find --show --partscan rdos-prod.raw)
-          sudo dd if="${LOOP}p2" bs=4M of=rdos-root.img status=progress
+          FIRST_SECTOR=$(sgdisk -i 2 rdos-prod.raw | awk -F': *' '/^First sector:/ {print $2}')
+          LAST_SECTOR=$(sgdisk -i 2 rdos-prod.raw | awk -F': *' '/^Last sector:/ {print $2}')
+          if [[ -z "$FIRST_SECTOR" || -z "$LAST_SECTOR" ]]; then
+            echo "Failed to determine partition 2 offsets from rdos-prod.raw" >&2
+            exit 1
+          fi
+
+          SECTOR_COUNT=$((LAST_SECTOR - FIRST_SECTOR + 1))
+          dd if=rdos-prod.raw of=rdos-root.img bs=512 skip="$FIRST_SECTOR" count="$SECTOR_COUNT" iflag=fullblock status=progress
           zstd -T0 -9 -f rdos-root.img -o rdos-prod.raw.zst
           ls -lh rdos-prod.raw.zst
 
