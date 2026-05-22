@@ -504,7 +504,7 @@ load_config ()
 
     is_allowed_config_key() {
         case "$1" in
-            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|cert_policy|connect_splash_timeout|status_overlay_enabled|status_show_datetime|status_show_battery|status_show_wifi|status_show_ip|status_show_wireguard|wireguard_enabled|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns|auto_update_enabled|maintenance_window|autologon|username|password|rdpusername|rdpserver)
+            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|cert_policy|connect_splash_timeout|status_overlay_enabled|status_show_datetime|status_show_battery|status_show_wifi|status_show_ip|status_show_wireguard|wireguard_enabled|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns|auto_update_enabled|maintenance_window|ota_channel|autologon|username|password|rdpusername|rdpserver)
                 return 0
                 ;;
             *)

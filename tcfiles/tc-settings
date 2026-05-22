@@ -152,6 +152,7 @@ load_config() {
     static_dns=""
     auto_update_enabled="true"
     maintenance_window="02:00"
+    ota_channel="stable"
 
     [ -f "$CONFIG_PATH" ] || return 0
 
@@ -162,7 +163,7 @@ load_config() {
         value="$(unquote_config_value "$value")"
 
         case "$key" in
-            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|status_overlay_enabled|status_show_datetime|status_show_battery|status_show_wifi|status_show_ip|status_show_wireguard|wireguard_enabled|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns|auto_update_enabled|maintenance_window)
+            server|domain|param|adminpass|helpdesk|login_timeout|volume|microphone|brightness|screen_timeout|battery_low_threshold|status_overlay_enabled|status_show_datetime|status_show_battery|status_show_wifi|status_show_ip|status_show_wireguard|wireguard_enabled|keylayout|exit_type|config_url|network_mode|network_interface|static_address|static_prefix|static_gateway|static_dns|auto_update_enabled|maintenance_window|ota_channel)
                 printf -v "$key" '%s' "$value"
                 ;;
         esac
@@ -204,6 +205,7 @@ save_config() {
         printf 'static_dns=%s\n' "$(quote_config_value "$static_dns")"
         printf 'auto_update_enabled=%s\n' "$(quote_config_value "$auto_update_enabled")"
         printf 'maintenance_window=%s\n' "$(quote_config_value "$maintenance_window")"
+        printf 'ota_channel=%s\n' "$(quote_config_value "$ota_channel")"
     } > "$CONFIG_PATH"
 }
 

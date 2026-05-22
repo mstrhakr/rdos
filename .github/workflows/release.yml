@@ -100,22 +100,20 @@ jobs:
         id: rename
         run: |
           VERSION="${{ needs.detect-version.outputs.version }}"
-          PROD_RAW_ZST_VERSIONED="rdos-prod-${VERSION}.raw.zst"
           ISO_VERSIONED="rdos-installer-${VERSION}.iso"
-          
-          mv rdos-prod.raw.zst "$PROD_RAW_ZST_VERSIONED"
+
           mv rdos-installer.iso "$ISO_VERSIONED"
-          
-          echo "prod-raw-zst-versioned=$PROD_RAW_ZST_VERSIONED" >> $GITHUB_OUTPUT
+
+          echo "prod-raw-zst=rdos-prod.raw.zst" >> $GITHUB_OUTPUT
           echo "iso-versioned=$ISO_VERSIONED" >> $GITHUB_OUTPUT
-          
-          ls -lh "$PROD_RAW_ZST_VERSIONED" "$ISO_VERSIONED"
+
+          ls -lh rdos-prod.raw.zst "$ISO_VERSIONED"
 
       - name: Generate OTA image and manifest
         run: |
           set -euo pipefail
           VERSION="${{ needs.detect-version.outputs.version }}"
-          OTA_IMG="rdos-prod-${VERSION}.raw.zst"
+          OTA_IMG="rdos-prod.raw.zst"
 
           echo "Computing SHA256..."
           SHA256=$(sha256sum "$OTA_IMG" | awk '{print $1}')
@@ -138,7 +136,7 @@ jobs:
         with:
           name: rdos-release-${{ needs.detect-version.outputs.version }}
           path: |
-            rdos-prod-*.raw.zst
+            rdos-prod.raw.zst
             rdos-installer-*.iso
             manifest.json
           retention-days: 30
@@ -181,13 +179,13 @@ jobs:
           body: |
             RDOS Release ${{ needs.detect-version.outputs.version }}
             
-            - **Production Raw (compressed)**: rdos-prod-${{ needs.detect-version.outputs.version }}.raw.zst (OTA update payload)
+            - **Production Raw (compressed)**: rdos-prod.raw.zst (OTA update payload)
             - **Installer ISO**: rdos-installer-${{ needs.detect-version.outputs.version }}.iso (Clonezilla-based installer)
             - **Manifest**: manifest.json (OTA update metadata with SHA256 checksum)
             
             See [docs/building.md](docs/building.md) and [Readme.md](Readme.md) for deployment instructions.
           files: |
-            release-artifacts/rdos-prod-*.raw.zst
+            release-artifacts/rdos-prod.raw.zst
             release-artifacts/rdos-installer-*.iso
             release-artifacts/manifest.json
           draft: false
