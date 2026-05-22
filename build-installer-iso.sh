@@ -33,7 +33,7 @@ RAW_IMAGE="$WORKDIR/rdos.img"
 COMPRESSED_IMAGE="$ISO_ROOT/RDOS/rdos.img.zst"
 IMAGE_SIZE_METADATA="$ISO_ROOT/RDOS/rdos.img.size"
 MIN_BASE_ISO_SIZE_BYTES=400000000
-TEMP_ROOT="${TMPDIR:-/tmp}"
+TEMP_ROOT="${TMPDIR:-/var/tmp}"
 AUTO_STAGING_DIR=""
 ORIGINAL_OUTPUT_ISO="$OUTPUT_ISO"
 
@@ -238,6 +238,7 @@ need_cmd zstd
 need_cmd curl
 need_cmd lsblk
 need_cmd findmnt
+need_cmd rsync
 
 log_phase() {
   printf '\n[%s] %s\n' "$(date +'%H:%M:%S')" "$1"
@@ -246,12 +247,25 @@ log_phase() {
 copy_with_progress() {
   local source_path="$1"
   local target_path="$2"
+  local source_bytes=""
+  local available_bytes=""
+  local target_dir
 
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -ah --info=progress2 --no-inc-recursive --protect-args "$source_path" "$target_path"
-  else
-    cp -f "$source_path" "$target_path"
+  if [[ -f "$source_path" ]]; then
+    source_bytes="$(wc -c <"$source_path")"
+    target_dir="$(dirname "$target_path")"
+    mkdir -p "$target_dir"
+    available_bytes="$(df -PB1 "$target_dir" | awk 'NR==2 {print $4}')"
+
+    if [[ "$source_bytes" =~ ^[0-9]+$ ]] && [[ "$available_bytes" =~ ^[0-9]+$ ]] && (( available_bytes < source_bytes )); then
+      echo "Insufficient free space at $target_dir for staged copy." >&2
+      echo "Need: $source_bytes bytes, available: $available_bytes bytes." >&2
+      echo "Set --staging-dir to a larger filesystem or pass --no-staging." >&2
+      exit 1
+    fi
   fi
+
+  rsync -ah --info=progress2 --no-inc-recursive --protect-args "$source_path" "$target_path"
 }
 
 verify_clonezilla_iso() {
@@ -413,10 +427,10 @@ mkdir -p "$ISO_ROOT/RDOS"
 
 if [[ -n "$INPUT_DISK_ZST" ]]; then
   log_phase "Using pre-compressed A/B payload directly: $INPUT_DISK_ZST"
-  cp "$INPUT_DISK_ZST" "$COMPRESSED_IMAGE"
+  copy_with_progress "$INPUT_DISK_ZST" "$COMPRESSED_IMAGE"
 
   if [[ -f "${INPUT_DISK_ZST}.size" ]]; then
-    cp "${INPUT_DISK_ZST}.size" "$IMAGE_SIZE_METADATA"
+    copy_with_progress "${INPUT_DISK_ZST}.size" "$IMAGE_SIZE_METADATA"
   elif [[ -n "$INPUT_DISK" && -f "$INPUT_DISK" ]]; then
     stat -c%s "$INPUT_DISK" > "$IMAGE_SIZE_METADATA"
   else
@@ -425,7 +439,7 @@ if [[ -n "$INPUT_DISK_ZST" ]]; then
   fi
 elif [[ -n "$INPUT_DISK" ]]; then
   log_phase "Using raw A/B disk image directly: $INPUT_DISK"
-  cp "$INPUT_DISK" "$RAW_IMAGE"
+  copy_with_progress "$INPUT_DISK" "$RAW_IMAGE"
   log_phase "Compressing installer payload (zstd level ${ZSTD_LEVEL}, threads: all)"
   zstd -T0 "-${ZSTD_LEVEL}" -f "$RAW_IMAGE" -o "$COMPRESSED_IMAGE"
   stat -c%s "$RAW_IMAGE" > "$IMAGE_SIZE_METADATA"
@@ -439,8 +453,8 @@ else
   rm -f "$RAW_IMAGE"
 fi
 
-cp "$SCRIPT_DIR/tcfiles/installer-install.sh" "$ISO_ROOT/RDOS/install.sh"
-cp "$SCRIPT_DIR/tcfiles/tc-installer-ui.sh" "$ISO_ROOT/RDOS/tc-installer-ui.sh"
+copy_with_progress "$SCRIPT_DIR/tcfiles/installer-install.sh" "$ISO_ROOT/RDOS/install.sh"
+copy_with_progress "$SCRIPT_DIR/tcfiles/tc-installer-ui.sh" "$ISO_ROOT/RDOS/tc-installer-ui.sh"
 chmod +x "$ISO_ROOT/RDOS/install.sh"
 chmod +x "$ISO_ROOT/RDOS/tc-installer-ui.sh"
 
