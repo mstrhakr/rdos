@@ -105,9 +105,11 @@ jobs:
           ls -lh rdos-prod.raw.zst
 
       - name: Persist artifacts on runner
+        env:
+          ARTIFACT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          TARGET_DIR="${RUNNER_ARTIFACT_ROOT}/${GITHUB_SHA}"
+          TARGET_DIR="${RUNNER_ARTIFACT_ROOT}/${ARTIFACT_SHA}"
           mkdir -p "$TARGET_DIR"
           install -m 0644 rdos-prod.raw.zst "$TARGET_DIR/rdos-prod.raw.zst"
           install -m 0644 rdos-installer.iso "$TARGET_DIR/rdos-installer.iso"
