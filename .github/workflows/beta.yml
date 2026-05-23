@@ -152,7 +152,7 @@ jobs:
           }
           EOF
 
-          ls -lh "$OTA_IMG" "$ISO_VERSIONED" manifest.json
+          ls -lh "$OTA_IMG" manifest.json
 
       - name: Upload RC artifact
         uses: actions/upload-artifact@v4
