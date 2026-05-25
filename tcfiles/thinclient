@@ -33,7 +33,7 @@ cert_policy="${cert_policy:-tofu}"
 connect_splash_timeout="${connect_splash_timeout:-12}"
 status_overlay_enabled="${status_overlay_enabled:-true}"
 status_show_datetime="${status_show_datetime:-true}"
-status_show_battery="${status_show_battery:-true}"
+status_show_battery="${status_show_battery:-false}"
 status_show_wifi="${status_show_wifi:-false}"
 status_show_ip="${status_show_ip:-false}"
 status_show_wireguard="${status_show_wireguard:-false}"
@@ -222,14 +222,6 @@ status_any_items_enabled() {
 status_overlay_loop() {
     local battery_device="$1"
     local threshold="$2"
-    local width=620
-    local height=112
-    local screen_spec=""
-    local screen_width=1024
-    local x_offset=0
-    local fifo_path=""
-    local yad_pid=""
-    local writer_fd=""
     local notified_low=0
     local capacity=0
     local status="Unknown"
@@ -239,6 +231,16 @@ status_overlay_loop() {
     local date_line=""
     local network_line=""
     local status_text=""
+    local screen_spec=""
+    local screen_width=1024
+    local width=220
+    local height=64
+    local x_offset=0
+    local line_count=0
+    local max_line_len=0
+    local line=""
+    local has_battery="false"
+    local yad_pid=""
     local network_parts=()
     local text_lines=()
 
@@ -246,56 +248,17 @@ status_overlay_loop() {
         threshold=20
     fi
 
-    screen_spec="$(xrandr --current 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i ~ /^[0-9]+x[0-9]+\+[0-9]+\+[0-9]+$/){print $i; exit}}}')"
-    if [ -n "$screen_spec" ]; then
-        screen_width="${screen_spec%x*}"
-    fi
-
-    if ! [[ "$screen_width" =~ ^[0-9]+$ ]]; then
-        screen_width=1024
-    fi
-
-    x_offset=$((screen_width - width - 12))
-    if [ "$x_offset" -lt 0 ]; then
-        x_offset=0
-    fi
-
     cleanup_overlay() {
-        if [ -n "$writer_fd" ]; then
-            exec {writer_fd}>&- 2>/dev/null || true
-            writer_fd=""
-        fi
         if [ -n "$yad_pid" ]; then
             kill "$yad_pid" 2>/dev/null || true
             wait "$yad_pid" 2>/dev/null || true
             yad_pid=""
         fi
-        if [ -n "$fifo_path" ] && [ -p "$fifo_path" ]; then
-            rm -f "$fifo_path"
-        fi
     }
 
     trap cleanup_overlay EXIT INT TERM
 
-    fifo_path="$(mktemp -u /tmp/rdos-status-overlay.XXXXXX)"
-    mkfifo "$fifo_path"
-
-    yad --progress \
-        --title="System Status" \
-        --text="Preparing status" \
-        --percentage=0 \
-        --geometry="${width}x${height}+${x_offset}+12" \
-        --no-buttons \
-        --undecorated \
-        --on-top \
-        --skip-taskbar \
-        --sticky \
-        <"$fifo_path" >/dev/null 2>&1 &
-    yad_pid=$!
-
-    exec {writer_fd}>"$fifo_path"
-
-    while kill -0 "$yad_pid" 2>/dev/null; do
+    while true; do
         if [ -n "$battery_device" ] && [ -r "$battery_device/capacity" ]; then
             capacity="$(< "$battery_device/capacity")"
         else
@@ -312,15 +275,16 @@ status_overlay_loop() {
             capacity=0
         fi
 
+        has_battery="false"
+        battery_text=""
+        overlay_percent=0
         if is_enabled "$status_show_battery" && [ -n "$battery_device" ]; then
+            has_battery="true"
             overlay_percent="$capacity"
             battery_text="Battery ${capacity}% (${status})"
-        else
-            overlay_percent=0
-            battery_text=""
         fi
 
-        now="$(date '+%Y-%m-%d %H:%M')"
+        now="$(date '+%H:%M')"
 
         date_line=""
         if is_enabled "$status_show_datetime"; then
@@ -355,16 +319,77 @@ status_overlay_loop() {
             text_lines+=("$battery_text")
         fi
 
-        if [ "${#text_lines[@]}" -gt 0 ]; then
-            status_text="$(printf '%s\n' "${text_lines[@]}")"
-            status_text="${status_text%$'\n'}"
-        else
-            status_text="Preparing status..."
+        if [ "${#text_lines[@]}" -eq 0 ]; then
+            cleanup_overlay
+            sleep 30
+            continue
         fi
 
-        printf '%s\n#%s\n' "$overlay_percent" "$status_text" >&${writer_fd} || break
+        status_text="$(printf '%s\n' "${text_lines[@]}")"
+        status_text="${status_text%$'\n'}"
 
-        if is_enabled "$status_show_battery" && [ -n "$battery_device" ] && [ "$capacity" -le "$threshold" ] && [ "$status" != "Charging" ]; then
+        max_line_len=0
+        for line in "${text_lines[@]}"; do
+            if [ "${#line}" -gt "$max_line_len" ]; then
+                max_line_len="${#line}"
+            fi
+        done
+
+        line_count="${#text_lines[@]}"
+        width=$((max_line_len * 8 + 40))
+        if [ "$width" -lt 170 ]; then
+            width=170
+        elif [ "$width" -gt 560 ]; then
+            width=560
+        fi
+
+        height=$((line_count * 24 + 28))
+        if [ "$has_battery" = "true" ]; then
+            height=$((height + 26))
+        fi
+
+        screen_spec="$(xrandr --current 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i ~ /^[0-9]+x[0-9]+\+[0-9]+\+[0-9]+$/){print $i; exit}}}')"
+        if [ -n "$screen_spec" ]; then
+            screen_width="${screen_spec%x*}"
+        fi
+        if ! [[ "$screen_width" =~ ^[0-9]+$ ]]; then
+            screen_width=1024
+        fi
+
+        x_offset=$((screen_width - width - 12))
+        if [ "$x_offset" -lt 0 ]; then
+            x_offset=0
+        fi
+
+        cleanup_overlay
+
+        if [ "$has_battery" = "true" ]; then
+            yad --progress \
+                --title="System Status" \
+                --text="$status_text" \
+                --percentage="$overlay_percent" \
+                --geometry="${width}x${height}+${x_offset}+12" \
+                --no-buttons \
+                --undecorated \
+                --on-top \
+                --skip-taskbar \
+                --sticky \
+                --timeout=35 >/dev/null 2>&1 &
+            yad_pid=$!
+        else
+            yad --title="System Status" \
+                --text="$status_text" \
+                --geometry="${width}x${height}+${x_offset}+12" \
+                --no-buttons \
+                --undecorated \
+                --on-top \
+                --skip-taskbar \
+                --sticky \
+                --timeout=35 >/dev/null 2>&1 &
+            yad_pid=$!
+        fi
+
+        if [ "$has_battery" = "true" ] && [ "$capacity" -le "$threshold" ] && [ "$status" != "Charging" ]; then
             if [ "$notified_low" -eq 0 ]; then
                 yad --warning --on-top --skip-taskbar --timeout=10 --title="Low Battery" \
                     --text="Battery is low (${capacity}%). Please connect power." >/dev/null 2>&1 &
@@ -399,6 +424,14 @@ start_status_overlay() {
     pkill -f 'yad --progress.*--title=System Status' >/dev/null 2>&1 || true
 
     battery_device="$(find_battery_device || true)"
+
+    if ! is_enabled "$status_show_datetime" && \
+       ! is_enabled "$status_show_wifi" && \
+       ! is_enabled "$status_show_ip" && \
+       ! is_enabled "$status_show_wireguard" && \
+       (! is_enabled "$status_show_battery" || [ -z "$battery_device" ]); then
+        return 0
+    fi
 
     status_overlay_loop "$battery_device" "$battery_low_threshold" &
     STATUS_OVERLAY_PID=$!

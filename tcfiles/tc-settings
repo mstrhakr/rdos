@@ -136,7 +136,7 @@ load_config() {
     battery_low_threshold="20"
     status_overlay_enabled="true"
     status_show_datetime="true"
-    status_show_battery="true"
+    status_show_battery="false"
     status_show_wifi="false"
     status_show_ip="false"
     status_show_wireguard="false"
