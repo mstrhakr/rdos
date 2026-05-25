@@ -45,32 +45,19 @@ STATUS_OVERLAY_PID=""
 start_loading_splash() {
     local message="$1"
     local fifo
-    local overlay_width="1280"
-    local overlay_height="720"
-    local screen_size
 
     stop_loading_splash
 
-    if command -v xrandr >/dev/null 2>&1; then
-        screen_size="$(xrandr 2>/dev/null | awk '/\*/ {print $1; exit}')"
-        if [[ "$screen_size" =~ ^[0-9]+x[0-9]+$ ]]; then
-            overlay_width="${screen_size%x*}"
-            overlay_height="${screen_size#*x}"
-        fi
-    fi
-
     fifo=$(mktemp -u)
     mkfifo "$fifo"
-    yad --progress --on-top --undecorated --skip-taskbar --no-buttons --pulsate \
-        --borders=0 --mouse \
-        --width="$overlay_width" --height="$overlay_height" --posx=0 --posy=0 \
-        --title="Loading" --text="\n\nLoading...\n\n$message" <"$fifo" >/dev/null 2>&1 &
+    yad --progress --center --on-top --undecorated --skip-taskbar --no-buttons --pulsate \
+        --width=460 --title="Loading" --text="$message" <"$fifo" >/dev/null 2>&1 &
     LOADING_PID=$!
 
-    # If the fullscreen-style overlay fails to start, fall back to compact centered spinner.
+    # If the compact splash fails to start, retry with a small bordered dialog.
     sleep 0.1
     if ! kill -0 "$LOADING_PID" >/dev/null 2>&1; then
-        yad --progress --center --on-top --undecorated --skip-taskbar --no-buttons --pulsate \
+        yad --progress --center --on-top --skip-taskbar --no-buttons --pulsate \
             --width=460 --title="Loading" --text="$message" <"$fifo" >/dev/null 2>&1 &
         LOADING_PID=$!
     fi
