@@ -116,6 +116,10 @@ RUN mkdir -p /etc/systemd/system/getty@tty1.service.d
 COPY tcfiles/autologin /etc/systemd/system/getty@tty1.service.d/override.conf
 RUN systemctl enable getty@tty1.service
 
+RUN mkdir -p /etc/systemd/system/serial-getty@ttyS0.service.d
+COPY tcfiles/autologin-serial /etc/systemd/system/serial-getty@ttyS0.service.d/override.conf
+RUN systemctl enable serial-getty@ttyS0.service
+
 COPY tcfiles/tc-copyconfig.service /etc/systemd/system/tc-copyconfig.service
 RUN systemctl enable tc-copyconfig.service
 
