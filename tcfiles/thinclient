@@ -589,6 +589,31 @@ download_config ()
         --output "$1" "$2"
 }
 
+wait_for_startup_config() {
+    local wait_seconds=0
+    local max_wait_seconds=12
+
+    if [ -f "$HOME/tcconfig" ]; then
+        return 0
+    fi
+
+    # Boot config can be imported asynchronously by tc-copyconfig.service.
+    if [ -f /boot/tcconfig ]; then
+        while [ ! -f "$HOME/tcconfig" ] && [ -f /boot/tcconfig ] && [ "$wait_seconds" -lt "$max_wait_seconds" ]; do
+            sleep 1
+            wait_seconds=$((wait_seconds + 1))
+        done
+    fi
+
+    # Fallback: import directly when the boot config is still present and readable.
+    if [ ! -f "$HOME/tcconfig" ] && [ -r /boot/tcconfig ]; then
+        install -m 600 -o "$(id -u)" -g "$(id -g)" /boot/tcconfig "$HOME/tcconfig" >/dev/null 2>&1 || \
+            cp /boot/tcconfig "$HOME/tcconfig" >/dev/null 2>&1 || true
+    fi
+}
+
+wait_for_startup_config
+
 # Config file (down)loading and also the start of the main UI routine
 if [ -f ~/tcconfig ];then
     load_config ~/config_url
