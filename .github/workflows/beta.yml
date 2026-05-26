@@ -123,14 +123,16 @@ jobs:
         run: |
           VERSION="${{ needs.validate-version.outputs.version }}"
           RC_NUMBER="${{ needs.validate-version.outputs.rc_number }}"
+          RAW_VERSIONED="rdos-prod-${VERSION}-rc.${RC_NUMBER}.raw.zst"
           ISO_VERSIONED="rdos-installer-${VERSION}-rc.${RC_NUMBER}.iso"
 
+          mv rdos-prod.raw.zst "$RAW_VERSIONED"
           mv rdos-installer.iso "$ISO_VERSIONED"
 
-          echo "prod-raw-zst=rdos-prod.raw.zst" >> $GITHUB_OUTPUT
+          echo "prod-raw-zst=$RAW_VERSIONED" >> $GITHUB_OUTPUT
           echo "iso-versioned=$ISO_VERSIONED" >> $GITHUB_OUTPUT
 
-          ls -lh rdos-prod.raw.zst "$ISO_VERSIONED"
+          ls -lh "$RAW_VERSIONED" "$ISO_VERSIONED"
 
       - name: Generate OTA manifest (beta channel)
         run: |
@@ -138,7 +140,7 @@ jobs:
           VERSION="${{ needs.validate-version.outputs.version }}"
           RC_NUMBER="${{ needs.validate-version.outputs.rc_number }}"
           OTA_VERSION="${VERSION}-rc.${RC_NUMBER}"
-          OTA_IMG="rdos-prod.raw.zst"
+          OTA_IMG="rdos-prod-${VERSION}-rc.${RC_NUMBER}.raw.zst"
 
           SHA256=$(sha256sum "$OTA_IMG" | awk '{print $1}')
 
@@ -159,7 +161,7 @@ jobs:
         with:
           name: rdos-rc-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}
           path: |
-            rdos-prod.raw.zst
+            rdos-prod-*.raw.zst
             rdos-installer-*.iso
             manifest.json
           retention-days: 30
@@ -205,7 +207,7 @@ jobs:
             
             This is a pre-release build for testing and validation.
             
-            - **Production Raw (compressed)**: rdos-prod.raw.zst (OTA update payload)
+            - **Production Raw (compressed)**: rdos-prod-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}.raw.zst (OTA update payload)
             - **Installer ISO**: rdos-installer-${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}.iso (Clonezilla-based installer)
             - **Manifest**: manifest.json (beta OTA metadata with SHA256 checksum)
             
@@ -213,7 +215,7 @@ jobs:
             
             See [docs/building.md](docs/building.md) and [Readme.md](Readme.md) for deployment instructions.
           files: |
-            rc-artifacts/rdos-prod.raw.zst
+            rc-artifacts/rdos-prod-*.raw.zst
             rc-artifacts/rdos-installer-*.iso
             rc-artifacts/manifest.json
           draft: false
