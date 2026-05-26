@@ -117,36 +117,24 @@ if ! shopt -oq posix; then
 fi
 
 TTY="$(/usr/bin/tty | sed 's:.*/::')"
-if [[ -z ${DISPLAY} && ( ${TTY} == 'tty1' || ${TTY} == 'console' ) ]]; then
+if [[ -z ${DISPLAY} && ( ${TTY} == 'tty1' || ${TTY} == 'console' || ${TTY} == 'ttyS0' ) ]]; then
     unset TTY
     udiskie &
 
-    max_startx_retries=10
-    startx_attempt=1
-
-    # Retry X startup a limited number of times to handle transient failures.
-    while [ "$startx_attempt" -le "$max_startx_retries" ]; do
+    # Keep retrying X startup so transient boot-time failures do not leave the user at a text console.
+    while true; do
         if startx >>"$HOME/.startx.log" 2>&1; then
-            break
+            continue
         fi
 
         startx_rc=$?
-        warning_msg="startx failed (attempt ${startx_attempt}/${max_startx_retries}, exit ${startx_rc})."
+        warning_msg="startx failed (exit ${startx_rc}); retrying."
         printf 'WARNING: %s\n' "$warning_msg" >&2
         if command -v logger >/dev/null 2>&1; then
             logger -t thinclient-bashrc "$warning_msg"
         fi
 
-        startx_attempt=$((startx_attempt + 1))
         sleep 2
     done
-
-    if [ "$startx_attempt" -gt "$max_startx_retries" ]; then
-        final_warning="startx failed ${max_startx_retries} times. Dropping to console."
-        printf 'WARNING: %s\n' "$final_warning" >&2
-        if command -v logger >/dev/null 2>&1; then
-            logger -t thinclient-bashrc "$final_warning"
-        fi
-    fi
 fi
 unset TTY
