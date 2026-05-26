@@ -117,7 +117,7 @@ if ! shopt -oq posix; then
 fi
 
 TTY="$(/usr/bin/tty | sed 's:.*/::')"
-if [[ -z ${DISPLAY} && ( ${TTY} == 'tty1' || ${TTY} == 'console' || ${TTY} == 'ttyS0' ) ]]; then
+if [[ -z ${DISPLAY} && ( ${TTY} == 'tty1' || ${TTY} == 'console' ) ]]; then
     unset TTY
     udiskie &
 
@@ -126,7 +126,7 @@ if [[ -z ${DISPLAY} && ( ${TTY} == 'tty1' || ${TTY} == 'console' || ${TTY} == 't
 
     # Retry X startup a limited number of times to handle transient failures.
     while [ "$startx_attempt" -le "$max_startx_retries" ]; do
-        if startx; then
+        if startx >>"$HOME/.startx.log" 2>&1; then
             break
         fi
 
