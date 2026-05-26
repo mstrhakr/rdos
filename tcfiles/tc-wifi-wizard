@@ -320,7 +320,15 @@ while true; do
         exit 0
     fi
 
-    selected_index="$(awk -F'\x1F' '{print $1}' <<<"$selection")"
+    selected_index=""
+    selected_signal=""
+    selected_security=""
+
+    if [[ "$selection" == *$'\x1F'* ]]; then
+        IFS=$'\x1F' read -r selected_index _ selected_signal selected_security <<<"$selection"
+    else
+        IFS='|' read -r selected_index _ selected_signal selected_security <<<"$selection"
+    fi
 
     if ! [[ "$selected_index" =~ ^[0-9]+$ ]]; then
         yad --error --center --title="WiFi Wizard" --text="Unable to parse the selected WiFi network. Please rescan or enter it manually."
@@ -333,7 +341,7 @@ while true; do
     fi
 
     network_ssid="${scanned_ssids[$selected_index]}"
-    network_security="$(awk -F'\x1F' '{print $3}' <<<"$selection")"
+    network_security="$selected_security"
     network_hidden="false"
 
     if [ "$network_security" = "Open" ]; then

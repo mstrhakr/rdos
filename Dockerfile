@@ -114,22 +114,33 @@ COPY tcfiles/wallpaper-default.png /usr/share/rdos/wallpaper-default.png
 
 RUN mkdir -p /etc/systemd/system/getty@tty1.service.d
 COPY tcfiles/autologin /etc/systemd/system/getty@tty1.service.d/override.conf
+RUN chmod 0644 /etc/systemd/system/getty@tty1.service.d/override.conf
 RUN systemctl enable getty@tty1.service
 
+RUN mkdir -p /etc/systemd/system/serial-getty@ttyS0.service.d
+COPY tcfiles/autologin-serial /etc/systemd/system/serial-getty@ttyS0.service.d/override.conf
+RUN chmod 0644 /etc/systemd/system/serial-getty@ttyS0.service.d/override.conf
+RUN systemctl enable serial-getty@ttyS0.service
+
 COPY tcfiles/tc-copyconfig.service /etc/systemd/system/tc-copyconfig.service
+RUN chmod 0644 /etc/systemd/system/tc-copyconfig.service
 RUN systemctl enable tc-copyconfig.service
 
 COPY tcfiles/tc-copywpa.service /etc/systemd/system/tc-copywpa.service
+RUN chmod 0644 /etc/systemd/system/tc-copywpa.service
 RUN systemctl enable tc-copywpa.service
 
 COPY tcfiles/tc-networkconfig.service /etc/systemd/system/tc-networkconfig.service
+RUN chmod 0644 /etc/systemd/system/tc-networkconfig.service
 RUN systemctl enable tc-networkconfig.service
 
 COPY tcfiles/tc-wifipower.service /etc/systemd/system/tc-wifipower.service
+RUN chmod 0644 /etc/systemd/system/tc-wifipower.service
 RUN systemctl enable tc-wifipower.service
 
 COPY tcfiles/tc-ota-updater.service /etc/systemd/system/tc-ota-updater.service
 COPY tcfiles/tc-ota-updater.timer /etc/systemd/system/tc-ota-updater.timer
+RUN chmod 0644 /etc/systemd/system/tc-ota-updater.service /etc/systemd/system/tc-ota-updater.timer
 RUN systemctl enable tc-ota-updater.timer
 
 COPY tcfiles/dhcp.network /etc/systemd/network/dhcp.network

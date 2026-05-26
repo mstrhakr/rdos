@@ -118,9 +118,23 @@ fi
 
 TTY="$(/usr/bin/tty | sed 's:.*/::')"
 if [[ -z ${DISPLAY} && ( ${TTY} == 'tty1' || ${TTY} == 'console' || ${TTY} == 'ttyS0' ) ]]; then
-  unset TTY
-  udiskie &
-  exec startx
-  logout
+    unset TTY
+    udiskie &
+
+    # Keep retrying X startup so transient boot-time failures do not leave the user at a text console.
+    while true; do
+        if startx >>"$HOME/.startx.log" 2>&1; then
+            continue
+        fi
+
+        startx_rc=$?
+        warning_msg="startx failed (exit ${startx_rc}); retrying."
+        printf 'WARNING: %s\n' "$warning_msg" >&2
+        if command -v logger >/dev/null 2>&1; then
+            logger -t thinclient-bashrc "$warning_msg"
+        fi
+
+        sleep 2
+    done
 fi
 unset TTY

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# build-ab-disk.sh — Assemble a 31 GB A/B + Recovery disk from the production
+# build-ab-disk.sh — Assemble a right-sized A/B + Recovery disk from the production
 # and recovery VHDs produced by d2vm.
 #
 # Partition layout (GPT):
 #   p1  1 MB    BIOSBOOT  (type EF02, no filesystem — GRUB BIOS core)
-#   p2  4 GB    ESP       (FAT32, label ESP — GRUB modules, grub.cfg, grubenv,
+#   p2  1 GB    ESP       (FAT32, label ESP — GRUB modules, grub.cfg, grubenv,
 #                          slot kernels: vmlinuz-a/b, initrd-a/b.img)
-#   p3  12 GB   ROOT_A    (ext4, label ROOT_A — initial production OS)
-#   p4  12 GB   ROOT_B    (ext4, label ROOT_B — empty, filled by OTA)
+#   p3  11 GB   ROOT_A    (ext4, label ROOT_A — initial production OS)
+#   p4  11 GB   ROOT_B    (ext4, label ROOT_B — empty, filled by OTA)
 #   p5   2 GB   RECOVERY  (ext4, label RECOVERY — Alpine recovery OS)
 #
 # Usage:
@@ -32,6 +32,12 @@ PROD_RAW_INPUT=""
 RECOVERY_RAW_INPUT=""
 OUTPUT_DISK="rdos-ab.img"
 SKIP_EFI=false
+
+# Keep ROOT_A/ROOT_B larger than the current production ROOT partition image
+# written by OTA (currently ~10.1 GiB uncompressed).
+DISK_SIZE_GB=25
+ESP_SIZE_GB=1
+ROOT_SLOT_SIZE_GB=11
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -169,7 +175,7 @@ mkdir -p "$WORK_DIR"/{esp,root_a,root_b,recovery,vhd_boot,vhd_root,rec_boot,rec_
 # ---------------------------------------------------------------------------
 log "Creating output disk: $OUTPUT_DISK"
 rm -f "$OUTPUT_DISK"
-truncate -s 31G "$OUTPUT_DISK"
+truncate -s "${DISK_SIZE_GB}G" "$OUTPUT_DISK"
 
 log "Partitioning with GPT"
 # Clear any existing partition table
@@ -178,9 +184,9 @@ sgdisk --zap-all "$OUTPUT_DISK"
 # Create all partitions in one write to avoid repeated "old partition table" warnings.
 sgdisk \
     -n 1:2048:+1M  -t 1:ef02 -c 1:BIOSBOOT \
-    -n 2:0:+4G     -t 2:ef00 -c 2:ESP \
-    -n 3:0:+12G    -t 3:8300 -c 3:ROOT_A \
-    -n 4:0:+12G    -t 4:8300 -c 4:ROOT_B \
+    -n 2:0:+${ESP_SIZE_GB}G           -t 2:ef00 -c 2:ESP \
+    -n 3:0:+${ROOT_SLOT_SIZE_GB}G     -t 3:8300 -c 3:ROOT_A \
+    -n 4:0:+${ROOT_SLOT_SIZE_GB}G     -t 4:8300 -c 4:ROOT_B \
     -n 5:0:0       -t 5:8300 -c 5:RECOVERY \
     "$OUTPUT_DISK"
 
