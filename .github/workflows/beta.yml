@@ -140,7 +140,8 @@ jobs:
           VERSION="${{ needs.validate-version.outputs.version }}"
           RC_NUMBER="${{ needs.validate-version.outputs.rc_number }}"
           OTA_VERSION="${VERSION}-rc.${RC_NUMBER}"
-          OTA_IMG="rdos-prod-${VERSION}-rc.${RC_NUMBER}.raw.zst"
+          OTA_IMG="${{ steps.rename.outputs.prod-raw-zst }}"
+          ISO_VERSIONED="${{ steps.rename.outputs.iso-versioned }}"
 
           SHA256=$(sha256sum "$OTA_IMG" | awk '{print $1}')
 
@@ -154,7 +155,7 @@ jobs:
           }
           EOF
 
-          ls -lh "$OTA_IMG" manifest.json
+          ls -lh "$OTA_IMG" "$ISO_VERSIONED" manifest.json
 
       - name: Upload RC artifact
         uses: actions/upload-artifact@v4
