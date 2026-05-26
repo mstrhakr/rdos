@@ -84,14 +84,15 @@ jobs:
         run: |
           bash ./ci/pipeline.sh all --mode ci --shellcheck-severity error
 
+      - name: Reclaim workspace space before compression
+        run: |
+          set -euo pipefail
+          rm -f rdos-ab.img rdos-ab.img.zst rdos-recovery.raw
+          rm -rf .installer-work
+
       - name: Compress production raw artifact
         run: |
           set -euo pipefail
-          cleanup() {
-            rm -f rdos-root.img
-          }
-          trap cleanup EXIT
-
           FIRST_SECTOR=$(sgdisk -i 2 rdos-prod.raw | awk -F': *' '/^First sector:/ {print $2}' | awk '{print $1}')
           LAST_SECTOR=$(sgdisk -i 2 rdos-prod.raw | awk -F': *' '/^Last sector:/ {print $2}' | awk '{print $1}')
           if [[ -z "$FIRST_SECTOR" || -z "$LAST_SECTOR" ]]; then
@@ -100,9 +101,14 @@ jobs:
           fi
 
           SECTOR_COUNT=$((LAST_SECTOR - FIRST_SECTOR + 1))
-          dd if=rdos-prod.raw of=rdos-root.img bs=512 skip="$FIRST_SECTOR" count="$SECTOR_COUNT" iflag=fullblock status=progress
-          zstd -T0 -9 -f rdos-root.img -o rdos-prod.raw.zst
+          dd if=rdos-prod.raw bs=512 skip="$FIRST_SECTOR" count="$SECTOR_COUNT" iflag=fullblock status=progress | zstd -T0 -9 -f -o rdos-prod.raw.zst
           ls -lh rdos-prod.raw.zst
+
+      - name: Prune stale runner artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_ARTIFACT_ROOT"
+          find "$RUNNER_ARTIFACT_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
 
       - name: Persist artifacts on runner
         env:

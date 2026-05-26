@@ -199,6 +199,13 @@ jobs:
             manifest.json
           retention-days: 30
 
+      - name: Cleanup runner-stored source artifacts
+        if: always()
+        run: |
+          set -euo pipefail
+          SOURCE_DIR="${RUNNER_ARTIFACT_ROOT}/${{ github.event.workflow_run.head_sha }}"
+          rm -rf "$SOURCE_DIR"
+
   create-release:
     name: Create GitHub Release
     needs: [detect-release-context, build-and-test]
