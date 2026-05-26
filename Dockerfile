@@ -122,6 +122,10 @@ COPY tcfiles/autologin-serial /etc/systemd/system/serial-getty@ttyS0.service.d/o
 RUN chmod 0644 /etc/systemd/system/serial-getty@ttyS0.service.d/override.conf
 RUN systemctl enable serial-getty@ttyS0.service
 
+RUN mkdir -p /etc/systemd/system/console-getty.service.d
+COPY tcfiles/autologin-console /etc/systemd/system/console-getty.service.d/override.conf
+RUN chmod 0644 /etc/systemd/system/console-getty.service.d/override.conf
+
 COPY tcfiles/tc-copyconfig.service /etc/systemd/system/tc-copyconfig.service
 RUN chmod 0644 /etc/systemd/system/tc-copyconfig.service
 RUN systemctl enable tc-copyconfig.service
