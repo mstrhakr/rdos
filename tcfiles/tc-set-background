@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-wallpaper_mode="max"
+wallpaper_mode="fill"
 
 normalize_wallpaper_mode() {
     case "${1,,}" in
