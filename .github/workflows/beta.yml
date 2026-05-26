@@ -198,7 +198,7 @@ jobs:
           git push origin "$TAG"
 
       - name: Create GitHub RC Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.validate-version.outputs.tag }}
           name: RC ${{ needs.validate-version.outputs.version }}-rc.${{ needs.validate-version.outputs.rc_number }}
