@@ -12,69 +12,119 @@ permissions:
   packages: write
 
 jobs:
-  detect-version:
-    name: Detect Version & Auto-Increment Patch
+  detect-release-context:
+    name: Detect Release Context & Version
     runs-on: [self-hosted, linux, rdos-builder]
     if: >-
       github.repository == 'mstrhakr/RDOS' &&
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'master'
+      github.event.workflow_run.repository.full_name == github.repository &&
+      (
+        (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.head_branch != 'master') ||
+        (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'master')
+      )
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
+      channel: ${{ steps.version.outputs.channel }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      artifact_bundle: ${{ steps.version.outputs.artifact_bundle }}
+      release_name: ${{ steps.version.outputs.release_name }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Detect Version & Patch Number
+      - name: Detect Channel, Version, and Tag
         id: version
         run: |
-          # Read major.minor from Version file
-          VERSION_FILE=$(cat Version | tr -d '\n' | tr -d '\r')
-          echo "version_base=$VERSION_FILE"
+          set -euo pipefail
 
-          # Only consider stable tags (vX.Y.Z), not RC tags.
-          LAST_TAG=$(git tag -l "v*" --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || echo "")
-          echo "last_tag=$LAST_TAG"
+          EVENT="${{ github.event.workflow_run.event }}"
+          HEAD_BRANCH="${{ github.event.workflow_run.head_branch }}"
 
-          # If no tags exist, start at patch 0
-          if [[ -z "$LAST_TAG" ]]; then
-            PATCH=0
-            echo "First release, starting at patch 0"
-          else
-            # Extract major.minor from last tag (e.g., v2.3.5 -> 2.3)
-            LAST_MAJOR_MINOR=$(echo "$LAST_TAG" | sed 's/^v//' | cut -d. -f1-2)
+          if [[ "$EVENT" == "pull_request" && "$HEAD_BRANCH" != "master" ]]; then
+            CHANNEL="beta"
+            PRERELEASE="true"
 
-            # Check if Version file changed (major.minor different from last tag)
-            if [[ "$VERSION_FILE" == "$LAST_MAJOR_MINOR" ]]; then
-              # Version unchanged, increment patch
-              LAST_PATCH=$(echo "$LAST_TAG" | rev | cut -d. -f1 | rev)
-              PATCH=$((LAST_PATCH + 1))
-              echo "Version unchanged (${VERSION_FILE}), incrementing patch to $PATCH"
-            else
-              # Version changed, reset patch to 0
-              PATCH=0
-              echo "Version changed (${VERSION_FILE}), resetting patch to 0"
+            git fetch origin master:master
+
+            PR_VERSION=$(tr -d '\n\r' < Version)
+            MASTER_VERSION=$(git show master:Version | tr -d '\n\r')
+
+            PR_MAJOR=$(echo "$PR_VERSION" | cut -d. -f1)
+            PR_MINOR=$(echo "$PR_VERSION" | cut -d. -f2)
+            MASTER_MAJOR=$(echo "$MASTER_VERSION" | cut -d. -f1)
+            MASTER_MINOR=$(echo "$MASTER_VERSION" | cut -d. -f2)
+            MIN_REQUIRED_MINOR=$((MASTER_MINOR + 1))
+
+            if [[ "$PR_MAJOR" -lt "$MASTER_MAJOR" ]]; then
+              echo "PR version major is older than master"
+              exit 1
+            elif [[ "$PR_MAJOR" -eq "$MASTER_MAJOR" ]] && [[ "$PR_MINOR" -lt "$MIN_REQUIRED_MINOR" ]]; then
+              echo "PR version must be at least one minor newer than master"
+              exit 1
             fi
+
+            BASE_VERSION="${PR_VERSION}.0"
+            LAST_RC_TAG=$(git tag -l "v${BASE_VERSION}-rc.*" --sort=-version:refname | head -1 || true)
+
+            if [[ -z "$LAST_RC_TAG" ]]; then
+              RC_NUMBER=1
+            else
+              LAST_RC="${LAST_RC_TAG##*.}"
+              RC_NUMBER=$((LAST_RC + 1))
+            fi
+
+            VERSION="${BASE_VERSION}-rc.${RC_NUMBER}"
+            TAG="v${VERSION}"
+            RELEASE_NAME="RC ${VERSION}"
+          elif [[ "$EVENT" == "push" && "$HEAD_BRANCH" == "master" ]]; then
+            CHANNEL="stable"
+            PRERELEASE="false"
+
+            VERSION_FILE=$(tr -d '\n\r' < Version)
+            LAST_TAG=$(git tag -l "v*" --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+
+            if [[ -z "$LAST_TAG" ]]; then
+              PATCH=0
+            else
+              LAST_MAJOR_MINOR=$(echo "$LAST_TAG" | sed 's/^v//' | cut -d. -f1-2)
+              if [[ "$VERSION_FILE" == "$LAST_MAJOR_MINOR" ]]; then
+                LAST_PATCH="${LAST_TAG##*.}"
+                PATCH=$((LAST_PATCH + 1))
+              else
+                PATCH=0
+              fi
+            fi
+
+            VERSION="${VERSION_FILE}.${PATCH}"
+            TAG="v${VERSION}"
+            RELEASE_NAME="Release ${VERSION}"
+          else
+            echo "Unsupported workflow_run context: event=$EVENT head_branch=$HEAD_BRANCH"
+            exit 1
           fi
-          
-          TAG="v${VERSION_FILE}.${PATCH}"
+
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists; this run would duplicate a release tag."
             exit 1
           fi
 
+          ARTIFACT_BUNDLE="rdos-${CHANNEL}-${VERSION}"
+
           echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "version=${VERSION_FILE}.${PATCH}" >> $GITHUB_OUTPUT
-          echo "Final tag: $TAG"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
+          echo "prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
+          echo "artifact_bundle=$ARTIFACT_BUNDLE" >> $GITHUB_OUTPUT
+          echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
 
   build-and-test:
-    name: Collect Prebuilt Artifacts (for Release)
-    needs: detect-version
+    name: Collect Prebuilt Artifacts
+    needs: detect-release-context
     runs-on: [self-hosted, linux, rdos-builder]
     env:
       RUNNER_ARTIFACT_ROOT: /var/tmp/rdos-artifacts
@@ -83,8 +133,11 @@ jobs:
       github.repository == 'mstrhakr/RDOS' &&
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'master'
+      github.event.workflow_run.repository.full_name == github.repository &&
+      (
+        (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.head_branch != 'master') ||
+        (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'master')
+      )
     steps:
       - name: Fetch artifacts from runner storage
         run: |
@@ -99,7 +152,8 @@ jobs:
       - name: Rename artifacts with version
         id: rename
         run: |
-          VERSION="${{ needs.detect-version.outputs.version }}"
+          set -euo pipefail
+          VERSION="${{ needs.detect-release-context.outputs.version }}"
           RAW_VERSIONED="rdos-prod-${VERSION}.raw.zst"
           ISO_VERSIONED="rdos-installer-${VERSION}.iso"
 
@@ -114,8 +168,10 @@ jobs:
       - name: Generate OTA image and manifest
         run: |
           set -euo pipefail
-          VERSION="${{ needs.detect-version.outputs.version }}"
-          OTA_IMG="rdos-prod-${VERSION}.raw.zst"
+          VERSION="${{ needs.detect-release-context.outputs.version }}"
+          CHANNEL="${{ needs.detect-release-context.outputs.channel }}"
+          OTA_IMG="${{ steps.rename.outputs.prod-raw-zst }}"
+          ISO_VERSIONED="${{ steps.rename.outputs.iso-versioned }}"
 
           echo "Computing SHA256..."
           SHA256=$(sha256sum "$OTA_IMG" | awk '{print $1}')
@@ -124,19 +180,19 @@ jobs:
           cat > manifest.json <<EOF
           {
             "version": "${VERSION}",
-            "channel": "stable",
+            "channel": "${CHANNEL}",
             "sha256": "${SHA256}",
             "artifact": "${OTA_IMG}",
             "min_base": "3.0"
           }
           EOF
 
-          ls -lh "$OTA_IMG" manifest.json
+          ls -lh "$OTA_IMG" "$ISO_VERSIONED" manifest.json
 
       - name: Upload versioned artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rdos-release-${{ needs.detect-version.outputs.version }}
+          name: ${{ needs.detect-release-context.outputs.artifact_bundle }}
           path: |
             rdos-prod-*.raw.zst
             rdos-installer-*.iso
@@ -145,14 +201,17 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    needs: [detect-version, build-and-test]
+    needs: [detect-release-context, build-and-test]
     runs-on: [self-hosted, linux, rdos-builder]
     if: >-
       github.repository == 'mstrhakr/RDOS' &&
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'master'
+      github.event.workflow_run.repository.full_name == github.repository &&
+      (
+        (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.head_branch != 'master') ||
+        (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'master')
+      )
     steps:
       - uses: actions/checkout@v6
         with:
@@ -161,7 +220,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: rdos-release-${{ needs.detect-version.outputs.version }}
+          name: ${{ needs.detect-release-context.outputs.artifact_bundle }}
           path: ./release-artifacts
 
       - name: Create git tag
@@ -169,21 +228,21 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          TAG="${{ needs.detect-version.outputs.tag }}"
+          TAG="${{ needs.detect-release-context.outputs.tag }}"
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "$TAG"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ needs.detect-version.outputs.tag }}
-          name: Release ${{ needs.detect-version.outputs.version }}
+          tag_name: ${{ needs.detect-release-context.outputs.tag }}
+          name: ${{ needs.detect-release-context.outputs.release_name }}
           body: |
-            RDOS Release ${{ needs.detect-version.outputs.version }}
+            RDOS ${{ needs.detect-release-context.outputs.channel }} release ${{ needs.detect-release-context.outputs.version }}
             
-            - **Production Raw (compressed)**: rdos-prod-${{ needs.detect-version.outputs.version }}.raw.zst (OTA update payload)
-            - **Installer ISO**: rdos-installer-${{ needs.detect-version.outputs.version }}.iso (Clonezilla-based installer)
-            - **Manifest**: manifest.json (OTA update metadata with SHA256 checksum)
+            - **Production Raw (compressed)**: rdos-prod-${{ needs.detect-release-context.outputs.version }}.raw.zst (OTA update payload)
+            - **Installer ISO**: rdos-installer-${{ needs.detect-release-context.outputs.version }}.iso (Clonezilla-based installer)
+            - **Manifest**: manifest.json (${{ needs.detect-release-context.outputs.channel }} OTA metadata with SHA256 checksum)
             
             See [docs/building.md](docs/building.md) and [Readme.md](Readme.md) for deployment instructions.
           files: |
@@ -191,6 +250,6 @@ jobs:
             release-artifacts/rdos-installer-*.iso
             release-artifacts/manifest.json
           draft: false
-          prerelease: false
+          prerelease: ${{ needs.detect-release-context.outputs.prerelease == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
