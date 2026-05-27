@@ -80,7 +80,7 @@ run_web_mode() {
     fi
 
     if ! command -v chromium >/dev/null 2>&1; then
-        log "chromium not found; falling back to legacy UI"
+        log "chromium not found; web UI cannot start"
         return 1
     fi
 
@@ -91,7 +91,7 @@ run_web_mode() {
     backend_pid=$!
 
     if ! wait_for_backend; then
-        log "thinclient-go failed to become ready; falling back to legacy UI"
+        log "thinclient-go failed to become ready; web UI cannot start"
         kill "$backend_pid" >/dev/null 2>&1 || true
         wait "$backend_pid" >/dev/null 2>&1 || true
         return 1
@@ -125,6 +125,8 @@ if [ "$mode" = "web" ]; then
     if run_web_mode; then
         exit 0
     fi
+    log "Web mode failed; not loading legacy UI from web boot path"
+    exit 1
 fi
 
 exec /usr/bin/thinclient
