@@ -289,26 +289,24 @@ GRUBCFG
             cat > "$work_dir/boot/EFI/RDOS/grub.cfg" <<'EFI_RDOS_GRUBCFG'
 search --no-floppy --label BOOT --set=root
 set prefix=($root)/grub
-configfile /grub/grub.cfg
+configfile ($root)/grub/grub.cfg
 EFI_RDOS_GRUBCFG
 
             cat > "$work_dir/boot/EFI/BOOT/grub.cfg" <<'EFI_GRUBCFG'
 search --no-floppy --label BOOT --set=root
 set prefix=($root)/grub
-configfile /grub/grub.cfg
+configfile ($root)/grub/grub.cfg
 EFI_GRUBCFG
 
             if [[ -f "$work_dir/boot/EFI/BOOT/BOOTX64.EFI" ]] && [[ ! -f "$work_dir/boot/EFI/RDOS/grubx64.efi" ]]; then
                 cp "$work_dir/boot/EFI/BOOT/BOOTX64.EFI" "$work_dir/boot/EFI/RDOS/grubx64.efi"
             elif [[ -f "$work_dir/boot/EFI/RDOS/grubx64.efi" ]] && [[ ! -f "$work_dir/boot/EFI/BOOT/BOOTX64.EFI" ]]; then
-                cp "$work_dir/boot/EFI/RDOS/grubx64.efi" "$work_dir/boot/EFI/BOOT/BOOTX64.EFI"
+configfile ($root)/grub/grub.cfg
             fi
 
             if [[ ! -f "$work_dir/boot/EFI/BOOT/BOOTX64.EFI" ]] && [[ ! -f "$work_dir/boot/EFI/RDOS/grubx64.efi" ]]; then
                 echo "Warning: EFI GRUB binary was not created in EFI/BOOT or EFI/RDOS" >&2
             fi
-        else
-            echo "Warning: EFI grub-install failed; artifact may not boot on UEFI-only hypervisors" >&2
         fi
     fi
 
