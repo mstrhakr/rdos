@@ -74,7 +74,7 @@ type statusSnapshot struct {
 	Helpdesk      string `json:"helpdesk"`
 	Server        string `json:"server"`
 	Connection    string `json:"connection"`
-	StatusEnabled  string `json:"statusEnabled"`
+	StatusEnabled string `json:"statusEnabled"`
 	WiFiInterface string `json:"wifiInterface"`
 }
 
@@ -158,12 +158,12 @@ func (a *app) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
-		"status":    "ok",
-		"service":   "thinclient-go",
-		"version":   a.version,
-		"bootMode":  a.bootMode,
+		"status":     "ok",
+		"service":    "thinclient-go",
+		"version":    a.version,
+		"bootMode":   a.bootMode,
 		"configPath": a.store.Path(),
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
@@ -290,7 +290,7 @@ func (a *app) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Helpdesk:      strings.TrimSpace(cfg["helpdesk"]),
 		Server:        strings.TrimSpace(cfg["server"]),
 		Connection:    strings.TrimSpace(cfg["network_mode"]),
-		StatusEnabled:  strings.TrimSpace(cfg["status_overlay_enabled"]),
+		StatusEnabled: strings.TrimSpace(cfg["status_overlay_enabled"]),
 		WiFiInterface: strings.TrimSpace(cfg["network_interface"]),
 	})
 }
