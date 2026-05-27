@@ -301,13 +301,15 @@ EFI_GRUBCFG
             if [[ -f "$work_dir/boot/EFI/BOOT/BOOTX64.EFI" ]] && [[ ! -f "$work_dir/boot/EFI/RDOS/grubx64.efi" ]]; then
                 cp "$work_dir/boot/EFI/BOOT/BOOTX64.EFI" "$work_dir/boot/EFI/RDOS/grubx64.efi"
             elif [[ -f "$work_dir/boot/EFI/RDOS/grubx64.efi" ]] && [[ ! -f "$work_dir/boot/EFI/BOOT/BOOTX64.EFI" ]]; then
-configfile ($root)/grub/grub.cfg
+                cp "$work_dir/boot/EFI/RDOS/grubx64.efi" "$work_dir/boot/EFI/BOOT/BOOTX64.EFI"
             fi
 
             if [[ ! -f "$work_dir/boot/EFI/BOOT/BOOTX64.EFI" ]] && [[ ! -f "$work_dir/boot/EFI/RDOS/grubx64.efi" ]]; then
                 echo "Warning: EFI GRUB binary was not created in EFI/BOOT or EFI/RDOS" >&2
             fi
+
         fi
+
     fi
 
     umount "$work_dir/boot"
