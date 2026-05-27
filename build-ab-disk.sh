@@ -356,6 +356,7 @@ mkdir -p "$WORK_DIR/root_a/boot/grub"
 cat > "$WORK_DIR/root_a/boot/grub/grub.cfg" <<'GRUBCFG'
 insmod all_video
 insmod gfxterm
+insmod search_label
 set default="0"
 set timeout=5
 set timeout_style=menu
@@ -435,12 +436,14 @@ if [[ "$SKIP_EFI" == false ]]; then
     mkdir -p "$WORK_DIR/root_a/boot/EFI/RDOS" "$WORK_DIR/root_a/boot/EFI/BOOT"
 
     cat > "$WORK_DIR/root_a/boot/EFI/RDOS/grub.cfg" <<'EFI_GRUBCFG'
+insmod search_label
 search --no-floppy --label --set=esp ESP
 set prefix=($esp)/grub
 configfile ($esp)/grub/grub.cfg
 EFI_GRUBCFG
 
     cat > "$WORK_DIR/root_a/boot/EFI/BOOT/grub.cfg" <<'EFI_FALLBACK_CFG'
+insmod search_label
 search --no-floppy --label --set=esp ESP
 set prefix=($esp)/grub
 configfile ($esp)/grub/grub.cfg

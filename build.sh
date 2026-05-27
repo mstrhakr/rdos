@@ -264,6 +264,7 @@ build_source_raw_image() {
         cat > "$work_dir/boot/grub/grub.cfg" <<'GRUBCFG'
 insmod part_gpt
 insmod fat
+insmod search_label
 
 search --no-floppy --label BOOT --set=root
 
@@ -278,7 +279,17 @@ search --no-floppy --label BOOT --set=root
 }
 GRUBCFG
 
-        if grub-install \
+        if command -v grub-script-check >/dev/null 2>&1; then
+            grub-script-check "$work_dir/boot/grub/grub.cfg"
+        fi
+
+        if command -v grub-mkstandalone >/dev/null 2>&1; then
+            grub-mkstandalone \
+                --format=x86_64-efi \
+                --output="$work_dir/boot/EFI/RDOS/grubx64.efi" \
+                "/boot/grub/grub.cfg=$work_dir/boot/grub/grub.cfg"
+            cp "$work_dir/boot/EFI/RDOS/grubx64.efi" "$work_dir/boot/EFI/BOOT/BOOTX64.EFI"
+        elif grub-install \
             --target=x86_64-efi \
             --boot-directory="$work_dir/boot" \
             --efi-directory="$work_dir/boot" \
@@ -287,12 +298,20 @@ GRUBCFG
             --removable \
             --recheck >/dev/null 2>&1; then
             cat > "$work_dir/boot/EFI/RDOS/grub.cfg" <<'EFI_RDOS_GRUBCFG'
+insmod part_gpt
+insmod fat
+insmod search_label
+
 search --no-floppy --label BOOT --set=root
 set prefix=($root)/grub
 configfile ($root)/grub/grub.cfg
 EFI_RDOS_GRUBCFG
 
             cat > "$work_dir/boot/EFI/BOOT/grub.cfg" <<'EFI_GRUBCFG'
+insmod part_gpt
+insmod fat
+insmod search_label
+
 search --no-floppy --label BOOT --set=root
 set prefix=($root)/grub
 configfile ($root)/grub/grub.cfg
