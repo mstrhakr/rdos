@@ -117,7 +117,9 @@ if ! shopt -oq posix; then
 fi
 
 TTY="$(/usr/bin/tty | sed 's:.*/::')"
-if [[ -z ${DISPLAY} && ( ${TTY} == 'tty1' || ${TTY} == 'console' || ${TTY} == 'ttyS0' ) ]]; then
+# Only auto-launch X on the local primary virtual terminal.
+# Serial/console autologin sessions are kept text-only for troubleshooting.
+if [[ -z ${DISPLAY} && ${TTY} == 'tty1' ]]; then
     unset TTY
     udiskie &
 

@@ -1,0 +1,130 @@
+#!/bin/bash
+set -u
+
+MODE_DEFAULT="web"
+BACKEND_URL="http://127.0.0.1:8080"
+BACKEND_LOG="${HOME}/.thinclient-go.log"
+BROWSER_LOG="${HOME}/.chromium.log"
+
+log() {
+    printf '[tc-ui-launch] %s\n' "$*"
+}
+
+read_mode_from_cmdline() {
+    local token
+    local cmdline
+
+    if [ ! -r /proc/cmdline ]; then
+        return 1
+    fi
+
+    cmdline="$(< /proc/cmdline)"
+    for token in $cmdline; do
+        case "$token" in
+            rdos.ui=web)
+                printf '%s\n' "web"
+                return 0
+                ;;
+            rdos.ui=legacy)
+                printf '%s\n' "legacy"
+                return 0
+                ;;
+        esac
+    done
+
+    return 1
+}
+
+read_mode_from_tcconfig() {
+    local key
+    local value
+    local cfg_path="${HOME}/tcconfig"
+
+    [ -r "$cfg_path" ] || return 1
+
+    while IFS='=' read -r key value || [ -n "$key" ]; do
+        [ -z "$key" ] && continue
+        case "$key" in
+            ui_mode)
+                value="${value#\"}"
+                value="${value%\"}"
+                value="${value,,}"
+                if [ "$value" = "web" ] || [ "$value" = "legacy" ]; then
+                    printf '%s\n' "$value"
+                    return 0
+                fi
+                ;;
+        esac
+    done < "$cfg_path"
+
+    return 1
+}
+
+wait_for_backend() {
+    local i
+    for i in $(seq 1 20); do
+        if curl -fsS "$BACKEND_URL/api/v1/health" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.25
+    done
+    return 1
+}
+
+run_web_mode() {
+    local backend_pid=""
+
+    if ! command -v /usr/bin/thinclient-go >/dev/null 2>&1; then
+        log "thinclient-go not found; falling back to legacy UI"
+        return 1
+    fi
+
+    if ! command -v chromium >/dev/null 2>&1; then
+        log "chromium not found; falling back to legacy UI"
+        return 1
+    fi
+
+    RDOS_UI_LISTEN="127.0.0.1:8080" \
+    RDOS_TCCONFIG="${HOME}/tcconfig" \
+    RDOS_SESSION_LOG="${HOME}/session.log" \
+    /usr/bin/thinclient-go >>"$BACKEND_LOG" 2>&1 &
+    backend_pid=$!
+
+    if ! wait_for_backend; then
+        log "thinclient-go failed to become ready; falling back to legacy UI"
+        kill "$backend_pid" >/dev/null 2>&1 || true
+        wait "$backend_pid" >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    chromium \
+        --kiosk \
+        --app="$BACKEND_URL" \
+        --no-first-run \
+        --disable-session-crashed-bubble \
+        --disable-infobars \
+        --overscroll-history-navigation=0 \
+        --autoplay-policy=no-user-gesture-required \
+        >>"$BROWSER_LOG" 2>&1
+
+    kill "$backend_pid" >/dev/null 2>&1 || true
+    wait "$backend_pid" >/dev/null 2>&1 || true
+    return 0
+}
+
+mode="$MODE_DEFAULT"
+if detected_mode="$(read_mode_from_cmdline 2>/dev/null)"; then
+    mode="$detected_mode"
+elif detected_mode="$(read_mode_from_tcconfig 2>/dev/null)"; then
+    mode="$detected_mode"
+fi
+
+log "Selected mode: $mode"
+
+if [ "$mode" = "web" ]; then
+    if run_web_mode; then
+        exit 0
+    fi
+fi
+
+exec /usr/bin/thinclient

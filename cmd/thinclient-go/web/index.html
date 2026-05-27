@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RDOS Control Surface</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <main class="app" aria-label="RDOS control surface">
+      <header class="topbar">
+        <div class="brand">
+          <p class="eyebrow">RDOS thin client</p>
+          <h1>Control Surface</h1>
+          <p class="subhead">Fullscreen kiosk UI with RDP, WiFi, network, and background controls.</p>
+        </div>
+
+        <div class="status-strip" id="statusPills" aria-live="polite"></div>
+
+        <div class="topbar-actions">
+          <button id="openSettings" class="secondary">Settings</button>
+          <button id="refreshAll" class="secondary">Refresh</button>
+        </div>
+      </header>
+
+      <section class="dashboard">
+        <article class="panel login-panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">RDP</p>
+              <h2>Login</h2>
+            </div>
+            <span class="panel-note">Basics only</span>
+          </div>
+
+          <div class="form-grid two-up">
+            <label>Server<input id="server" placeholder="rdp.example.local" /></label>
+            <label>Domain<input id="domain" placeholder="domain" /></label>
+            <label>Username<input id="username" placeholder="username" /></label>
+            <label>Password<input id="password" type="password" placeholder="password" /></label>
+          </div>
+
+          <div class="actions">
+            <button id="connect">Connect</button>
+            <button id="disconnect" class="secondary">Disconnect</button>
+          </div>
+
+          <div class="status-card" id="sessionState">session: idle</div>
+        </article>
+
+        <article class="panel status-panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">System</p>
+              <h2>Status</h2>
+            </div>
+            <span class="panel-note" id="health">checking service...</span>
+          </div>
+
+          <div class="metrics" id="statusMetrics"></div>
+          <div class="status-card compact" id="configState">configuration not loaded</div>
+        </article>
+
+        <article class="panel network-panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Network</p>
+              <h2>Connections</h2>
+            </div>
+            <span class="panel-note">WiFi and wired</span>
+          </div>
+
+          <div class="network-layout">
+            <div class="network-block">
+              <h3>Wireless</h3>
+              <div class="actions tight">
+                <button id="scanWifi" class="secondary">Scan</button>
+                <button id="openNetworkTab" class="secondary">Open settings</button>
+              </div>
+              <div id="wifiList" class="wifi-list"></div>
+            </div>
+
+            <div class="network-block">
+              <h3>Wired</h3>
+              <div class="status-card compact" id="networkState">network not loaded</div>
+              <div class="actions tight">
+                <button id="loadNetwork" class="secondary">Reload</button>
+                <button id="saveNetwork">Apply</button>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <aside class="modal" id="settingsModal" aria-hidden="true">
+      <div class="modal-surface" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <header class="modal-head">
+          <div>
+            <p class="eyebrow">Settings</p>
+            <h2 id="settingsTitle">Everything the device needs</h2>
+          </div>
+          <button id="closeSettings" class="secondary">Close</button>
+        </header>
+
+        <div class="tabs" id="settingsTabs" role="tablist"></div>
+        <div class="tab-panels" id="settingsPanels"></div>
+
+        <footer class="modal-foot">
+          <div class="modal-foot-note" id="settingsNote">Changes save to tcconfig.</div>
+          <div class="actions tight">
+            <button id="reloadSettings" class="secondary">Reload</button>
+            <button id="saveSettings">Save settings</button>
+          </div>
+        </footer>
+      </div>
+    </aside>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RDOS Thin Client</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <h1>RDOS Control Surface</h1>
+        <p>Thinclient Go + Web UI MVP</p>
+        <div id="health" class="badge">Checking service...</div>
+      </header>
+
+      <section class="card">
+        <h2>Session</h2>
+        <div class="grid two">
+          <label>Server<input id="server" placeholder="rdp.example.local" /></label>
+          <label>Username<input id="username" placeholder="username" /></label>
+          <label>Password<input id="password" type="password" placeholder="password" /></label>
+          <label>Domain<input id="domain" placeholder="domain" /></label>
+        </div>
+        <div class="actions">
+          <button id="connect">Connect</button>
+          <button id="disconnect" class="secondary">Disconnect</button>
+        </div>
+        <pre id="sessionState" class="output">session: idle</pre>
+      </section>
+
+      <section class="card">
+        <h2>Config</h2>
+        <div class="grid two">
+          <label>Server key<input id="cfgServer" placeholder="server" /></label>
+          <label>Helpdesk text<input id="cfgHelpdesk" placeholder="helpdesk" /></label>
+        </div>
+        <div class="actions">
+          <button id="loadConfig" class="secondary">Reload</button>
+          <button id="saveConfig">Save</button>
+        </div>
+        <pre id="configState" class="output">config not loaded</pre>
+      </section>
+
+      <section class="card">
+        <h2>Network</h2>
+        <div class="grid two">
+          <label>Mode
+            <select id="netMode">
+              <option value="dhcp">dhcp</option>
+              <option value="static">static</option>
+            </select>
+          </label>
+          <label>Interface<input id="netInterface" placeholder="eth0" /></label>
+          <label>Address<input id="netAddress" placeholder="192.168.1.10" /></label>
+          <label>Prefix<input id="netPrefix" placeholder="24" /></label>
+          <label>Gateway<input id="netGateway" placeholder="192.168.1.1" /></label>
+          <label>DNS<input id="netDNS" placeholder="1.1.1.1" /></label>
+        </div>
+        <div class="actions">
+          <button id="loadNetwork" class="secondary">Reload</button>
+          <button id="saveNetwork">Save Network</button>
+        </div>
+        <pre id="networkState" class="output">network not loaded</pre>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

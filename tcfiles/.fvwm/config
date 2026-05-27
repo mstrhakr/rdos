@@ -93,12 +93,12 @@ Style "*" PositionPlacement Center
 AddToFunc StartFunction
 + I Module FvwmBacker
 + I Exec exec /usr/bin/tc-set-background
-+ I exec thinclient
++ I exec /usr/bin/tc-ui-launch
 
 ######################## Menus ###################
 DestroyMenu MenuFvwmRoot
 AddToMenu MenuFvwmRoot  " User Friendly Thin Client by Henk.Tech    "             Title
-+                       "&1. Thinclient GUI"             Exec killall thinclient;killall yad;thinclient
++                       "&1. Launch UI"             Exec killall thinclient;killall thinclient-go;killall yad;/usr/bin/tc-ui-launch
 +                       ""              Nop
 +                       "&R. Restart"          Exec systemctl reboot
 +                       "&Q. Shutdown"          Exec systemctl poweroff
