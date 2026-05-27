@@ -8,6 +8,28 @@ case $- in
       *) return;;
 esac
 
+if [ -z "${DISPLAY:-}" ] && [ "$(/usr/bin/tty 2>/dev/null | sed 's:.*/::')" = "tty1" ]; then
+    mode="legacy"
+    if [ -r /proc/cmdline ]; then
+        for token in $(cat /proc/cmdline); do
+            case "$token" in
+                rdos.ui=web)
+                    mode="web"
+                    break
+                    ;;
+                rdos.ui=legacy)
+                    mode="legacy"
+                    break
+                    ;;
+            esac
+        done
+    fi
+
+    if [ "$mode" = "web" ]; then
+        exec /usr/bin/tc-ui-launch
+    fi
+fi
+
 # don't put duplicate lines or lines starting with space in the history.
 # See bash(1) for more options
 HISTCONTROL=ignoreboth
