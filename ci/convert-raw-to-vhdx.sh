@@ -68,7 +68,23 @@ if [[ -f "$OUTPUT_VHDX" ]] && [[ "$FORCE_OVERWRITE" != "1" ]]; then
 fi
 
 if [[ -f "$OUTPUT_VHDX" ]]; then
-  rm -f "$OUTPUT_VHDX"
+  if ! rm -f "$OUTPUT_VHDX" 2>/dev/null; then
+    output_win_path=""
+    if command -v wslpath >/dev/null 2>&1; then
+      output_win_path="$(wslpath -w "$OUTPUT_VHDX" 2>/dev/null || true)"
+    fi
+
+    if [[ -n "$output_win_path" ]] && command -v cmd.exe >/dev/null 2>&1; then
+      cmd.exe /C "del /F /Q \"$output_win_path\"" >/dev/null 2>&1 || true
+    fi
+
+    if [[ -f "$OUTPUT_VHDX" ]]; then
+      echo "Unable to remove existing output: $OUTPUT_VHDX" >&2
+      echo "The file is likely locked by Hyper-V or blocked by Windows ACLs." >&2
+      echo "Detach the disk from any VM, run fixPerms.cmd, then retry." >&2
+      exit 1
+    fi
+  fi
 fi
 
 printf '[%s] Converting %s -> %s\n' "$(date +'%H:%M:%S')" "$INPUT_RAW" "$OUTPUT_VHDX"
