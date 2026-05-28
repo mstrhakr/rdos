@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -51,6 +52,28 @@ type networkInterfacesResponse struct {
 	HasWireless      bool     `json:"hasWireless"`
 	DefaultInterface string   `json:"defaultInterface"`
 	DefaultWireless  string   `json:"defaultWireless"`
+}
+
+type wireguardUSBConfig struct {
+	Path        string `json:"path"`
+	Mount       string `json:"mount"`
+	Filename    string `json:"filename"`
+	Interface   string `json:"interface"`
+	NeedsImport bool   `json:"needsImport"`
+}
+
+type wireguardUSBScanResponse struct {
+	Configs []wireguardUSBConfig `json:"configs"`
+}
+
+type wireguardUSBImportRequest struct {
+	Path string `json:"path"`
+}
+
+type wireguardUSBImportResponse struct {
+	Path      string `json:"path"`
+	Interface string `json:"interface"`
+	Message   string `json:"message"`
 }
 
 type wifiNetwork struct {
@@ -132,6 +155,8 @@ func main() {
 	mux.Handle("/api/v1/config", application.loopbackOnly(http.HandlerFunc(application.handleConfig)))
 	mux.Handle("/api/v1/network", application.loopbackOnly(http.HandlerFunc(application.handleNetwork)))
 	mux.Handle("/api/v1/network/interfaces", application.loopbackOnly(http.HandlerFunc(application.handleNetworkInterfaces)))
+	mux.Handle("/api/v1/wireguard/usb", application.loopbackOnly(http.HandlerFunc(application.handleWireGuardUSBScan)))
+	mux.Handle("/api/v1/wireguard/import", application.loopbackOnly(http.HandlerFunc(application.handleWireGuardUSBImport)))
 	mux.Handle("/api/v1/status", application.loopbackOnly(http.HandlerFunc(application.handleStatus)))
 	mux.Handle("/api/v1/wifi/scan", application.loopbackOnly(http.HandlerFunc(application.handleWifiScan)))
 	mux.Handle("/api/v1/wifi/connect", application.loopbackOnly(http.HandlerFunc(application.handleWifiConnect)))
@@ -343,6 +368,58 @@ func (a *app) handleNetworkInterfaces(w http.ResponseWriter, r *http.Request) {
 		HasWireless:      len(wireless) > 0,
 		DefaultInterface: defaultInterface,
 		DefaultWireless:  defaultWireless,
+	})
+}
+
+func (a *app) handleWireGuardUSBScan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, wireguardUSBScanResponse{Configs: scanWireGuardUSBConfigs()})
+}
+
+func (a *app) handleWireGuardUSBImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	defer r.Body.Close()
+
+	var req wireguardUSBImportRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "invalid json payload", http.StatusBadRequest)
+		return
+	}
+
+	path := strings.TrimSpace(req.Path)
+	if path == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	config, ok := findWireGuardUSBConfig(path)
+	if !ok {
+		http.Error(w, "wireguard config not found on a USB drive", http.StatusNotFound)
+		return
+	}
+
+	cmd := exec.Command("sudo", "-n", "/usr/bin/tc-configure-wireguard", "--from-usb-drive", config.Path)
+	output, err := cmd.CombinedOutput()
+	message := strings.TrimSpace(string(output))
+	if err != nil {
+		if message == "" {
+			message = err.Error()
+		}
+		http.Error(w, "wireguard import failed: "+message, http.StatusBadRequest)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, wireguardUSBImportResponse{
+		Path:      config.Path,
+		Interface: config.Interface,
+		Message:   message,
 	})
 }
 
@@ -747,6 +824,111 @@ func listNetworkInterfaces() ([]string, []string) {
 	sort.Strings(interfaces)
 	sort.Strings(wireless)
 	return interfaces, wireless
+}
+
+func scanWireGuardUSBConfigs() []wireguardUSBConfig {
+	configs := make([]wireguardUSBConfig, 0)
+	for _, mount := range usbMountPoints() {
+		for _, path := range wireGuardConfigsOnMount(mount) {
+			configs = append(configs, newWireGuardUSBConfig(mount, path))
+		}
+	}
+	sort.Slice(configs, func(i, j int) bool {
+		if configs[i].Mount == configs[j].Mount {
+			return configs[i].Filename < configs[j].Filename
+		}
+		return configs[i].Mount < configs[j].Mount
+	})
+	return configs
+}
+
+func findWireGuardUSBConfig(path string) (wireguardUSBConfig, bool) {
+	for _, config := range scanWireGuardUSBConfigs() {
+		if config.Path == path {
+			return config, true
+		}
+	}
+	return wireguardUSBConfig{}, false
+}
+
+func usbMountPoints() []string {
+	cmd := exec.Command("lsblk", "-d", "-o", "NAME,TRAN", "-n")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return []string{}
+	}
+
+	mounts := make([]string, 0)
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[1] != "usb" {
+			continue
+		}
+		device := "/dev/" + fields[0]
+		mountOutput, err := exec.Command("lsblk", "-o", "MOUNTPOINT", "-n", device).CombinedOutput()
+		if err != nil {
+			continue
+		}
+		for _, mount := range strings.Split(strings.TrimSpace(string(mountOutput)), "\n") {
+			mount = strings.TrimSpace(mount)
+			if mount == "" || mount == "/" || mount == "/boot" {
+				continue
+			}
+			mounts = append(mounts, mount)
+		}
+	}
+	return uniqueSortedStrings(mounts)
+}
+
+func wireGuardConfigsOnMount(mount string) []string {
+	configs := make([]string, 0)
+	for _, pattern := range []string{"wg*.conf", "wireguard*.conf"} {
+		matches, _ := filepath.Glob(filepath.Join(mount, pattern))
+		for _, match := range matches {
+			if info, err := os.Stat(match); err == nil && info.Mode().IsRegular() {
+				configs = append(configs, match)
+			}
+		}
+	}
+	return uniqueSortedStrings(configs)
+}
+
+func newWireGuardUSBConfig(mount, path string) wireguardUSBConfig {
+	filename := filepath.Base(path)
+	iface := strings.TrimSuffix(filename, filepath.Ext(filename))
+	destination := filepath.Join("/etc/wireguard", filename)
+	needsImport := true
+	if existing, err := os.ReadFile(destination); err == nil {
+		if source, err := os.ReadFile(path); err == nil && bytes.Equal(existing, source) {
+			needsImport = false
+		}
+	}
+
+	return wireguardUSBConfig{
+		Path:        path,
+		Mount:       mount,
+		Filename:    filename,
+		Interface:   iface,
+		NeedsImport: needsImport,
+	}
+}
+
+func uniqueSortedStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		filtered = append(filtered, value)
+	}
+	sort.Strings(filtered)
+	return filtered
 }
 
 func applyNetworkFromConfig(configPath string) string {

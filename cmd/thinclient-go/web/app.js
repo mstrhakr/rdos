@@ -176,6 +176,7 @@ const appState = {
   session: null,
   status: null,
   wifiNetworks: [],
+  wireguardUSBConfigs: [],
   activeTab: "connection",
 };
 
@@ -376,6 +377,44 @@ function renderWifiRows(containerId) {
   });
 }
 
+function renderWireGuardUSBRows(containerId) {
+  const target = document.getElementById(containerId);
+  if (!target) {
+    return;
+  }
+
+  if (!appState.wireguardUSBConfigs.length) {
+    target.innerHTML = '<div class="status-card">No WireGuard tunnel configs were found on mounted USB drives.</div>';
+    return;
+  }
+
+  target.innerHTML = appState.wireguardUSBConfigs
+    .map((config) => {
+      const actionLabel = config.needsImport ? "Import" : "Installed";
+      const disabled = config.needsImport ? "" : "disabled";
+      return `
+        <div class="wifi-row">
+          <div>
+            <div class="wifi-name">${escapeHtml(config.filename)}</div>
+            <div class="wifi-meta">${escapeHtml(config.interface)} • ${escapeHtml(config.mount)}</div>
+          </div>
+          <span class="wifi-meta">${config.needsImport ? "Ready" : "Up to date"}</span>
+          <button type="button" data-wireguard-path="${escapeHtml(config.path)}" ${disabled}>${actionLabel}</button>
+        </div>
+      `;
+    })
+    .join("");
+
+  target.querySelectorAll("button[data-wireguard-path]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const path = button.getAttribute("data-wireguard-path") || "";
+      if (path) {
+        importWireGuardUSB(path);
+      }
+    });
+  });
+}
+
 function buildField(field) {
   const currentValue = valueForKey(field.key);
   if (field.type === "checkbox") {
@@ -477,6 +516,15 @@ function renderSettingsPanels() {
                 </div>
                 <div id="settingsWifiList" class="wifi-list"></div>
               </section>
+
+              <section class="tab-card wifi-connect">
+                <h3>WireGuard from USB</h3>
+                <div class="status-card">Insert a USB drive containing a <strong>wg*.conf</strong> tunnel file, then scan for it here.</div>
+                <div class="actions tight">
+                  <button type="button" id="scanWireGuardUsb" class="secondary">Scan USB</button>
+                </div>
+                <div id="wireguardUsbList" class="wifi-list"></div>
+              </section>
             </div>
           </div>
         </section>
@@ -507,6 +555,7 @@ function renderSettingsPanels() {
   syncNetworkFields();
   syncInterfaceFields();
   renderWifiRows("settingsWifiList");
+  renderWireGuardUSBRows("wireguardUsbList");
 }
 
 function attachSettingsActions() {
@@ -537,6 +586,12 @@ function attachSettingsActions() {
     refreshNetworkAdaptersButton.addEventListener("click", async () => {
       await refreshNetworkInterfaces();
     });
+  }
+
+  const scanWireGuardUsbButton = document.getElementById("scanWireGuardUsb");
+  if (scanWireGuardUsbButton && !scanWireGuardUsbButton.dataset.bound) {
+    scanWireGuardUsbButton.dataset.bound = "1";
+    scanWireGuardUsbButton.addEventListener("click", () => refreshWireGuardUSB());
   }
 }
 
@@ -683,6 +738,7 @@ function bindModalActions() {
     await refreshConfig();
     await refreshNetwork();
     await refreshNetworkInterfaces();
+    await refreshWireGuardUSB();
     renderSettingsPanels();
   });
   document.getElementById("saveSettings")?.addEventListener("click", saveSettings);
@@ -751,6 +807,17 @@ async function refreshNetwork() {
   }
 }
 
+async function refreshWireGuardUSB() {
+  try {
+    const payload = await api("/api/v1/wireguard/usb");
+    appState.wireguardUSBConfigs = payload.configs || [];
+    renderWireGuardUSBRows("wireguardUsbList");
+  } catch (err) {
+    appState.wireguardUSBConfigs = [];
+    updateText("wireguardUsbList", `wireguard scan error: ${err.message}`);
+  }
+}
+
 async function refreshNetworkInterfaces() {
   try {
     const payload = await api("/api/v1/network/interfaces");
@@ -794,7 +861,7 @@ async function refreshWifi() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces()]);
+  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces(), refreshWireGuardUSB()]);
   await refreshWifi();
 }
 
@@ -900,6 +967,18 @@ async function scanWifi() {
     const message = `wifi scan error: ${err.message}`;
     updateText("wifiList", message);
     updateText("settingsWifiList", message);
+  }
+}
+
+async function importWireGuardUSB(path) {
+  try {
+    updateText("settingsNote", "Importing WireGuard config from USB...");
+    const payload = await api("/api/v1/wireguard/import", "POST", { path });
+    updateText("settingsNote", `Imported ${payload.interface || payload.path}.`);
+    await refreshWireGuardUSB();
+    await refreshStatus();
+  } catch (err) {
+    updateText("settingsNote", `wireguard import error: ${err.message}`);
   }
 }
 
