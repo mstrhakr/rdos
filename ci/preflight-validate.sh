@@ -281,6 +281,28 @@ else
   fi
 fi
 
+info "Running Go tests"
+if command -v go >/dev/null 2>&1; then
+  ok "go command present"
+  go_test_packages=(
+    "./cmd/thinclient-go"
+    "./internal/bootmode"
+    "./internal/session"
+    "./internal/tcconfig"
+  )
+  if go test "${go_test_packages[@]}"; then
+    ok "go tests passed"
+  else
+    fail "go tests failed"
+  fi
+else
+  if [[ "$MODE" == "ci" ]]; then
+    fail "go command is required in ci mode"
+  else
+    warn "go command not installed; skipping go tests"
+  fi
+fi
+
 info "Checking for CRLF in Linux-consumed scripts"
 for file in "${shell_files[@]}"; do
   if [[ ! -f "$file" ]]; then
