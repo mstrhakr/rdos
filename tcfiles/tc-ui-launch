@@ -10,6 +10,22 @@ log() {
     printf '[tc-ui-launch] %s\n' "$*"
 }
 
+warn() {
+    printf '[tc-ui-launch] WARNING: %s\n' "$*" >&2
+}
+
+find_chromium() {
+    if command -v chromium >/dev/null 2>&1; then
+        command -v chromium
+        return 0
+    fi
+    if command -v chromium-browser >/dev/null 2>&1; then
+        command -v chromium-browser
+        return 0
+    fi
+    return 1
+}
+
 read_mode_from_cmdline() {
     local token
     local cmdline
@@ -62,26 +78,36 @@ read_mode_from_tcconfig() {
 
 wait_for_backend() {
     local i
-    for i in $(seq 1 20); do
+    for i in $(seq 1 120); do
         if curl -fsS "$BACKEND_URL/api/v1/health" >/dev/null 2>&1; then
             return 0
         fi
-        sleep 0.25
+        sleep 0.5
     done
     return 1
 }
 
 run_web_mode() {
     local backend_pid=""
+    local chromium_bin=""
+    local use_no_sandbox="0"
+    local chromium_rc="0"
 
     if ! command -v /usr/bin/thinclient-go >/dev/null 2>&1; then
         log "thinclient-go not found; falling back to legacy UI"
         return 1
     fi
 
-    if ! command -v chromium >/dev/null 2>&1; then
+    if ! chromium_bin="$(find_chromium)"; then
         log "chromium not found; web UI cannot start"
         return 1
+    fi
+
+    if [ "${RDOS_UI_CHROMIUM_NO_SANDBOX:-}" = "1" ]; then
+        use_no_sandbox="1"
+    elif [ ! -e /proc/sys/kernel/unprivileged_userns_clone ] || [ "$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || printf '1')" != "1" ]; then
+        # Some hardened kernels disable unprivileged namespaces, which Chromium sandbox needs.
+        use_no_sandbox="1"
     fi
 
     RDOS_UI_LISTEN="127.0.0.1:8080" \
@@ -91,25 +117,57 @@ run_web_mode() {
     backend_pid=$!
 
     if ! wait_for_backend; then
-        log "thinclient-go failed to become ready; web UI cannot start"
+        warn "thinclient-go failed to become ready at ${BACKEND_URL}"
+        if [ -s "$BACKEND_LOG" ]; then
+            warn "Recent backend log:" 
+            tail -n 40 "$BACKEND_LOG" >&2 || true
+        fi
         kill "$backend_pid" >/dev/null 2>&1 || true
         wait "$backend_pid" >/dev/null 2>&1 || true
         return 1
     fi
 
-    chromium \
-        --kiosk \
-        --app="$BACKEND_URL" \
-        --no-first-run \
-        --disable-session-crashed-bubble \
-        --disable-infobars \
-        --overscroll-history-navigation=0 \
-        --autoplay-policy=no-user-gesture-required \
-        >>"$BROWSER_LOG" 2>&1
+    if [ "$use_no_sandbox" = "1" ]; then
+        warn "Launching Chromium with --no-sandbox for kernel compatibility"
+        "$chromium_bin" \
+            --kiosk \
+            --app="$BACKEND_URL" \
+            --no-first-run \
+            --disable-session-crashed-bubble \
+            --disable-infobars \
+            --overscroll-history-navigation=0 \
+            --autoplay-policy=no-user-gesture-required \
+            --disable-gpu \
+            --disable-dev-shm-usage \
+            --no-sandbox \
+            >>"$BROWSER_LOG" 2>&1
+        chromium_rc=$?
+    else
+        "$chromium_bin" \
+            --kiosk \
+            --app="$BACKEND_URL" \
+            --no-first-run \
+            --disable-session-crashed-bubble \
+            --disable-infobars \
+            --overscroll-history-navigation=0 \
+            --autoplay-policy=no-user-gesture-required \
+            --disable-gpu \
+            --disable-dev-shm-usage \
+            >>"$BROWSER_LOG" 2>&1
+        chromium_rc=$?
+    fi
+
+    if [ "$chromium_rc" -ne 0 ]; then
+        warn "Chromium exited with status ${chromium_rc}"
+        if [ -s "$BROWSER_LOG" ]; then
+            warn "Recent Chromium log:"
+            tail -n 60 "$BROWSER_LOG" >&2 || true
+        fi
+    fi
 
     kill "$backend_pid" >/dev/null 2>&1 || true
     wait "$backend_pid" >/dev/null 2>&1 || true
-    return 0
+    return "$chromium_rc"
 }
 
 mode="$MODE_DEFAULT"
