@@ -165,6 +165,13 @@ const SETTINGS_TABS = [
 const appState = {
   config: {},
   network: null,
+  networkInterfaces: {
+    interfaces: [],
+    wireless: [],
+    hasWireless: false,
+    defaultInterface: "",
+    defaultWireless: "",
+  },
   health: null,
   session: null,
   status: null,
@@ -234,6 +241,45 @@ function renderCornerClock() {
   }
   const source = appState.status?.time ? new Date(appState.status.time) : new Date();
   target.textContent = source.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function networkInterfaceOptionsMarkup() {
+  const all = appState.networkInterfaces.interfaces || [];
+  const selected = appState.network?.interface || appState.networkInterfaces.defaultInterface || "";
+  const options = ['<option value="">Automatic</option>'];
+  all.forEach((iface) => {
+    const isSelected = iface === selected ? " selected" : "";
+    options.push(`<option value="${escapeHtml(iface)}"${isSelected}>${escapeHtml(iface)}</option>`);
+  });
+  return options.join("");
+}
+
+function wifiInterfaceOptionsMarkup() {
+  const wireless = appState.networkInterfaces.wireless || [];
+  const selected = appState.networkInterfaces.defaultWireless || appState.status?.wifiInterface || "";
+  if (wireless.length === 0) {
+    return '<option value="">No wireless adapter detected</option>';
+  }
+  return wireless
+    .map((iface) => `<option value="${escapeHtml(iface)}"${iface === selected ? " selected" : ""}>${escapeHtml(iface)}</option>`)
+    .join("");
+}
+
+function syncInterfaceFields() {
+  const networkInterface = document.getElementById("networkInterface");
+  if (networkInterface) {
+    networkInterface.innerHTML = networkInterfaceOptionsMarkup();
+    const selected = appState.network?.interface || appState.networkInterfaces.defaultInterface || "";
+    networkInterface.value = selected;
+  }
+
+  const wifiInterface = document.getElementById("wifiInterface");
+  if (wifiInterface) {
+    wifiInterface.innerHTML = wifiInterfaceOptionsMarkup();
+    wifiInterface.disabled = !appState.networkInterfaces.hasWireless;
+    const selectedWifi = appState.networkInterfaces.defaultWireless || wifiInterface.value || "";
+    wifiInterface.value = selectedWifi;
+  }
 }
 
 function renderPills() {
@@ -417,13 +463,16 @@ function renderSettingsPanels() {
               <section class="tab-card wifi-connect">
                 <h3>WiFi connection</h3>
                 <div class="form-grid">
-                  <label>Interface<input id="wifiInterface" type="text" placeholder="wlan0" value="${escapeHtml(appState.status?.wifiInterface || "")}" /></label>
+                  <label>Interface
+                    <select id="wifiInterface">${wifiInterfaceOptionsMarkup()}</select>
+                  </label>
                   <label>SSID<input id="wifiSSID" type="text" placeholder="WiFi network" /></label>
                   <label>Password<input id="wifiPassword" type="password" placeholder="password" /></label>
                   <label class="switch-row"><input id="wifiHidden" type="checkbox" /> <span>Hidden network</span></label>
                 </div>
                 <div class="actions tight">
                   <button type="button" id="scanWifiSettings" class="secondary">Scan WiFi</button>
+                  <button type="button" id="refreshWifiInterfaces" class="secondary">Refresh adapters</button>
                   <button type="button" id="applyWifi">Connect WiFi</button>
                 </div>
                 <div id="settingsWifiList" class="wifi-list"></div>
@@ -456,6 +505,7 @@ function renderSettingsPanels() {
   attachNetworkActions();
   syncConfigFields();
   syncNetworkFields();
+  syncInterfaceFields();
   renderWifiRows("settingsWifiList");
 }
 
@@ -470,6 +520,23 @@ function attachSettingsActions() {
   if (applyButton && !applyButton.dataset.bound) {
     applyButton.dataset.bound = "1";
     applyButton.addEventListener("click", () => connectWifi());
+  }
+
+  const refreshWifiAdaptersButton = document.getElementById("refreshWifiInterfaces");
+  if (refreshWifiAdaptersButton && !refreshWifiAdaptersButton.dataset.bound) {
+    refreshWifiAdaptersButton.dataset.bound = "1";
+    refreshWifiAdaptersButton.addEventListener("click", async () => {
+      await refreshNetworkInterfaces();
+      await scanWifi();
+    });
+  }
+
+  const refreshNetworkAdaptersButton = document.getElementById("refreshNetworkInterfaces");
+  if (refreshNetworkAdaptersButton && !refreshNetworkAdaptersButton.dataset.bound) {
+    refreshNetworkAdaptersButton.dataset.bound = "1";
+    refreshNetworkAdaptersButton.addEventListener("click", async () => {
+      await refreshNetworkInterfaces();
+    });
   }
 }
 
@@ -544,6 +611,7 @@ function syncNetworkFields() {
     }
   });
 
+  syncInterfaceFields();
   updateNetworkModeUI();
 }
 
@@ -576,13 +644,16 @@ function buildNetworkForm() {
             <option value="static">Static IPv4</option>
           </select>
         </label>
-        <label>Interface<input id="networkInterface" type="text" placeholder="eth0" /></label>
+        <label>Interface
+          <select id="networkInterface">${networkInterfaceOptionsMarkup()}</select>
+        </label>
         <label>Address<input id="networkAddress" type="text" placeholder="192.168.1.10" /></label>
         <label>Prefix<input id="networkPrefix" type="number" placeholder="24" /></label>
         <label>Gateway<input id="networkGateway" type="text" placeholder="192.168.1.1" /></label>
         <label>DNS<input id="networkDNS" type="text" placeholder="1.1.1.1 8.8.8.8" /></label>
       </div>
       <div class="actions tight">
+        <button type="button" id="refreshNetworkInterfaces" class="secondary">Refresh adapters</button>
         <button type="button" id="refreshNetworkSettings" class="secondary">Reload</button>
         <button type="button" id="applyNetworkSettings">Apply wired settings</button>
       </div>
@@ -611,6 +682,7 @@ function bindModalActions() {
   document.getElementById("reloadSettings")?.addEventListener("click", async () => {
     await refreshConfig();
     await refreshNetwork();
+    await refreshNetworkInterfaces();
     renderSettingsPanels();
   });
   document.getElementById("saveSettings")?.addEventListener("click", saveSettings);
@@ -679,6 +751,22 @@ async function refreshNetwork() {
   }
 }
 
+async function refreshNetworkInterfaces() {
+  try {
+    const payload = await api("/api/v1/network/interfaces");
+    appState.networkInterfaces = {
+      interfaces: payload.interfaces || [],
+      wireless: payload.wireless || [],
+      hasWireless: Boolean(payload.hasWireless),
+      defaultInterface: payload.defaultInterface || "",
+      defaultWireless: payload.defaultWireless || "",
+    };
+    syncInterfaceFields();
+  } catch (err) {
+    updateText("settingsNote", `interface refresh error: ${err.message}`);
+  }
+}
+
 async function refreshStatus() {
   try {
     appState.status = await api("/api/v1/status");
@@ -706,7 +794,8 @@ async function refreshWifi() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshWifi()]);
+  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces()]);
+  await refreshWifi();
 }
 
 async function connectSession() {
@@ -775,6 +864,12 @@ async function saveNetwork() {
     dns: document.getElementById("networkDNS")?.value.trim() || "",
   };
 
+  if (payload.mode === "static" && !payload.interface) {
+    updateText("networkState", "network save error: static mode requires interface");
+    updateText("settingsNote", "Select a specific interface for static IPv4.");
+    return;
+  }
+
   try {
     const saved = await api("/api/v1/network", "POST", payload);
     appState.network = saved;
@@ -789,7 +884,11 @@ async function saveNetwork() {
 
 async function scanWifi() {
   try {
-    const interfaceValue = document.getElementById("wifiInterface")?.value.trim() || "";
+    const interfaceValue = document.getElementById("wifiInterface")?.value.trim() || appState.networkInterfaces.defaultWireless || "";
+    if (!interfaceValue && appState.networkInterfaces.hasWireless) {
+      updateText("settingsNote", "No wireless adapter selected.");
+      return;
+    }
     const query = interfaceValue ? `?interface=${encodeURIComponent(interfaceValue)}` : "";
     const payload = await api(`/api/v1/wifi/scan${query}`);
     appState.wifiNetworks = payload.networks || [];
@@ -805,12 +904,18 @@ async function scanWifi() {
 }
 
 async function connectWifi() {
+  const selectedInterface = document.getElementById("wifiInterface")?.value.trim() || appState.networkInterfaces.defaultWireless || "";
   const payload = {
-    interface: document.getElementById("wifiInterface")?.value.trim() || "",
+    interface: selectedInterface,
     ssid: document.getElementById("wifiSSID")?.value.trim() || "",
     password: document.getElementById("wifiPassword")?.value || "",
     hidden: Boolean(document.getElementById("wifiHidden")?.checked),
   };
+
+  if (!payload.interface) {
+    updateText("settingsNote", "Select a wireless adapter before connecting.");
+    return;
+  }
 
   try {
     await api("/api/v1/wifi/connect", "POST", payload);

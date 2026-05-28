@@ -45,6 +45,14 @@ type networkSettingsResponse struct {
 	ApplyMessage string `json:"applyMessage,omitempty"`
 }
 
+type networkInterfacesResponse struct {
+	Interfaces       []string `json:"interfaces"`
+	Wireless         []string `json:"wireless"`
+	HasWireless      bool     `json:"hasWireless"`
+	DefaultInterface string   `json:"defaultInterface"`
+	DefaultWireless  string   `json:"defaultWireless"`
+}
+
 type wifiNetwork struct {
 	SSID      string `json:"ssid"`
 	Signal    string `json:"signal"`
@@ -123,6 +131,7 @@ func main() {
 	mux.Handle("/api/v1/health", application.loopbackOnly(http.HandlerFunc(application.handleHealth)))
 	mux.Handle("/api/v1/config", application.loopbackOnly(http.HandlerFunc(application.handleConfig)))
 	mux.Handle("/api/v1/network", application.loopbackOnly(http.HandlerFunc(application.handleNetwork)))
+	mux.Handle("/api/v1/network/interfaces", application.loopbackOnly(http.HandlerFunc(application.handleNetworkInterfaces)))
 	mux.Handle("/api/v1/status", application.loopbackOnly(http.HandlerFunc(application.handleStatus)))
 	mux.Handle("/api/v1/wifi/scan", application.loopbackOnly(http.HandlerFunc(application.handleWifiScan)))
 	mux.Handle("/api/v1/wifi/connect", application.loopbackOnly(http.HandlerFunc(application.handleWifiConnect)))
@@ -304,6 +313,39 @@ func (a *app) handleStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *app) handleNetworkInterfaces(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	interfaces, wireless := listNetworkInterfaces()
+
+	a.mu.Lock()
+	cfg := cloneConfig(a.config)
+	a.mu.Unlock()
+
+	defaultInterface := strings.TrimSpace(cfg["network_interface"])
+	defaultWireless := ""
+	for _, iface := range wireless {
+		if iface == defaultInterface {
+			defaultWireless = iface
+			break
+		}
+	}
+	if defaultWireless == "" && len(wireless) > 0 {
+		defaultWireless = wireless[0]
+	}
+
+	respondJSON(w, http.StatusOK, networkInterfacesResponse{
+		Interfaces:       interfaces,
+		Wireless:         wireless,
+		HasWireless:      len(wireless) > 0,
+		DefaultInterface: defaultInterface,
+		DefaultWireless:  defaultWireless,
+	})
+}
+
 func (a *app) handleWifiScan(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -347,6 +389,14 @@ func (a *app) handleWifiConnect(w http.ResponseWriter, r *http.Request) {
 	var req wifiConnectRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 		http.Error(w, "invalid json payload", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Interface) == "" {
+		http.Error(w, "interface is required", http.StatusBadRequest)
+		return
+	}
+	if !isSafeInterfaceName(strings.TrimSpace(req.Interface)) {
+		http.Error(w, "invalid interface", http.StatusBadRequest)
 		return
 	}
 	if strings.TrimSpace(req.SSID) == "" {
@@ -649,8 +699,17 @@ func validateNetworkSettings(s networkSettings) error {
 		return errors.New("network mode must be 'dhcp' or 'static'")
 	}
 
+	iface := strings.TrimSpace(s.Interface)
+	if iface != "" && !isSafeInterfaceName(iface) {
+		return errors.New("invalid interface")
+	}
+
 	if mode == "dhcp" {
 		return nil
+	}
+
+	if iface == "" {
+		return errors.New("static mode requires interface")
 	}
 
 	if strings.TrimSpace(s.Address) == "" {
@@ -661,6 +720,33 @@ func validateNetworkSettings(s networkSettings) error {
 	}
 
 	return nil
+}
+
+func listNetworkInterfaces() ([]string, []string) {
+	entries, err := os.ReadDir("/sys/class/net")
+	if err != nil {
+		return []string{}, []string{}
+	}
+
+	interfaces := make([]string, 0, len(entries))
+	wireless := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == "" || name == "lo" {
+			continue
+		}
+		interfaces = append(interfaces, name)
+		if info, err := os.Stat(filepath.Join("/sys/class/net", name, "wireless")); err == nil && info.IsDir() {
+			wireless = append(wireless, name)
+		}
+	}
+
+	sort.Strings(interfaces)
+	sort.Strings(wireless)
+	return interfaces, wireless
 }
 
 func applyNetworkFromConfig(configPath string) string {
