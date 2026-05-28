@@ -60,6 +60,48 @@ type otaStatusResponse struct {
 	CanRollback       bool   `json:"canRollback"`
 }
 
+type otaReleaseEntry struct {
+	Tag         string `json:"tag"`
+	Name        string `json:"name"`
+	PublishedAt string `json:"publishedAt"`
+	Prerelease  bool   `json:"prerelease"`
+}
+
+type otaReleasesResponse struct {
+	Channel  string            `json:"channel"`
+	Releases []otaReleaseEntry `json:"releases"`
+}
+
+type otaUpdateRequest struct {
+	Tag string `json:"tag"`
+}
+
+type otaUpdateResponse struct {
+	Message string            `json:"message"`
+	Tag     string            `json:"tag,omitempty"`
+	Status  otaStatusResponse `json:"status"`
+}
+
+type githubReleaseAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+type githubRelease struct {
+	TagName     string               `json:"tag_name"`
+	Name        string               `json:"name"`
+	Draft       bool                 `json:"draft"`
+	Prerelease  bool                 `json:"prerelease"`
+	PublishedAt string               `json:"published_at"`
+	Assets      []githubReleaseAsset `json:"assets"`
+}
+
+const (
+	otaGitHubReleasesAPI = "https://api.github.com/repos/mstrhakr/rdos/releases"
+	otaDefaultLimit      = 10
+	otaMaxLimit          = 20
+)
+
 type networkInterfacesResponse struct {
 	Interfaces       []string `json:"interfaces"`
 	Wireless         []string `json:"wireless"`
@@ -140,6 +182,8 @@ type app struct {
 
 var otaLookPath = exec.LookPath
 var otaExecCommand = exec.Command
+var otaFetchReleases = fetchOTAReleases
+var otaHTTPClient = &http.Client{Timeout: 20 * time.Second}
 
 func main() {
 	listenAddr := flag.String("listen", envOrDefault("RDOS_UI_LISTEN", "127.0.0.1:8080"), "web server listen address")
@@ -173,6 +217,8 @@ func main() {
 	mux.Handle("/api/v1/network", application.loopbackOnly(http.HandlerFunc(application.handleNetwork)))
 	mux.Handle("/api/v1/network/interfaces", application.loopbackOnly(http.HandlerFunc(application.handleNetworkInterfaces)))
 	mux.Handle("/api/v1/ota", application.loopbackOnly(http.HandlerFunc(application.handleOTAStatus)))
+	mux.Handle("/api/v1/ota/releases", application.loopbackOnly(http.HandlerFunc(application.handleOTAReleases)))
+	mux.Handle("/api/v1/ota/update", application.loopbackOnly(http.HandlerFunc(application.handleOTAUpdate)))
 	mux.Handle("/api/v1/ota/rollback", application.loopbackOnly(http.HandlerFunc(application.handleOTARollback)))
 	mux.Handle("/api/v1/wireguard/usb", application.loopbackOnly(http.HandlerFunc(application.handleWireGuardUSBScan)))
 	mux.Handle("/api/v1/wireguard/import", application.loopbackOnly(http.HandlerFunc(application.handleWireGuardUSBImport)))
@@ -368,6 +414,101 @@ func (a *app) handleOTAStatus(w http.ResponseWriter, r *http.Request) {
 	a.mu.Unlock()
 
 	respondJSON(w, http.StatusOK, otaStatusFromConfig(cfg))
+}
+
+func (a *app) handleOTAReleases(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	limit := otaDefaultLimit
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		parsedLimit, err := strconv.Atoi(rawLimit)
+		if err != nil || parsedLimit < 1 || parsedLimit > otaMaxLimit {
+			http.Error(w, "limit must be between 1 and 20", http.StatusBadRequest)
+			return
+		}
+		limit = parsedLimit
+	}
+
+	a.mu.Lock()
+	cfg := cloneConfig(a.config)
+	a.mu.Unlock()
+
+	channel := otaChannelFromConfig(cfg)
+	releases, err := otaFetchReleases(channel, limit)
+	if err != nil {
+		http.Error(w, "failed to fetch releases: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, otaReleasesResponse{
+		Channel:  channel,
+		Releases: releases,
+	})
+}
+
+func (a *app) handleOTAUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	defer r.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+
+	var req otaUpdateRequest
+	if strings.TrimSpace(string(body)) != "" {
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, "invalid json payload", http.StatusBadRequest)
+			return
+		}
+	}
+
+	tag := strings.TrimSpace(req.Tag)
+	if tag != "" && !isValidOTATag(tag) {
+		http.Error(w, "invalid tag", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := otaLookPath("sudo"); err != nil {
+		http.Error(w, "update unavailable: sudo not found", http.StatusInternalServerError)
+		return
+	}
+
+	args := []string{"-n", "/usr/bin/tc-ota-updater", "--manual"}
+	if tag != "" {
+		args = append(args, "--tag", tag)
+	}
+
+	cmd := otaExecCommand("sudo", args...)
+	output, err := cmd.CombinedOutput()
+	message := strings.TrimSpace(string(output))
+	if err != nil {
+		if message == "" {
+			message = err.Error()
+		}
+		http.Error(w, "update failed: "+message, http.StatusBadRequest)
+		return
+	}
+	if message == "" {
+		message = "OTA update started"
+	}
+
+	a.mu.Lock()
+	cfg := cloneConfig(a.config)
+	a.mu.Unlock()
+
+	respondJSON(w, http.StatusAccepted, otaUpdateResponse{
+		Message: message,
+		Tag:     tag,
+		Status:  otaStatusFromConfig(cfg),
+	})
 }
 
 func (a *app) handleOTARollback(w http.ResponseWriter, r *http.Request) {
@@ -922,6 +1063,121 @@ func defaultString(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func otaChannelFromConfig(cfg map[string]string) string {
+	channel := strings.ToLower(strings.TrimSpace(defaultString(cfg["ota_channel"], "stable")))
+	if channel == "beta" {
+		return "beta"
+	}
+	return "stable"
+}
+
+func fetchOTAReleases(channel string, limit int) ([]otaReleaseEntry, error) {
+	if limit < 1 {
+		limit = otaDefaultLimit
+	}
+	if limit > otaMaxLimit {
+		limit = otaMaxLimit
+	}
+
+	perPage := limit * 4
+	if perPage < 20 {
+		perPage = 20
+	}
+	if perPage > 100 {
+		perPage = 100
+	}
+
+	req, err := http.NewRequest(http.MethodGet, otaGitHubReleasesAPI+"?per_page="+strconv.Itoa(perPage), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "rdos-thinclient-go")
+
+	resp, err := otaHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return nil, errors.New("github api returned " + resp.Status + ": " + strings.TrimSpace(string(body)))
+	}
+
+	var releases []githubRelease
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&releases); err != nil {
+		return nil, err
+	}
+
+	filtered := make([]otaReleaseEntry, 0, limit)
+	for _, release := range releases {
+		if len(filtered) >= limit {
+			break
+		}
+		if release.Draft {
+			continue
+		}
+		if !otaReleaseMatchesChannel(release, channel) {
+			continue
+		}
+		if !otaReleaseHasRequiredAssets(release) {
+			continue
+		}
+
+		name := strings.TrimSpace(release.Name)
+		if name == "" {
+			name = strings.TrimSpace(release.TagName)
+		}
+
+		filtered = append(filtered, otaReleaseEntry{
+			Tag:         strings.TrimSpace(release.TagName),
+			Name:        name,
+			PublishedAt: strings.TrimSpace(release.PublishedAt),
+			Prerelease:  release.Prerelease,
+		})
+	}
+
+	return filtered, nil
+}
+
+func otaReleaseMatchesChannel(release githubRelease, channel string) bool {
+	tag := strings.ToLower(strings.TrimSpace(release.TagName))
+	isRC := strings.Contains(tag, "-rc.")
+	if channel == "beta" {
+		return release.Prerelease || isRC
+	}
+	return !release.Prerelease && !isRC
+}
+
+func otaReleaseHasRequiredAssets(release githubRelease) bool {
+	hasManifest := false
+	hasImage := false
+	for _, asset := range release.Assets {
+		switch strings.TrimSpace(asset.Name) {
+		case "manifest.json":
+			hasManifest = true
+		case "rdos-prod.raw.zst":
+			hasImage = true
+		}
+	}
+	return hasManifest && hasImage
+}
+
+func isValidOTATag(tag string) bool {
+	tag = strings.TrimSpace(tag)
+	if tag == "" || !strings.HasPrefix(tag, "v") {
+		return false
+	}
+	for _, r := range tag {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_' || r == '+' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func networkSettingsFromConfig(cfg map[string]string) networkSettings {

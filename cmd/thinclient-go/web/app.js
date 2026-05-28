@@ -191,6 +191,8 @@ const appState = {
   },
   health: null,
   ota: null,
+  otaReleases: [],
+  selectedOtaTag: "",
   session: null,
   status: null,
   wifiNetworks: [],
@@ -494,6 +496,16 @@ function buildOTAPanel(tab) {
   const currentVersion = ota?.currentVersion || "unknown";
   const inactiveVersion = ota?.inactiveVersion || "unknown";
   const recovery = ota?.pendingRecovery ? "pending" : "clear";
+  const releases = appState.otaReleases || [];
+  const selectedTag = appState.selectedOtaTag || releases[0]?.tag || "";
+  const releaseOptions = releases.length
+    ? releases
+        .map((release) => {
+          const label = `${release.tag}${release.prerelease ? " (beta)" : ""}${release.publishedAt ? ` - ${release.publishedAt.slice(0, 10)}` : ""}`;
+          return `<option value="${escapeHtml(release.tag)}"${release.tag === selectedTag ? " selected" : ""}>${escapeHtml(label)}</option>`;
+        })
+        .join("")
+    : "<option value=\"\">No releases available</option>";
 
   return `
     <section class="tab-panel ${tab.id === appState.activeTab ? "active" : ""}" data-panel-id="${tab.id}" role="tabpanel">
@@ -515,8 +527,16 @@ function buildOTAPanel(tab) {
               <label>Current version<input type="text" value="${escapeHtml(currentVersion)}" readonly /></label>
               <label>Inactive version<input type="text" value="${escapeHtml(inactiveVersion)}" readonly /></label>
             </div>
+            <h3>Available releases</h3>
+            <div class="form-grid">
+              <label>Target release
+                <select id="otaReleaseTag">${releaseOptions}</select>
+              </label>
+            </div>
             <div class="actions tight">
               <button type="button" id="refreshOTAStatus" class="secondary">Refresh OTA</button>
+              <button type="button" id="refreshOTAReleases" class="secondary">Refresh releases</button>
+              <button type="button" id="runOTAUpdate" ${selectedTag ? "" : "disabled"}>Update to selected</button>
               <button type="button" id="runOTARollback" ${ota?.canRollback ? "" : "disabled"}>Rollback to previous slot</button>
             </div>
           </section>
@@ -661,6 +681,26 @@ function attachSettingsActions() {
   if (refreshOTAButton && !refreshOTAButton.dataset.bound) {
     refreshOTAButton.dataset.bound = "1";
     refreshOTAButton.addEventListener("click", () => refreshOTA());
+  }
+
+  const refreshOTAReleasesButton = document.getElementById("refreshOTAReleases");
+  if (refreshOTAReleasesButton && !refreshOTAReleasesButton.dataset.bound) {
+    refreshOTAReleasesButton.dataset.bound = "1";
+    refreshOTAReleasesButton.addEventListener("click", () => refreshOTAReleases());
+  }
+
+  const otaReleaseTag = document.getElementById("otaReleaseTag");
+  if (otaReleaseTag && !otaReleaseTag.dataset.bound) {
+    otaReleaseTag.dataset.bound = "1";
+    otaReleaseTag.addEventListener("change", () => {
+      appState.selectedOtaTag = otaReleaseTag.value;
+    });
+  }
+
+  const runOTAUpdateButton = document.getElementById("runOTAUpdate");
+  if (runOTAUpdateButton && !runOTAUpdateButton.dataset.bound) {
+    runOTAUpdateButton.dataset.bound = "1";
+    runOTAUpdateButton.addEventListener("click", () => triggerOTAUpdate());
   }
 
   const rollbackButton = document.getElementById("runOTARollback");
@@ -931,6 +971,23 @@ async function refreshOTA() {
   }
 }
 
+async function refreshOTAReleases() {
+  try {
+    const payload = await api("/api/v1/ota/releases?limit=10");
+    appState.otaReleases = payload.releases || [];
+    const knownTags = new Set(appState.otaReleases.map((release) => release.tag));
+    if (!appState.selectedOtaTag || !knownTags.has(appState.selectedOtaTag)) {
+      appState.selectedOtaTag = appState.otaReleases[0]?.tag || "";
+    }
+    renderSettingsPanels();
+  } catch (err) {
+    appState.otaReleases = [];
+    appState.selectedOtaTag = "";
+    updateText("settingsNote", `release refresh error: ${err.message}`);
+    renderSettingsPanels();
+  }
+}
+
 async function refreshWifi() {
   try {
     const payload = await api("/api/v1/wifi/scan");
@@ -946,8 +1003,28 @@ async function refreshWifi() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces(), refreshWireGuardUSB(), refreshOTA()]);
+  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces(), refreshWireGuardUSB(), refreshOTA(), refreshOTAReleases()]);
   await refreshWifi();
+}
+
+async function triggerOTAUpdate() {
+  const selectedTag = appState.selectedOtaTag || document.getElementById("otaReleaseTag")?.value || "";
+  if (!selectedTag) {
+    updateText("settingsNote", "Select a release first.");
+    return;
+  }
+
+  try {
+    updateText("settingsNote", `Starting OTA update to ${selectedTag}...`);
+    const payload = await api("/api/v1/ota/update", "POST", { tag: selectedTag });
+    if (payload?.status) {
+      appState.ota = payload.status;
+      renderSettingsPanels();
+    }
+    updateText("settingsNote", payload?.message || `Update to ${selectedTag} started.`);
+  } catch (err) {
+    updateText("settingsNote", `update error: ${err.message}`);
+  }
 }
 
 async function triggerOTARollback() {

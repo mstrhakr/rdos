@@ -11,6 +11,8 @@ This document describes the first implementation slice for the RDOS Go backend a
   - `GET /api/v1/config`
   - `POST /api/v1/config`
   - `GET /api/v1/ota`
+  - `GET /api/v1/ota/releases`
+  - `POST /api/v1/ota/update`
   - `POST /api/v1/ota/rollback`
   - `GET /api/v1/session`
   - `POST /api/v1/session/connect`
@@ -32,13 +34,13 @@ This document describes the first implementation slice for the RDOS Go backend a
 
 - No systemd unit wiring yet
 - No kiosk browser launch integration yet
-- No manual update execution or timer control yet
+- No OTA timer control yet
 - No replacement of existing shell UI path yet
 - No separate app-layer updater; RDOS stays on a single deployable version with A/B image rollback for platform updates
 
 ## Next parity target
 
-- OTA management is the next feature-parity gap to close: network, WiFi, and WireGuard surfaces are already present in `thinclient-go`, and the first OTA slice now covers live slot status plus rollback entry, but update execution and timer control are still missing.
+- OTA timer management is the next feature-parity gap: release listing, selected-version OTA staging, and rollback are now exposed in the web UI, but timer/service scheduling controls are still missing.
 
 ## Local run
 
@@ -52,5 +54,5 @@ Then open `http://127.0.0.1:8080`.
 
 - API access is restricted to loopback clients in this MVP.
 - This service is additive and does not modify current RDOS startup behavior.
-- OTA status and rollback are now exposed in the web settings UI, but update execution and timer management still remain to be wired.
+- OTA status, recent release selection, targeted OTA staging, and rollback are now exposed in the web settings UI.
 - Platform update flow remains A/B image based; the web UI is not a second independently versioned application.

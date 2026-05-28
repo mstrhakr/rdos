@@ -353,6 +353,175 @@ func TestHandleOTAStatusRejectsWrongMethod(t *testing.T) {
 	}
 }
 
+func TestHandleOTAReleasesRejectsWrongMethod(t *testing.T) {
+	t.Parallel()
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/releases", strings.NewReader(`{}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAReleases(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandleOTAReleasesReturnsResults(t *testing.T) {
+	oldFetchReleases := otaFetchReleases
+	t.Cleanup(func() {
+		otaFetchReleases = oldFetchReleases
+	})
+
+	otaFetchReleases = func(channel string, limit int) ([]otaReleaseEntry, error) {
+		if channel != "beta" {
+			t.Fatalf("channel = %q, want beta", channel)
+		}
+		if limit != 5 {
+			t.Fatalf("limit = %d, want 5", limit)
+		}
+		return []otaReleaseEntry{{Tag: "v1.2.3-rc.1", Name: "v1.2.3-rc.1", Prerelease: true}}, nil
+	}
+
+	a := &app{config: map[string]string{"ota_channel": "beta"}}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ota/releases?limit=5", nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAReleases(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var payload otaReleasesResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if payload.Channel != "beta" {
+		t.Fatalf("channel = %q, want beta", payload.Channel)
+	}
+	if len(payload.Releases) != 1 || payload.Releases[0].Tag != "v1.2.3-rc.1" {
+		t.Fatalf("unexpected releases: %+v", payload.Releases)
+	}
+}
+
+func TestHandleOTAUpdateRejectsWrongMethod(t *testing.T) {
+	t.Parallel()
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ota/update", nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAUpdate(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandleOTAUpdateRejectsInvalidTag(t *testing.T) {
+	t.Parallel()
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/update", strings.NewReader(`{"tag":"../bad"}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAUpdate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleOTAUpdateReturnsUnavailableWithoutSudo(t *testing.T) {
+	oldLookPath := otaLookPath
+	t.Cleanup(func() {
+		otaLookPath = oldLookPath
+	})
+	otaLookPath = func(file string) (string, error) {
+		return "", errors.New("missing")
+	}
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/update", strings.NewReader(`{"tag":"v1.2.3"}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAUpdate(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestHandleOTAUpdateReturnsAcceptedOnSuccess(t *testing.T) {
+	oldLookPath := otaLookPath
+	oldExecCommand := otaExecCommand
+	t.Cleanup(func() {
+		otaLookPath = oldLookPath
+		otaExecCommand = oldExecCommand
+	})
+
+	otaLookPath = func(file string) (string, error) {
+		return "/usr/bin/sudo", nil
+	}
+	otaExecCommand = fakeExecCommand(t, 0, "ota staging complete")
+
+	a := &app{config: map[string]string{"ota_channel": "stable"}}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/update", strings.NewReader(`{"tag":"v1.2.3"}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAUpdate(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusAccepted)
+	}
+
+	var payload otaUpdateResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if payload.Tag != "v1.2.3" {
+		t.Fatalf("tag = %q, want v1.2.3", payload.Tag)
+	}
+	if payload.Message != "ota staging complete" {
+		t.Fatalf("message = %q, want ota staging complete", payload.Message)
+	}
+}
+
+func TestHandleOTAUpdateReturnsBadRequestOnFailure(t *testing.T) {
+	oldLookPath := otaLookPath
+	oldExecCommand := otaExecCommand
+	t.Cleanup(func() {
+		otaLookPath = oldLookPath
+		otaExecCommand = oldExecCommand
+	})
+
+	otaLookPath = func(file string) (string, error) {
+		return "/usr/bin/sudo", nil
+	}
+	otaExecCommand = fakeExecCommand(t, 1, "manifest channel mismatch")
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/update", strings.NewReader(`{"tag":"v1.2.3"}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAUpdate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(w.Body.String(), "manifest channel mismatch") {
+		t.Fatalf("body = %q, want update failure detail", w.Body.String())
+	}
+}
+
 func TestHandleOTARollbackRejectsWrongMethod(t *testing.T) {
 	t.Parallel()
 
@@ -369,8 +538,6 @@ func TestHandleOTARollbackRejectsWrongMethod(t *testing.T) {
 }
 
 func TestHandleOTARollbackReturnsUnavailableWithoutSudo(t *testing.T) {
-	t.Parallel()
-
 	oldLookPath := otaLookPath
 	t.Cleanup(func() {
 		otaLookPath = oldLookPath
@@ -392,8 +559,6 @@ func TestHandleOTARollbackReturnsUnavailableWithoutSudo(t *testing.T) {
 }
 
 func TestHandleOTARollbackReturnsAcceptedOnSuccess(t *testing.T) {
-	t.Parallel()
-
 	oldLookPath := otaLookPath
 	oldExecCommand := otaExecCommand
 	t.Cleanup(func() {
@@ -434,8 +599,6 @@ func TestHandleOTARollbackReturnsAcceptedOnSuccess(t *testing.T) {
 }
 
 func TestHandleOTARollbackReturnsBadRequestOnFailure(t *testing.T) {
-	t.Parallel()
-
 	oldLookPath := otaLookPath
 	oldExecCommand := otaExecCommand
 	t.Cleanup(func() {
