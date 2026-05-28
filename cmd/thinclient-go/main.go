@@ -40,6 +40,11 @@ type networkSettings struct {
 	DNS       string `json:"dns"`
 }
 
+type networkSettingsResponse struct {
+	networkSettings
+	ApplyMessage string `json:"applyMessage,omitempty"`
+}
+
 type wifiNetwork struct {
 	SSID      string `json:"ssid"`
 	Signal    string `json:"signal"`
@@ -260,7 +265,11 @@ func (a *app) handleNetwork(w http.ResponseWriter, r *http.Request) {
 		a.config = updated
 		a.mu.Unlock()
 
-		respondJSON(w, http.StatusOK, networkSettingsFromConfig(updated))
+		applyMessage := applyNetworkFromConfig(a.store.Path())
+		respondJSON(w, http.StatusOK, networkSettingsResponse{
+			networkSettings: networkSettingsFromConfig(updated),
+			ApplyMessage:    applyMessage,
+		})
 		return
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -301,16 +310,29 @@ func (a *app) handleWifiScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cmd := exec.Command("sudo", "-n", "/usr/bin/tc-scan-wifi")
+	iface := strings.TrimSpace(r.URL.Query().Get("interface"))
+	if iface != "" {
+		if !isSafeInterfaceName(iface) {
+			http.Error(w, "invalid interface", http.StatusBadRequest)
+			return
+		}
+	}
+
+	args := []string{"-n", "/usr/bin/tc-scan-wifi"}
+	if iface != "" {
+		args = append(args, iface)
+	}
+
+	cmd := exec.Command("sudo", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		http.Error(w, "wifi scan failed: "+strings.TrimSpace(string(output)), http.StatusBadRequest)
 		return
 	}
 
-	networks := parseWifiScanOutput(string(output), "")
+	networks := parseWifiScanOutput(string(output), iface)
 	respondJSON(w, http.StatusOK, map[string]any{
-		"interface": "",
+		"interface": iface,
 		"networks":  networks,
 	})
 }
@@ -547,6 +569,19 @@ func boolText(value string, trueText, falseText string) string {
 	}
 }
 
+func isSafeInterfaceName(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' || r == ':' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func parseWifiScanOutput(output string, iface string) []wifiNetwork {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	networksBySSID := map[string]wifiNetwork{}
@@ -626,6 +661,29 @@ func validateNetworkSettings(s networkSettings) error {
 	}
 
 	return nil
+}
+
+func applyNetworkFromConfig(configPath string) string {
+	if _, err := exec.LookPath("sudo"); err != nil {
+		return "network saved; live apply unavailable (sudo not found)"
+	}
+
+	cmd := exec.Command("sudo", "-n", "/usr/bin/tc-configure-network", "--apply-tcconfig", configPath, "--reload")
+	output, err := cmd.CombinedOutput()
+	message := strings.TrimSpace(string(output))
+	if err != nil {
+		if message == "" {
+			message = err.Error()
+		}
+		log.Printf("network live apply failed: %s", message)
+		return "network saved; live apply failed: " + message
+	}
+
+	if message == "" {
+		return "network saved and applied"
+	}
+
+	return "network saved and applied: " + message
 }
 
 func logRequests(next http.Handler) http.Handler {

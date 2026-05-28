@@ -176,6 +176,15 @@ const settingsFieldKeys = SETTINGS_TABS.flatMap((tab) =>
   tab.cards.flatMap((card) => (card.fields || []).map((field) => field.key)),
 );
 
+const NETWORK_CONFIG_KEYS = new Set([
+  "network_mode",
+  "network_interface",
+  "static_address",
+  "static_prefix",
+  "static_gateway",
+  "static_dns",
+]);
+
 function api(path, method = "GET", body) {
   return fetch(path, {
     method,
@@ -216,6 +225,15 @@ function updateText(id, value) {
   if (element) {
     element.textContent = value;
   }
+}
+
+function renderCornerClock() {
+  const target = document.getElementById("cornerClock");
+  if (!target) {
+    return;
+  }
+  const source = appState.status?.time ? new Date(appState.status.time) : new Date();
+  target.textContent = source.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function renderPills() {
@@ -386,33 +404,45 @@ function renderSettingsPanels() {
   ).join("");
 
   panelsTarget.innerHTML = SETTINGS_TABS.map((tab) => {
+    if (tab.id === "network") {
+      return `
+        <section class="tab-panel ${tab.id === appState.activeTab ? "active" : ""}" data-panel-id="${tab.id}" role="tabpanel">
+          <div class="status-card">${escapeHtml(tab.title)}</div>
+          <div class="tab-panel-grid">
+            <div class="tab-column">
+              <div class="status-card">${escapeHtml(tab.subtitle)}</div>
+              ${buildNetworkForm()}
+            </div>
+            <div class="tab-column">
+              <section class="tab-card wifi-connect">
+                <h3>WiFi connection</h3>
+                <div class="form-grid">
+                  <label>Interface<input id="wifiInterface" type="text" placeholder="wlan0" value="${escapeHtml(appState.status?.wifiInterface || "")}" /></label>
+                  <label>SSID<input id="wifiSSID" type="text" placeholder="WiFi network" /></label>
+                  <label>Password<input id="wifiPassword" type="password" placeholder="password" /></label>
+                  <label class="switch-row"><input id="wifiHidden" type="checkbox" /> <span>Hidden network</span></label>
+                </div>
+                <div class="actions tight">
+                  <button type="button" id="scanWifiSettings" class="secondary">Scan WiFi</button>
+                  <button type="button" id="applyWifi">Connect WiFi</button>
+                </div>
+                <div id="settingsWifiList" class="wifi-list"></div>
+              </section>
+            </div>
+          </div>
+        </section>
+      `;
+    }
+
     const cardsMarkup = tab.cards.filter((card) => !card.custom).map((card) => buildCard(card)).join("");
     const intro = `<div class="status-card">${escapeHtml(tab.subtitle)}</div>`;
-    const wifiBlock = tab.id === "network"
-      ? `
-        <section class="tab-card wifi-connect">
-          <h3>WiFi connection</h3>
-          <div class="form-grid">
-            <label>Interface<input id="wifiInterface" type="text" placeholder="wlan0" value="${escapeHtml(appState.status?.wifiInterface || valueForKey("network_interface"))}" /></label>
-            <label>SSID<input id="wifiSSID" type="text" placeholder="WiFi network" /></label>
-            <label>Password<input id="wifiPassword" type="password" placeholder="password" /></label>
-            <label class="switch-row"><input id="wifiHidden" type="checkbox" /> <span>Hidden network</span></label>
-          </div>
-          <div class="actions tight">
-            <button type="button" id="scanWifiSettings" class="secondary">Scan WiFi</button>
-            <button type="button" id="applyWifi">Connect WiFi</button>
-          </div>
-          <div id="settingsWifiList" class="wifi-list"></div>
-        </section>
-      `
-      : "";
 
     return `
       <section class="tab-panel ${tab.id === appState.activeTab ? "active" : ""}" data-panel-id="${tab.id}" role="tabpanel">
         <div class="status-card">${escapeHtml(tab.title)}</div>
         <div class="tab-panel-grid">
           <div class="tab-column">${intro}${cardsMarkup}</div>
-          <div class="tab-column">${wifiBlock}</div>
+          <div class="tab-column"></div>
         </div>
       </section>
     `;
@@ -455,6 +485,14 @@ function attachNetworkActions() {
     refreshNetworkButton.dataset.bound = "1";
     refreshNetworkButton.addEventListener("click", () => refreshNetwork());
   }
+
+  const networkMode = document.getElementById("networkMode");
+  if (networkMode && !networkMode.dataset.bound) {
+    networkMode.dataset.bound = "1";
+    networkMode.addEventListener("change", updateNetworkModeUI);
+  }
+
+  updateNetworkModeUI();
 }
 
 function setActiveTab(tabId) {
@@ -505,6 +543,26 @@ function syncNetworkFields() {
       element.value = value;
     }
   });
+
+  updateNetworkModeUI();
+}
+
+function updateNetworkModeUI() {
+  const modeElement = document.getElementById("networkMode");
+  const staticFields = ["networkAddress", "networkPrefix", "networkGateway", "networkDNS"];
+  if (!modeElement) {
+    return;
+  }
+
+  const isStatic = (modeElement.value || "dhcp") === "static";
+  staticFields.forEach((id) => {
+    const field = document.getElementById(id);
+    if (!field) {
+      return;
+    }
+    field.disabled = !isStatic;
+    field.setAttribute("aria-disabled", isStatic ? "false" : "true");
+  });
 }
 
 function buildNetworkForm() {
@@ -528,6 +586,7 @@ function buildNetworkForm() {
         <button type="button" id="refreshNetworkSettings" class="secondary">Reload</button>
         <button type="button" id="applyNetworkSettings">Apply wired settings</button>
       </div>
+      <div class="status-card compact" id="networkState">network not loaded</div>
     </section>
   `;
 }
@@ -625,8 +684,10 @@ async function refreshStatus() {
     appState.status = await api("/api/v1/status");
     renderPills();
     renderMetrics();
+    renderCornerClock();
   } catch (err) {
     updateText("configState", `status error: ${err.message}`);
+    renderCornerClock();
   }
 }
 
@@ -679,7 +740,7 @@ function collectConfigValues() {
   const values = {};
   document.querySelectorAll("[data-config-key]").forEach((field) => {
     const key = field.getAttribute("data-config-key");
-    if (!key || !settingsFieldKeys.includes(key)) {
+    if (!key || !settingsFieldKeys.includes(key) || NETWORK_CONFIG_KEYS.has(key)) {
       return;
     }
     if (field.type === "checkbox") {
@@ -718,8 +779,9 @@ async function saveNetwork() {
     const saved = await api("/api/v1/network", "POST", payload);
     appState.network = saved;
     syncNetworkFields();
-    updateText("networkState", JSON.stringify(saved, null, 2));
-    updateText("settingsNote", "Wired network saved.");
+    const applyMessage = saved?.applyMessage || "Wired network saved.";
+    updateText("networkState", `${applyMessage}\n${JSON.stringify(saved, null, 2)}`);
+    updateText("settingsNote", applyMessage);
   } catch (err) {
     updateText("networkState", `network save error: ${err.message}`);
   }
@@ -876,10 +938,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   bindMainActions();
   bindModalActions();
   wireGlobalShortcuts();
+  renderCornerClock();
 
   await refreshAll();
   await scanWifi();
   renderSettingsPanels();
+  setInterval(renderCornerClock, 1000);
   setInterval(refreshSession, 5000);
   setInterval(refreshStatus, 7000);
   setInterval(refreshHealth, 15000);
