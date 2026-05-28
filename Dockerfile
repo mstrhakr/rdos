@@ -167,6 +167,7 @@ COPY tcfiles/systemd-resolved.conf /etc/tmpfiles.d/systemd-resolved.conf
 RUN systemctl enable systemd-networkd.service systemd-resolved.service
 
 COPY tcfiles/xorg.conf /etc/X11/xorg.conf.d/thinclient.conf
+COPY tcfiles/Xwrapper.config /etc/X11/Xwrapper.config
 
 #This line is for pipewire, because pipewire has limited mic support its currently replaced with pulseaudio
 #Pulseaudio has the auto switch behavior by default
