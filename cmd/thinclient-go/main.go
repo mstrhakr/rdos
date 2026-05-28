@@ -46,6 +46,20 @@ type networkSettingsResponse struct {
 	ApplyMessage string `json:"applyMessage,omitempty"`
 }
 
+type otaStatusResponse struct {
+	AutoUpdateEnabled bool   `json:"autoUpdateEnabled"`
+	Channel           string `json:"channel"`
+	MaintenanceWindow string `json:"maintenanceWindow"`
+	CurrentSlot       string `json:"currentSlot"`
+	PreviousSlot      string `json:"previousSlot"`
+	BootTries         string `json:"bootTries"`
+	PendingRecovery   bool   `json:"pendingRecovery"`
+	CurrentVersion    string `json:"currentVersion"`
+	InactiveVersion   string `json:"inactiveVersion"`
+	GrubenvPath       string `json:"grubenvPath"`
+	CanRollback       bool   `json:"canRollback"`
+}
+
 type networkInterfacesResponse struct {
 	Interfaces       []string `json:"interfaces"`
 	Wireless         []string `json:"wireless"`
@@ -124,6 +138,9 @@ type app struct {
 	config map[string]string
 }
 
+var otaLookPath = exec.LookPath
+var otaExecCommand = exec.Command
+
 func main() {
 	listenAddr := flag.String("listen", envOrDefault("RDOS_UI_LISTEN", "127.0.0.1:8080"), "web server listen address")
 	tcconfigPath := flag.String("tcconfig", envOrDefault("RDOS_TCCONFIG", "/home/thinclient/tcconfig"), "path to tcconfig")
@@ -155,6 +172,8 @@ func main() {
 	mux.Handle("/api/v1/config", application.loopbackOnly(http.HandlerFunc(application.handleConfig)))
 	mux.Handle("/api/v1/network", application.loopbackOnly(http.HandlerFunc(application.handleNetwork)))
 	mux.Handle("/api/v1/network/interfaces", application.loopbackOnly(http.HandlerFunc(application.handleNetworkInterfaces)))
+	mux.Handle("/api/v1/ota", application.loopbackOnly(http.HandlerFunc(application.handleOTAStatus)))
+	mux.Handle("/api/v1/ota/rollback", application.loopbackOnly(http.HandlerFunc(application.handleOTARollback)))
 	mux.Handle("/api/v1/wireguard/usb", application.loopbackOnly(http.HandlerFunc(application.handleWireGuardUSBScan)))
 	mux.Handle("/api/v1/wireguard/import", application.loopbackOnly(http.HandlerFunc(application.handleWireGuardUSBImport)))
 	mux.Handle("/api/v1/status", application.loopbackOnly(http.HandlerFunc(application.handleStatus)))
@@ -335,6 +354,51 @@ func (a *app) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Connection:    strings.TrimSpace(cfg["network_mode"]),
 		StatusEnabled: strings.TrimSpace(cfg["status_overlay_enabled"]),
 		WiFiInterface: strings.TrimSpace(cfg["network_interface"]),
+	})
+}
+
+func (a *app) handleOTAStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	a.mu.Lock()
+	cfg := cloneConfig(a.config)
+	a.mu.Unlock()
+
+	respondJSON(w, http.StatusOK, otaStatusFromConfig(cfg))
+}
+
+func (a *app) handleOTARollback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if _, err := otaLookPath("sudo"); err != nil {
+		http.Error(w, "rollback unavailable: sudo not found", http.StatusInternalServerError)
+		return
+	}
+
+	cmd := otaExecCommand("sudo", "-n", "/usr/bin/tc-ota-rollback")
+	output, err := cmd.CombinedOutput()
+	message := strings.TrimSpace(string(output))
+	if err != nil {
+		if message == "" {
+			message = err.Error()
+		}
+		http.Error(w, "rollback failed: "+message, http.StatusBadRequest)
+		return
+	}
+
+	a.mu.Lock()
+	cfg := cloneConfig(a.config)
+	a.mu.Unlock()
+
+	respondJSON(w, http.StatusAccepted, map[string]any{
+		"message": message,
+		"status":  otaStatusFromConfig(cfg),
 	})
 }
 
@@ -743,6 +807,121 @@ func detectBootMode() string {
 		return bootmode.ModeWeb
 	}
 	return bootmode.Resolve(string(cmdline), bootmode.ModeWeb)
+}
+
+func otaStatusFromConfig(cfg map[string]string) otaStatusResponse {
+	grubenvPath := resolveGrubenvPath()
+	grubenvValues := map[string]string{}
+	if grubenvPath != "" {
+		grubenvValues = readGrubEnvValues(grubenvPath)
+	}
+
+	currentSlot := strings.TrimSpace(grubenvValues["current_slot"])
+	previousSlot := strings.TrimSpace(grubenvValues["previous_slot"])
+	bootTries := strings.TrimSpace(grubenvValues["boot_tries"])
+	pendingRecovery := boolValue(grubenvValues["pending_recovery"], false)
+	inactiveSlot := ""
+	switch currentSlot {
+	case "a":
+		inactiveSlot = "b"
+	case "b":
+		inactiveSlot = "a"
+	}
+
+	currentVersion := readSlotVersion(currentSlot)
+	if currentVersion == "" {
+		currentVersion = readVersion()
+	}
+	inactiveVersion := readSlotVersion(inactiveSlot)
+
+	return otaStatusResponse{
+		AutoUpdateEnabled: boolValue(cfg["auto_update_enabled"], true),
+		Channel:           strings.TrimSpace(defaultString(cfg["ota_channel"], "stable")),
+		MaintenanceWindow: strings.TrimSpace(cfg["maintenance_window"]),
+		CurrentSlot:       currentSlot,
+		PreviousSlot:      previousSlot,
+		BootTries:         bootTries,
+		PendingRecovery:   pendingRecovery,
+		CurrentVersion:    currentVersion,
+		InactiveVersion:   inactiveVersion,
+		GrubenvPath:       grubenvPath,
+		CanRollback:       currentSlot != "" && previousSlot != "" && currentSlot != previousSlot,
+	}
+}
+
+func resolveGrubenvPath() string {
+	for _, candidate := range []string{"/boot/grub/grubenv", "/boot/efi/grub/grubenv", "/efi/grub/grubenv"} {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func readGrubEnvValues(path string) map[string]string {
+	values := map[string]string{}
+	if path == "" {
+		return values
+	}
+	if _, err := exec.LookPath("grub-editenv"); err != nil {
+		return values
+	}
+
+	output, err := exec.Command("grub-editenv", path, "list").CombinedOutput()
+	if err != nil {
+		return values
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		idx := strings.IndexRune(line, '=')
+		if idx <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		value := strings.TrimSpace(line[idx+1:])
+		values[key] = value
+	}
+
+	return values
+}
+
+func readSlotVersion(slot string) string {
+	slot = strings.TrimSpace(slot)
+	if slot == "" {
+		return ""
+	}
+
+	for _, candidate := range []string{filepath.Join("/boot/slots", slot+"-version")} {
+		if b, err := os.ReadFile(candidate); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+
+	return ""
+}
+
+func boolValue(value string, defaultValue bool) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	case "":
+		return defaultValue
+	default:
+		return defaultValue
+	}
+}
+
+func defaultString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func networkSettingsFromConfig(cfg map[string]string) networkSettings {

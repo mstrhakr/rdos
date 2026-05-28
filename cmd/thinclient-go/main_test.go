@@ -2,10 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -284,6 +287,209 @@ func TestHandleNetworkPostRejectsInvalidPayload(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
+}
+
+func TestOTAStatusFromConfigDefaults(t *testing.T) {
+	t.Parallel()
+
+	status := otaStatusFromConfig(map[string]string{})
+
+	if !status.AutoUpdateEnabled {
+		t.Fatal("auto update should default to enabled")
+	}
+	if status.Channel != "stable" {
+		t.Fatalf("channel = %q, want stable", status.Channel)
+	}
+	if status.PendingRecovery {
+		t.Fatal("pending recovery should default to false")
+	}
+}
+
+func TestHandleOTAStatusReturnsConfigValues(t *testing.T) {
+	t.Parallel()
+
+	a := &app{config: map[string]string{
+		"auto_update_enabled": "false",
+		"ota_channel":         "beta",
+		"maintenance_window":  "03:30",
+	}}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ota", nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAStatus(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var payload otaStatusResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if payload.AutoUpdateEnabled {
+		t.Fatal("auto update should reflect config value false")
+	}
+	if payload.Channel != "beta" {
+		t.Fatalf("channel = %q, want beta", payload.Channel)
+	}
+	if payload.MaintenanceWindow != "03:30" {
+		t.Fatalf("maintenance window = %q, want 03:30", payload.MaintenanceWindow)
+	}
+}
+
+func TestHandleOTAStatusRejectsWrongMethod(t *testing.T) {
+	t.Parallel()
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota", strings.NewReader(`{}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAStatus(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandleOTARollbackRejectsWrongMethod(t *testing.T) {
+	t.Parallel()
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ota/rollback", nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTARollback(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandleOTARollbackReturnsUnavailableWithoutSudo(t *testing.T) {
+	t.Parallel()
+
+	oldLookPath := otaLookPath
+	t.Cleanup(func() {
+		otaLookPath = oldLookPath
+	})
+	otaLookPath = func(file string) (string, error) {
+		return "", errors.New("missing")
+	}
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/rollback", strings.NewReader(`{}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTARollback(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestHandleOTARollbackReturnsAcceptedOnSuccess(t *testing.T) {
+	t.Parallel()
+
+	oldLookPath := otaLookPath
+	oldExecCommand := otaExecCommand
+	t.Cleanup(func() {
+		otaLookPath = oldLookPath
+		otaExecCommand = oldExecCommand
+	})
+
+	otaLookPath = func(file string) (string, error) {
+		return "/usr/bin/sudo", nil
+	}
+	otaExecCommand = fakeExecCommand(t, 0, "rollback queued")
+
+	a := &app{config: map[string]string{"ota_channel": "beta"}}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/rollback", strings.NewReader(`{}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTARollback(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusAccepted)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if payload["message"] != "rollback queued" {
+		t.Fatalf("message = %v, want rollback queued", payload["message"])
+	}
+	status, ok := payload["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("status payload missing: %v", payload["status"])
+	}
+	if status["channel"] != "beta" {
+		t.Fatalf("channel = %v, want beta", status["channel"])
+	}
+}
+
+func TestHandleOTARollbackReturnsBadRequestOnFailure(t *testing.T) {
+	t.Parallel()
+
+	oldLookPath := otaLookPath
+	oldExecCommand := otaExecCommand
+	t.Cleanup(func() {
+		otaLookPath = oldLookPath
+		otaExecCommand = oldExecCommand
+	})
+
+	otaLookPath = func(file string) (string, error) {
+		return "/usr/bin/sudo", nil
+	}
+	otaExecCommand = fakeExecCommand(t, 1, "nothing to roll back to")
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/rollback", strings.NewReader(`{}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTARollback(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(w.Body.String(), "nothing to roll back to") {
+		t.Fatalf("body = %q, want rollback failure detail", w.Body.String())
+	}
+}
+
+func fakeExecCommand(t *testing.T, exitCode int, stdout string) func(string, ...string) *exec.Cmd {
+	t.Helper()
+
+	return func(name string, args ...string) *exec.Cmd {
+		cmdArgs := []string{"-test.run=TestHelperProcess", "--", name}
+		cmdArgs = append(cmdArgs, args...)
+		cmd := exec.Command(os.Args[0], cmdArgs...)
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"GO_HELPER_EXIT_CODE="+strconv.Itoa(exitCode),
+			"GO_HELPER_STDOUT="+stdout,
+		)
+		return cmd
+	}
+}
+
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+
+	_, _ = os.Stdout.WriteString(os.Getenv("GO_HELPER_STDOUT"))
+	exitCode, err := strconv.Atoi(os.Getenv("GO_HELPER_EXIT_CODE"))
+	if err != nil {
+		exitCode = 0
+	}
+	os.Exit(exitCode)
 }
 
 func TestIsSafeInterfaceName(t *testing.T) {

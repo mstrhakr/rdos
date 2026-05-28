@@ -98,6 +98,19 @@ const SETTINGS_TABS = [
         title: "System summary",
         fields: [
           { key: "auto_update_enabled", label: "Auto update", type: "checkbox" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "updates",
+    label: "Updates",
+    title: "OTA management",
+    subtitle: "Track the active slot, update channel, and rollback readiness.",
+    cards: [
+      {
+        title: "Update policy",
+        fields: [
           { key: "maintenance_window", label: "Maintenance window", type: "text", placeholder: "02:00" },
           {
             key: "ota_channel",
@@ -106,10 +119,14 @@ const SETTINGS_TABS = [
             options: [
               ["stable", "Stable"],
               ["beta", "Beta"],
-              ["nightly", "Nightly"],
             ],
           },
         ],
+      },
+      {
+        title: "Operator note",
+        fields: [],
+        note: "RDOS updates stay platform-level and A/B slot based; the web UI is only a control surface for that flow.",
       },
     ],
   },
@@ -173,6 +190,7 @@ const appState = {
     defaultWireless: "",
   },
   health: null,
+  ota: null,
   session: null,
   status: null,
   wifiNetworks: [],
@@ -467,6 +485,47 @@ function buildCard(card) {
   `;
 }
 
+function buildOTAPanel(tab) {
+  const ota = appState.ota;
+  const details = ota ? JSON.stringify(ota, null, 2) : "ota not loaded";
+  const activeSlot = ota?.currentSlot || "n/a";
+  const previousSlot = ota?.previousSlot || "n/a";
+  const bootTries = ota?.bootTries || "n/a";
+  const currentVersion = ota?.currentVersion || "unknown";
+  const inactiveVersion = ota?.inactiveVersion || "unknown";
+  const recovery = ota?.pendingRecovery ? "pending" : "clear";
+
+  return `
+    <section class="tab-panel ${tab.id === appState.activeTab ? "active" : ""}" data-panel-id="${tab.id}" role="tabpanel">
+      <div class="status-card">${escapeHtml(tab.title)}</div>
+      <div class="tab-panel-grid">
+        <div class="tab-column">
+          <div class="status-card">${escapeHtml(tab.subtitle)}</div>
+          ${tab.cards.map((card) => buildCard(card)).join("")}
+        </div>
+        <div class="tab-column">
+          <section class="tab-card">
+            <h3>Slot status</h3>
+            <div class="status-card compact" id="otaState">${escapeHtml(details)}</div>
+            <div class="form-grid">
+              <label>Active slot<input type="text" value="${escapeHtml(activeSlot)}" readonly /></label>
+              <label>Previous slot<input type="text" value="${escapeHtml(previousSlot)}" readonly /></label>
+              <label>Boot tries<input type="text" value="${escapeHtml(bootTries)}" readonly /></label>
+              <label>Recovery<input type="text" value="${escapeHtml(recovery)}" readonly /></label>
+              <label>Current version<input type="text" value="${escapeHtml(currentVersion)}" readonly /></label>
+              <label>Inactive version<input type="text" value="${escapeHtml(inactiveVersion)}" readonly /></label>
+            </div>
+            <div class="actions tight">
+              <button type="button" id="refreshOTAStatus" class="secondary">Refresh OTA</button>
+              <button type="button" id="runOTARollback" ${ota?.canRollback ? "" : "disabled"}>Rollback to previous slot</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderSettingsPanels() {
   const tabsTarget = document.getElementById("settingsTabs");
   const panelsTarget = document.getElementById("settingsPanels");
@@ -489,6 +548,10 @@ function renderSettingsPanels() {
   ).join("");
 
   panelsTarget.innerHTML = SETTINGS_TABS.map((tab) => {
+    if (tab.id === "updates") {
+      return buildOTAPanel(tab);
+    }
+
     if (tab.id === "network") {
       return `
         <section class="tab-panel ${tab.id === appState.activeTab ? "active" : ""}" data-panel-id="${tab.id}" role="tabpanel">
@@ -592,6 +655,18 @@ function attachSettingsActions() {
   if (scanWireGuardUsbButton && !scanWireGuardUsbButton.dataset.bound) {
     scanWireGuardUsbButton.dataset.bound = "1";
     scanWireGuardUsbButton.addEventListener("click", () => refreshWireGuardUSB());
+  }
+
+  const refreshOTAButton = document.getElementById("refreshOTAStatus");
+  if (refreshOTAButton && !refreshOTAButton.dataset.bound) {
+    refreshOTAButton.dataset.bound = "1";
+    refreshOTAButton.addEventListener("click", () => refreshOTA());
+  }
+
+  const rollbackButton = document.getElementById("runOTARollback");
+  if (rollbackButton && !rollbackButton.dataset.bound) {
+    rollbackButton.dataset.bound = "1";
+    rollbackButton.addEventListener("click", () => triggerOTARollback());
   }
 }
 
@@ -846,6 +921,16 @@ async function refreshStatus() {
   }
 }
 
+async function refreshOTA() {
+  try {
+    appState.ota = await api("/api/v1/ota");
+    renderSettingsPanels();
+  } catch (err) {
+    appState.ota = null;
+    updateText("otaState", `ota error: ${err.message}`);
+  }
+}
+
 async function refreshWifi() {
   try {
     const payload = await api("/api/v1/wifi/scan");
@@ -861,8 +946,22 @@ async function refreshWifi() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces(), refreshWireGuardUSB()]);
+  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces(), refreshWireGuardUSB(), refreshOTA()]);
   await refreshWifi();
+}
+
+async function triggerOTARollback() {
+  try {
+    updateText("settingsNote", "Triggering OTA rollback...");
+    const payload = await api("/api/v1/ota/rollback", "POST", {});
+    if (payload?.status) {
+      appState.ota = payload.status;
+      renderSettingsPanels();
+    }
+    updateText("settingsNote", payload?.message || "Rollback triggered.");
+  } catch (err) {
+    updateText("settingsNote", `rollback error: ${err.message}`);
+  }
 }
 
 async function connectSession() {

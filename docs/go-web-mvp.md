@@ -10,6 +10,8 @@ This document describes the first implementation slice for the RDOS Go backend a
   - `GET /api/v1/health`
   - `GET /api/v1/config`
   - `POST /api/v1/config`
+  - `GET /api/v1/ota`
+  - `POST /api/v1/ota/rollback`
   - `GET /api/v1/session`
   - `POST /api/v1/session/connect`
   - `POST /api/v1/session/disconnect`
@@ -24,15 +26,19 @@ This document describes the first implementation slice for the RDOS Go backend a
   - `rdos.ui=legacy` launches existing shell/YAD flow (`/usr/bin/thinclient`)
 - The mode is selected by GRUB menu entries in both VHD and A/B image builders.
 - Runtime launcher: `/usr/bin/tc-ui-launch`.
-- Fallback behavior: if web mode components fail to start, launcher falls back to legacy UI automatically.
+- Web mode is web-only; it does not hand off to the legacy shell flow.
 
 ## Out of scope in this slice
 
 - No systemd unit wiring yet
 - No kiosk browser launch integration yet
-- No network and OTA management APIs yet
+- No manual update execution or timer control yet
 - No replacement of existing shell UI path yet
 - No separate app-layer updater; RDOS stays on a single deployable version with A/B image rollback for platform updates
+
+## Next parity target
+
+- OTA management is the next feature-parity gap to close: network, WiFi, and WireGuard surfaces are already present in `thinclient-go`, and the first OTA slice now covers live slot status plus rollback entry, but update execution and timer control are still missing.
 
 ## Local run
 
@@ -46,4 +52,5 @@ Then open `http://127.0.0.1:8080`.
 
 - API access is restricted to loopback clients in this MVP.
 - This service is additive and does not modify current RDOS startup behavior.
+- OTA status and rollback are now exposed in the web settings UI, but update execution and timer management still remain to be wired.
 - Platform update flow remains A/B image based; the web UI is not a second independently versioned application.
