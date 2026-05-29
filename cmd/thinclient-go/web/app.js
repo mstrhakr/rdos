@@ -10,19 +10,6 @@ const SETTINGS_TABS = [
         fields: [
           { key: "server", label: "Server", type: "text", placeholder: "rdp.example.local" },
           { key: "domain", label: "Domain", type: "text", placeholder: "domain" },
-          {
-            key: "rdp_resolution",
-            label: "Display mode",
-            type: "select",
-            options: [
-              ["dynamic", "Dynamic (fullscreen)"],
-              ["1920x1080", "1920×1080 windowed"],
-              ["1280x720", "1280×720 windowed"],
-              ["1024x768", "1024×768 windowed"],
-              ["1366x768", "1366×768 windowed"],
-              ["2560x1440", "2560×1440 windowed"],
-            ],
-          },
           { key: "param", label: "Parameter", type: "text", placeholder: "optional launch parameter" },
           { key: "config_url", label: "Config URL", type: "text", placeholder: "https://..." },
         ],
@@ -67,13 +54,6 @@ const SETTINGS_TABS = [
         custom: "wifi",
       },
     ],
-  },
-  {
-    id: "wireguard",
-    label: "VPN",
-    title: "WireGuard VPN",
-    subtitle: "Tunnel status, enable/disable, and config import from USB.",
-    cards: [],
   },
   {
     id: "device",
@@ -217,7 +197,6 @@ const appState = {
   status: null,
   wifiNetworks: [],
   wireguardUSBConfigs: [],
-  wireguardState: null,
   activeTab: "connection",
 };
 
@@ -508,49 +487,6 @@ function buildCard(card) {
   `;
 }
 
-function buildWireGuardPanel(tab) {
-  const wg = appState.wireguardState;
-  const enabled = wg?.enabled ?? false;
-  const hasConfig = wg?.hasConfig ?? false;
-  const interfaces = wg?.interfaces ?? [];
-  const statusText = interfaces.length > 0
-    ? `Up — ${interfaces.join(", ")}`
-    : enabled ? "Enabled — no active tunnels" : "Disabled";
-
-  return `
-    <section class="tab-panel ${tab.id === appState.activeTab ? "active" : ""}" data-panel-id="${tab.id}" role="tabpanel">
-      <div class="status-card">${escapeHtml(tab.title)}</div>
-      <div class="tab-panel-grid">
-        <div class="tab-column">
-          <div class="status-card">${escapeHtml(tab.subtitle)}</div>
-          <section class="tab-card">
-            <h3>Tunnel status</h3>
-            <div class="form-grid">
-              <label>Status<input type="text" value="${escapeHtml(statusText)}" readonly /></label>
-              <label>Active interfaces<input type="text" value="${escapeHtml(interfaces.join(", ") || "none")}" readonly /></label>
-            </div>
-            <div class="actions tight">
-              <button type="button" id="refreshWireGuardStatus" class="secondary">Refresh</button>
-              <button type="button" id="toggleWireGuardEnable" ${!hasConfig && !enabled ? "disabled" : ""}>${enabled ? "Disable VPN" : "Enable VPN"}</button>
-            </div>
-            <div class="status-card compact" id="wireguardStateMsg">${wg ? "Loaded." : "Not loaded yet."}</div>
-          </section>
-        </div>
-        <div class="tab-column">
-          <section class="tab-card wifi-connect">
-            <h3>Import from USB</h3>
-            <div class="status-card">Insert a USB drive containing a <strong>wg*.conf</strong> tunnel file, then scan for it here.</div>
-            <div class="actions tight">
-              <button type="button" id="scanWireGuardUsbVpn" class="secondary">Scan USB</button>
-            </div>
-            <div id="wireguardUsbListVpn" class="wifi-list"></div>
-          </section>
-        </div>
-      </div>
-    </section>
-  `;
-}
-
 function buildOTAPanel(tab) {
   const ota = appState.ota;
   const details = ota ? JSON.stringify(ota, null, 2) : "ota not loaded";
@@ -636,10 +572,6 @@ function renderSettingsPanels() {
       return buildOTAPanel(tab);
     }
 
-    if (tab.id === "wireguard") {
-      return buildWireGuardPanel(tab);
-    }
-
     if (tab.id === "network") {
       return `
         <section class="tab-panel ${tab.id === appState.activeTab ? "active" : ""}" data-panel-id="${tab.id}" role="tabpanel">
@@ -647,6 +579,7 @@ function renderSettingsPanels() {
           <div class="tab-panel-grid">
             <div class="tab-column">
               <div class="status-card">${escapeHtml(tab.subtitle)}</div>
+              ${buildNetworkStatusSection()}
               ${buildNetworkForm()}
             </div>
             <div class="tab-column">
@@ -663,7 +596,6 @@ function renderSettingsPanels() {
                 <div class="actions tight">
                   <button type="button" id="scanWifiSettings" class="secondary">Scan WiFi</button>
                   <button type="button" id="refreshWifiInterfaces" class="secondary">Refresh adapters</button>
-                  <button type="button" id="disconnectWifi" class="secondary">Disconnect</button>
                   <button type="button" id="applyWifi">Connect WiFi</button>
                 </div>
                 <div id="settingsWifiList" class="wifi-list"></div>
@@ -708,7 +640,6 @@ function renderSettingsPanels() {
   syncInterfaceFields();
   renderWifiRows("settingsWifiList");
   renderWireGuardUSBRows("wireguardUsbList");
-  renderWireGuardUSBRows("wireguardUsbListVpn");
 }
 
 function attachSettingsActions() {
@@ -722,12 +653,6 @@ function attachSettingsActions() {
   if (applyButton && !applyButton.dataset.bound) {
     applyButton.dataset.bound = "1";
     applyButton.addEventListener("click", () => connectWifi());
-  }
-
-  const disconnectWifiButton = document.getElementById("disconnectWifi");
-  if (disconnectWifiButton && !disconnectWifiButton.dataset.bound) {
-    disconnectWifiButton.dataset.bound = "1";
-    disconnectWifiButton.addEventListener("click", () => disconnectWifi());
   }
 
   const refreshWifiAdaptersButton = document.getElementById("refreshWifiInterfaces");
@@ -751,30 +676,6 @@ function attachSettingsActions() {
   if (scanWireGuardUsbButton && !scanWireGuardUsbButton.dataset.bound) {
     scanWireGuardUsbButton.dataset.bound = "1";
     scanWireGuardUsbButton.addEventListener("click", () => refreshWireGuardUSB());
-  }
-
-  const scanWireGuardUsbVpnButton = document.getElementById("scanWireGuardUsbVpn");
-  if (scanWireGuardUsbVpnButton && !scanWireGuardUsbVpnButton.dataset.bound) {
-    scanWireGuardUsbVpnButton.dataset.bound = "1";
-    scanWireGuardUsbVpnButton.addEventListener("click", async () => {
-      await refreshWireGuardUSB();
-      renderWireGuardUSBRows("wireguardUsbListVpn");
-    });
-  }
-
-  const refreshWgStatusButton = document.getElementById("refreshWireGuardStatus");
-  if (refreshWgStatusButton && !refreshWgStatusButton.dataset.bound) {
-    refreshWgStatusButton.dataset.bound = "1";
-    refreshWgStatusButton.addEventListener("click", async () => {
-      await refreshWireGuard();
-      renderSettingsPanels();
-    });
-  }
-
-  const toggleWgButton = document.getElementById("toggleWireGuardEnable");
-  if (toggleWgButton && !toggleWgButton.dataset.bound) {
-    toggleWgButton.dataset.bound = "1";
-    toggleWgButton.addEventListener("click", () => toggleWireGuard());
   }
 
   const refreshOTAButton = document.getElementById("refreshOTAStatus");
@@ -901,6 +802,31 @@ function updateNetworkModeUI() {
     field.disabled = !isStatic;
     field.setAttribute("aria-disabled", isStatic ? "false" : "true");
   });
+}
+
+function buildNetworkStatusSection() {
+  const details = appState.networkInterfaces.details || [];
+  if (details.length === 0) {
+    return `<section class="tab-card"><h3>Active interfaces</h3><div class="status-card compact">No interface data — click Refresh adapters.</div></section>`;
+  }
+  const rows = details.map((iface) => {
+    const state = iface.operstate || "unknown";
+    const addrs = (iface.addresses || []).join(", ") || "—";
+    const ssidPart = iface.ssid ? ` · ${escapeHtml(iface.ssid)}` : "";
+    const typePart = iface.isWireless ? " (WiFi)" : "";
+    return `
+      <div class="metric">
+        <div class="label">${escapeHtml(iface.name)}${escapeHtml(typePart)}</div>
+        <div class="value">${escapeHtml(state)} · ${escapeHtml(addrs)}${ssidPart}</div>
+      </div>
+    `;
+  }).join("");
+  return `
+    <section class="tab-card">
+      <h3>Active interfaces</h3>
+      <div class="metrics-grid">${rows}</div>
+    </section>
+  `;
 }
 
 function buildNetworkForm() {
@@ -1042,8 +968,10 @@ async function refreshNetworkInterfaces() {
       hasWireless: Boolean(payload.hasWireless),
       defaultInterface: payload.defaultInterface || "",
       defaultWireless: payload.defaultWireless || "",
+      details: payload.details || [],
     };
     syncInterfaceFields();
+    renderSettingsPanels();
   } catch (err) {
     updateText("settingsNote", `interface refresh error: ${err.message}`);
   }
@@ -1102,41 +1030,8 @@ async function refreshWifi() {
   }
 }
 
-async function refreshWireGuard() {
-  try {
-    appState.wireguardState = await api("/api/v1/wireguard");
-  } catch (err) {
-    appState.wireguardState = null;
-    updateText("wireguardStateMsg", `wireguard error: ${err.message}`);
-  }
-}
-
-async function toggleWireGuard() {
-  const current = appState.wireguardState?.enabled ?? false;
-  try {
-    updateText("wireguardStateMsg", current ? "Disabling VPN..." : "Enabling VPN...");
-    appState.wireguardState = await api("/api/v1/wireguard/enable", "POST", { enabled: !current });
-    renderSettingsPanels();
-    updateText("settingsNote", appState.wireguardState.enabled ? "VPN enabled." : "VPN disabled.");
-  } catch (err) {
-    updateText("wireguardStateMsg", `toggle error: ${err.message}`);
-    updateText("settingsNote", `wireguard error: ${err.message}`);
-  }
-}
-
-async function disconnectWifi() {
-  try {
-    updateText("settingsNote", "Disconnecting WiFi...");
-    const payload = await api("/api/v1/wifi/disconnect", "POST", {});
-    updateText("settingsNote", payload?.message || "WiFi disconnected.");
-    await refreshStatus();
-  } catch (err) {
-    updateText("settingsNote", `wifi disconnect error: ${err.message}`);
-  }
-}
-
 async function refreshAll() {
-  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces(), refreshWireGuardUSB(), refreshWireGuard(), refreshOTA(), refreshOTAReleases()]);
+  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces(), refreshWireGuardUSB(), refreshOTA(), refreshOTAReleases()]);
   await refreshWifi();
 }
 
@@ -1181,7 +1076,6 @@ async function connectSession() {
     password: document.getElementById("password")?.value,
     domain: document.getElementById("domain")?.value.trim(),
     certPolicy: "tofu",
-    resolution: valueForKey("rdp_resolution") || "dynamic",
   };
 
   try {
@@ -1372,6 +1266,7 @@ function initStaticPanels() {
           <div class="status-card">Wired and wireless connection management.</div>
           <div class="tab-panel-grid">
             <div class="tab-column">
+              ${buildNetworkStatusSection()}
               ${buildNetworkForm()}
             </div>
             <div class="tab-column">

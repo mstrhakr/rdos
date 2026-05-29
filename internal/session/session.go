@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -35,9 +36,11 @@ type ConnectRequest struct {
 }
 
 type Snapshot struct {
-	State     State  `json:"state"`
-	Message   string `json:"message"`
-	StartedAt int64  `json:"startedAt,omitempty"`
+	State      State  `json:"state"`
+	Message    string `json:"message"`
+	ExitCode   int    `json:"exitCode,omitempty"`
+	LastOutput string `json:"lastOutput,omitempty"`
+	StartedAt  int64  `json:"startedAt,omitempty"`
 }
 
 type Manager struct {
@@ -212,15 +215,51 @@ func (m *Manager) waitForExit(cmd *exec.Cmd) {
 	}
 	m.cancel = nil
 
+	logOutput := logTail(m.logPath, 8)
+
 	if err == nil {
-		m.state = Snapshot{State: StateDisconnected, Message: "session ended"}
+		m.state = Snapshot{State: StateDisconnected, Message: "session ended", LastOutput: logOutput}
 		return
 	}
 
 	if errors.Is(err, context.Canceled) {
-		m.state = Snapshot{State: StateDisconnected, Message: "session cancelled"}
+		m.state = Snapshot{State: StateDisconnected, Message: "session cancelled", LastOutput: logOutput}
 		return
 	}
 
-	m.state = Snapshot{State: StateError, Message: err.Error()}
+	exitCode := 0
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		exitCode = exitErr.ExitCode()
+	}
+
+	m.state = Snapshot{State: StateError, Message: err.Error(), ExitCode: exitCode, LastOutput: logOutput}
+}
+
+// logTail reads the last n non-empty lines from a log file, stripping WLOG timestamps.
+// Returns empty string if the file cannot be read.
+func logTail(path string, n int) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }
