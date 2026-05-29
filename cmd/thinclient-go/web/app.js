@@ -20,6 +20,15 @@ const SETTINGS_TABS = [
           { key: "adminpass", label: "Admin password", type: "password", placeholder: "admin password" },
           { key: "helpdesk", label: "Helpdesk", type: "text", placeholder: "the helpdesk" },
           { key: "login_timeout", label: "Login timeout", type: "number", placeholder: "600" },
+          {
+            key: "cert_policy",
+            label: "Certificate policy",
+            type: "select",
+            options: [
+              ["tofu", "Trust on first use (save key)"],
+              ["ignore", "Ignore certificate checks (insecure)"],
+            ],
+          },
         ],
       },
     ],
@@ -211,6 +220,11 @@ const appState = {
     url: "http://127.0.0.1:7681/",
     message: "Console is stopped.",
   },
+  certPrompt: {
+    open: false,
+    lastSignature: "",
+    dismissedSignature: "",
+  },
   activeTab: "connection",
 };
 
@@ -267,6 +281,88 @@ function updateText(id, value) {
   if (element) {
     element.textContent = value;
   }
+}
+
+function normalizeCertPolicy(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "ignore") {
+    return "ignore";
+  }
+  return "tofu";
+}
+
+function certificateIssueFromSnapshot(snapshot) {
+  if (!snapshot || snapshot.state !== "error") {
+    return null;
+  }
+  const details = [snapshot.message || "", snapshot.lastOutput || ""].filter(Boolean).join("\n").trim();
+  if (!details) {
+    return null;
+  }
+
+  const lower = details.toLowerCase();
+  const hasCertSignal = [
+    "certificate",
+    "x509",
+    "tls",
+    "cert:",
+    "cert verify",
+    "certification",
+    "self-signed",
+    "hostname mismatch",
+  ].some((token) => lower.includes(token));
+
+  if (!hasCertSignal) {
+    return null;
+  }
+
+  return {
+    details,
+    signature: `${snapshot.exitCode || ""}|${snapshot.message || ""}|${snapshot.lastOutput || ""}`,
+  };
+}
+
+function openCertTrustModal(issue) {
+  const modal = document.getElementById("certTrustModal");
+  if (!modal) {
+    return;
+  }
+  appState.certPrompt.open = true;
+  modal.setAttribute("aria-hidden", "false");
+  updateText("certTrustDetails", issue.details || "Certificate/security verification failed.");
+}
+
+function closeCertTrustModal() {
+  const modal = document.getElementById("certTrustModal");
+  if (!modal) {
+    return;
+  }
+  appState.certPrompt.open = false;
+  appState.certPrompt.dismissedSignature = appState.certPrompt.lastSignature;
+  modal.setAttribute("aria-hidden", "true");
+}
+
+async function persistCertPolicy(policy) {
+  const normalized = normalizeCertPolicy(policy);
+  const payload = await api("/api/v1/config", "POST", { values: { cert_policy: normalized } });
+  appState.config = payload.values || { ...appState.config, cert_policy: normalized };
+  renderSettingsPanels();
+  return normalized;
+}
+
+function maybePromptCertificateTrust(snapshot) {
+  const issue = certificateIssueFromSnapshot(snapshot);
+  if (!issue) {
+    return;
+  }
+  if (appState.certPrompt.dismissedSignature === issue.signature) {
+    return;
+  }
+  if (appState.certPrompt.open && appState.certPrompt.lastSignature === issue.signature) {
+    return;
+  }
+  appState.certPrompt.lastSignature = issue.signature;
+  openCertTrustModal(issue);
 }
 
 function renderCornerClock() {
@@ -924,6 +1020,29 @@ function bindModalActions() {
     renderSettingsPanels();
   });
   document.getElementById("saveSettings")?.addEventListener("click", saveSettings);
+
+  document.getElementById("certTrustClose")?.addEventListener("click", closeCertTrustModal);
+  document.getElementById("certTrustCancel")?.addEventListener("click", closeCertTrustModal);
+  document.getElementById("certTrustTofu")?.addEventListener("click", async () => {
+    try {
+      await persistCertPolicy("tofu");
+      closeCertTrustModal();
+      appState.certPrompt.dismissedSignature = "";
+      await connectSession("tofu");
+    } catch (err) {
+      updateText("settingsNote", `certificate trust error: ${err.message}`);
+    }
+  });
+  document.getElementById("certTrustIgnore")?.addEventListener("click", async () => {
+    try {
+      await persistCertPolicy("ignore");
+      closeCertTrustModal();
+      appState.certPrompt.dismissedSignature = "";
+      await connectSession("ignore");
+    } catch (err) {
+      updateText("settingsNote", `certificate ignore error: ${err.message}`);
+    }
+  });
 }
 
 function openSettings(tabId = "connection") {
@@ -963,7 +1082,16 @@ async function refreshHealth() {
 async function refreshSession() {
   try {
     appState.session = await api("/api/v1/session");
-    updateText("sessionState", JSON.stringify(appState.session, null, 2));
+    const snapshot = appState.session;
+    let display = `session: ${snapshot.state || "unknown"}`;
+    if (snapshot.exitCode !== undefined && snapshot.exitCode !== null && snapshot.exitCode !== 0) {
+      display += ` (exit ${snapshot.exitCode})`;
+    }
+    if (snapshot.lastOutput) {
+      display += `\n\n${snapshot.lastOutput}`;
+    }
+    updateText("sessionState", display);
+    maybePromptCertificateTrust(snapshot);
   } catch (err) {
     updateText("sessionState", `session error: ${err.message}`);
   }
@@ -1138,17 +1266,19 @@ async function triggerOTARollback() {
   }
 }
 
-async function connectSession() {
+async function connectSession(certPolicyOverride = "") {
+  const certPolicy = normalizeCertPolicy(certPolicyOverride || valueForKey("cert_policy") || "tofu");
   const payload = {
     server: document.getElementById("server")?.value.trim(),
     username: document.getElementById("username")?.value.trim(),
     password: document.getElementById("password")?.value,
     domain: document.getElementById("domain")?.value.trim(),
-    certPolicy: "tofu",
+    certPolicy,
   };
 
   try {
     await api("/api/v1/session/connect", "POST", payload);
+    closeCertTrustModal();
     await refreshSession();
     updateText("settingsNote", `Connecting to ${payload.server || "the server"}.`);
   } catch (err) {
@@ -1282,6 +1412,7 @@ async function connectWifi() {
 function wireGlobalShortcuts() {
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      closeCertTrustModal();
       closeSettings();
     }
   });

@@ -67,6 +67,30 @@
       </div>
     </aside>
 
+    <aside class="modal" id="certTrustModal" aria-hidden="true">
+      <div class="modal-surface cert-modal-surface" role="dialog" aria-modal="true" aria-labelledby="certTrustTitle">
+        <header class="modal-head">
+          <div>
+            <p class="eyebrow">Certificate warning</p>
+            <h2 id="certTrustTitle">Untrusted remote certificate</h2>
+          </div>
+          <button id="certTrustClose" class="secondary" type="button">Close</button>
+        </header>
+
+        <div class="status-card">The server certificate could not be verified. Choose how to proceed.</div>
+        <div class="status-card compact cert-details" id="certTrustDetails">No certificate details yet.</div>
+
+        <footer class="modal-foot">
+          <div class="modal-foot-note">Trust will save the key for future connections. Ignore disables certificate validation and is insecure.</div>
+          <div class="actions tight">
+            <button id="certTrustCancel" class="secondary" type="button">Cancel</button>
+            <button id="certTrustTofu" type="button">Trust and save key</button>
+            <button id="certTrustIgnore" class="secondary" type="button">Ignore (insecure)</button>
+          </div>
+        </footer>
+      </div>
+    </aside>
+
     <script src="/app.js"></script>
   </body>
 </html>

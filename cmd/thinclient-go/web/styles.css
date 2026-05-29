@@ -333,6 +333,18 @@ label {
   background: var(--surface-strong);
 }
 
+.cert-modal-surface {
+  width: min(760px, 100%);
+  height: auto;
+  max-height: min(620px, 100%);
+  grid-template-rows: auto auto 1fr auto;
+}
+
+.cert-details {
+  overflow: auto;
+  max-height: 40vh;
+}
+
 .modal-head,
 .modal-foot {
   display: flex;
