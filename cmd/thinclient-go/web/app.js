@@ -304,6 +304,15 @@ function certificateIssueFromSnapshot(snapshot) {
   }
 
   const lower = details.toLowerCase();
+  const certAccepted = [
+    "no certificate stored, automatically accepting",
+    "automatically accepting",
+  ].some((token) => lower.includes(token));
+
+  if (certAccepted) {
+    return null;
+  }
+
   const hasCertSignal = [
     "host key verification failed",
     "certificate verification failure",

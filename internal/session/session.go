@@ -159,7 +159,7 @@ func (m *Manager) buildCommand(ctx context.Context, req ConnectRequest) (*exec.C
 	}
 
 	if req.Username != "" {
-		args = append(args, "/u:"+req.Username)
+		args = append(args, "/u:"+normalizeUsernameForRDP(req.Username, req.Domain))
 	}
 	if req.Domain != "" {
 		args = append(args, "/d:"+req.Domain)
@@ -257,6 +257,23 @@ func (m *Manager) waitForExit(cmd *exec.Cmd) {
 	}
 
 	m.state = Snapshot{State: StateError, Message: err.Error(), ExitCode: exitCode, LastOutput: logOutput}
+}
+
+func normalizeUsernameForRDP(username, domain string) string {
+	u := strings.TrimSpace(username)
+	if u == "" {
+		return ""
+	}
+
+	if strings.TrimSpace(domain) != "" {
+		return u
+	}
+
+	if strings.Contains(u, "\\") || strings.Contains(u, "@") {
+		return u
+	}
+
+	return ".\\" + u
 }
 
 // logTail reads the last n non-empty lines from a log file, stripping WLOG timestamps.
