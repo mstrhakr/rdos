@@ -1296,10 +1296,8 @@ func listNetworkInterfaces() ([]string, []string) {
 	interfaces := make([]string, 0, len(entries))
 	wireless := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
 		name := entry.Name()
+		// /sys/class/net entries are symlinks; entry.IsDir() is always false — skip that check
 		if name == "" || name == "lo" {
 			continue
 		}
