@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -180,7 +181,21 @@ func (m *Manager) buildCommand(ctx context.Context, req ConnectRequest) (*exec.C
 	}
 
 	cmd := exec.CommandContext(ctx, m.rdpBinary, args...)
+	homeDir := strings.TrimSpace(os.Getenv("HOME"))
+	if homeDir == "" {
+		homeDir = "/home/thinclient"
+	}
+	xdgConfigHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))
+	if xdgConfigHome == "" {
+		xdgConfigHome = filepath.Join(homeDir, ".config")
+	}
+	freerdpDir := filepath.Join(xdgConfigHome, "freerdp")
+	if err := os.MkdirAll(freerdpDir, 0o700); err != nil {
+		return nil, nil, nil, fmt.Errorf("ensure freerdp config dir: %w", err)
+	}
 	cmd.Env = append(os.Environ(),
+		"HOME="+homeDir,
+		"XDG_CONFIG_HOME="+xdgConfigHome,
 		"WLOG_APPENDER=file",
 		"WLOG_FILEAPPENDER_OUTPUT_FILE_NAME=session.log",
 		"WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=.",
