@@ -195,6 +195,7 @@ build_source_raw_image() {
     local output_raw="$2"
     local disk_size="$3"
     local boot_mb="$4"
+    local install_bootloader="${5:-0}"
 
     local work_dir loop_dev p1 p2 kernel_path initrd_path
     work_dir="$(mktemp -d /var/tmp/rdos-src.XXXXXX)"
@@ -230,8 +231,13 @@ build_source_raw_image() {
     wait_for_block_device "$p1" 30 || { echo "Partition node $p1 did not appear in time" >&2; return 1; }
     wait_for_block_device "$p2" 30 || { echo "Partition node $p2 did not appear in time" >&2; return 1; }
 
-    mkfs.fat -F32 "$p1" >/dev/null
-    mkfs.ext4 -q "$p2"
+    if [[ "$install_bootloader" == "1" ]]; then
+        mkfs.fat -F32 -n BOOT "$p1" >/dev/null
+        mkfs.ext4 -q -L ROOT "$p2"
+    else
+        mkfs.fat -F32 "$p1" >/dev/null
+        mkfs.ext4 -q "$p2"
+    fi
 
     mkdir -p "$work_dir/boot" "$work_dir/root"
     mount "$p2" "$work_dir/root"
@@ -251,6 +257,55 @@ build_source_raw_image() {
 
     cp "$kernel_path" "$work_dir/boot/vmlinuz"
     cp "$initrd_path" "$work_dir/boot/initrd.img"
+
+    if [[ "$install_bootloader" == "1" ]]; then
+        mkdir -p "$work_dir/boot/grub" "$work_dir/boot/EFI/BOOT" "$work_dir/boot/EFI/RDOS"
+
+        cat > "$work_dir/boot/grub/grub.cfg" <<'GRUBCFG'
+insmod part_gpt
+insmod fat
+
+search --no-floppy --label BOOT --set=root
+
+menuentry "RDOS" {
+    linux /vmlinuz root=LABEL=ROOT rw quiet loglevel=3
+    initrd /initrd.img
+}
+GRUBCFG
+
+        if grub-install \
+            --target=x86_64-efi \
+            --boot-directory="$work_dir/boot" \
+            --efi-directory="$work_dir/boot" \
+            --bootloader-id=RDOS \
+            --no-nvram \
+            --removable \
+            --recheck >/dev/null 2>&1; then
+            cat > "$work_dir/boot/EFI/RDOS/grub.cfg" <<'EFI_RDOS_GRUBCFG'
+search --no-floppy --label BOOT --set=root
+set prefix=($root)/grub
+configfile /grub/grub.cfg
+EFI_RDOS_GRUBCFG
+
+            cat > "$work_dir/boot/EFI/BOOT/grub.cfg" <<'EFI_GRUBCFG'
+search --no-floppy --label BOOT --set=root
+set prefix=($root)/grub
+configfile /grub/grub.cfg
+EFI_GRUBCFG
+
+            if [[ -f "$work_dir/boot/EFI/BOOT/BOOTX64.EFI" ]] && [[ ! -f "$work_dir/boot/EFI/RDOS/grubx64.efi" ]]; then
+                cp "$work_dir/boot/EFI/BOOT/BOOTX64.EFI" "$work_dir/boot/EFI/RDOS/grubx64.efi"
+            elif [[ -f "$work_dir/boot/EFI/RDOS/grubx64.efi" ]] && [[ ! -f "$work_dir/boot/EFI/BOOT/BOOTX64.EFI" ]]; then
+                cp "$work_dir/boot/EFI/RDOS/grubx64.efi" "$work_dir/boot/EFI/BOOT/BOOTX64.EFI"
+            fi
+
+            if [[ ! -f "$work_dir/boot/EFI/BOOT/BOOTX64.EFI" ]] && [[ ! -f "$work_dir/boot/EFI/RDOS/grubx64.efi" ]]; then
+                echo "Warning: EFI GRUB binary was not created in EFI/BOOT or EFI/RDOS" >&2
+            fi
+        else
+            echo "Warning: EFI grub-install failed; artifact may not boot on UEFI-only hypervisors" >&2
+        fi
+    fi
 
     umount "$work_dir/boot"
     umount "$work_dir/root"
@@ -356,7 +411,7 @@ fi
 if [[ -f "$OUTPUT_PROD_RAW" ]]; then
     rm -f "$OUTPUT_PROD_RAW"
 fi
-run_with_heartbeat "Assembling production raw source image" build_source_raw_image "${IMAGE_NAME}:latest" "$OUTPUT_PROD_RAW" 14G 4000
+run_with_heartbeat "Assembling production raw source image" build_source_raw_image "${IMAGE_NAME}:latest" "$OUTPUT_PROD_RAW" 14G 4000 1
 log_phase "Production raw image ready: $OUTPUT_PROD_RAW"
 
 if [[ "$BUILD_AB" == "1" ]]; then
@@ -383,7 +438,7 @@ if [[ "$BUILD_AB" == "1" ]]; then
     [[ -f "$OUTPUT_AB_ZST" ]] && rm -f "$OUTPUT_AB_ZST"
     [[ -f "${OUTPUT_AB_ZST}.size" ]] && rm -f "${OUTPUT_AB_ZST}.size"
 
-    run_with_heartbeat "Assembling recovery raw source image" build_source_raw_image "${RECOVERY_IMAGE_NAME}:latest" "$OUTPUT_RECOVERY_RAW" 2G 200
+    run_with_heartbeat "Assembling recovery raw source image" build_source_raw_image "${RECOVERY_IMAGE_NAME}:latest" "$OUTPUT_RECOVERY_RAW" 2G 200 0
     log_phase "Recovery raw image ready: $OUTPUT_RECOVERY_RAW"
 
     run_with_heartbeat "Assembling A/B+Recovery disk" \

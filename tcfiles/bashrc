@@ -123,11 +123,15 @@ if [[ -z ${DISPLAY} && ( ${TTY} == 'tty1' || ${TTY} == 'console' || ${TTY} == 't
 
     # Keep retrying X startup so transient boot-time failures do not leave the user at a text console.
     while true; do
-        if startx >>"$HOME/.startx.log" 2>&1; then
+        startx >>"$HOME/.startx.log" 2>&1
+        startx_rc=$?
+
+        if [ "$startx_rc" -eq 0 ]; then
+            # X session ended cleanly (for example logout); restart login UI.
+            sleep 1
             continue
         fi
 
-        startx_rc=$?
         warning_msg="startx failed (exit ${startx_rc}); retrying."
         printf 'WARNING: %s\n' "$warning_msg" >&2
         if command -v logger >/dev/null 2>&1; then

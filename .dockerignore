@@ -3,7 +3,7 @@
 .installer-work/
 
 *.log
-*.vhd
+*.vhd*
 *.deb
 *.Identifier
 tcconfig*
