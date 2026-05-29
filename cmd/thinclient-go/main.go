@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -100,6 +101,10 @@ const (
 	otaGitHubReleasesAPI = "https://api.github.com/repos/mstrhakr/rdos/releases"
 	otaDefaultLimit      = 10
 	otaMaxLimit          = 20
+	terminalExecTimeout  = 15 * time.Second
+	terminalOutputMax    = 64 * 1024
+	terminalCommandMax   = 2048
+	ttydPort             = 7681
 )
 
 type networkInterfaceInfo struct {
@@ -163,6 +168,25 @@ type wifiConnectState struct {
 	Message   string `json:"message"`
 }
 
+type terminalExecRequest struct {
+	Command string `json:"command"`
+}
+
+type terminalExecResponse struct {
+	Command    string `json:"command"`
+	ExitCode   int    `json:"exitCode"`
+	Output     string `json:"output"`
+	DurationMs int64  `json:"durationMs"`
+	TimedOut   bool   `json:"timedOut"`
+}
+
+type terminalTTYDResponse struct {
+	Running bool   `json:"running"`
+	Ready   bool   `json:"ready"`
+	URL     string `json:"url"`
+	Message string `json:"message"`
+}
+
 type statusSnapshot struct {
 	Time          string `json:"time"`
 	BootMode      string `json:"bootMode"`
@@ -186,8 +210,10 @@ type app struct {
 	version  string
 	bootMode string
 
-	mu     sync.Mutex
-	config map[string]string
+	mu         sync.Mutex
+	config     map[string]string
+	terminalMu sync.Mutex
+	ttydCmd    *exec.Cmd
 }
 
 var otaLookPath = exec.LookPath
@@ -235,6 +261,8 @@ func main() {
 	mux.Handle("/api/v1/status", application.loopbackOnly(http.HandlerFunc(application.handleStatus)))
 	mux.Handle("/api/v1/wifi/scan", application.loopbackOnly(http.HandlerFunc(application.handleWifiScan)))
 	mux.Handle("/api/v1/wifi/connect", application.loopbackOnly(http.HandlerFunc(application.handleWifiConnect)))
+	mux.Handle("/api/v1/terminal/exec", application.loopbackOnly(http.HandlerFunc(application.handleTerminalExec)))
+	mux.Handle("/api/v1/terminal/ttyd", application.loopbackOnly(http.HandlerFunc(application.handleTerminalTTYD)))
 	mux.Handle("/api/v1/session", application.loopbackOnly(http.HandlerFunc(application.handleSessionStatus)))
 	mux.Handle("/api/v1/session/connect", application.loopbackOnly(http.HandlerFunc(application.handleSessionConnect)))
 	mux.Handle("/api/v1/session/disconnect", application.loopbackOnly(http.HandlerFunc(application.handleSessionDisconnect)))
@@ -637,6 +665,186 @@ func (a *app) handleWireGuardUSBImport(w http.ResponseWriter, r *http.Request) {
 		Interface: config.Interface,
 		Message:   message,
 	})
+}
+
+func (a *app) handleTerminalExec(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	defer r.Body.Close()
+
+	var req terminalExecRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "invalid json payload", http.StatusBadRequest)
+		return
+	}
+
+	command := strings.TrimSpace(req.Command)
+	if command == "" {
+		http.Error(w, "command is required", http.StatusBadRequest)
+		return
+	}
+	if len(command) > terminalCommandMax {
+		http.Error(w, "command is too long", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), terminalExecTimeout)
+	defer cancel()
+
+	start := time.Now()
+	cmd := exec.CommandContext(ctx, "bash", "-lc", command)
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	outputBytes, err := cmd.CombinedOutput()
+	durationMs := time.Since(start).Milliseconds()
+
+	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	exitCode := 0
+	if err != nil {
+		if timedOut {
+			exitCode = 124
+		} else if exitErr := (*exec.ExitError)(nil); errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
+	}
+
+	if len(outputBytes) > terminalOutputMax {
+		outputBytes = append(outputBytes[:terminalOutputMax], []byte("\n[output truncated]\n")...)
+	}
+
+	output := strings.TrimSpace(string(outputBytes))
+	if output == "" && err != nil {
+		output = err.Error()
+	}
+	if output == "" {
+		output = "(no output)"
+	}
+
+	respondJSON(w, http.StatusOK, terminalExecResponse{
+		Command:    command,
+		ExitCode:   exitCode,
+		Output:     output,
+		DurationMs: durationMs,
+		TimedOut:   timedOut,
+	})
+}
+
+func (a *app) handleTerminalTTYD(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		respondJSON(w, http.StatusOK, a.terminalTTYDStatus(""))
+		return
+	case http.MethodPost:
+		statusCode, status := a.startTerminalTTYD()
+		respondJSON(w, statusCode, status)
+		return
+	case http.MethodDelete:
+		statusCode, status := a.stopTerminalTTYD()
+		respondJSON(w, statusCode, status)
+		return
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *app) terminalTTYDStatus(message string) terminalTTYDResponse {
+	running := false
+	a.terminalMu.Lock()
+	running = a.ttydCmd != nil
+	a.terminalMu.Unlock()
+
+	ready := ttydReady()
+	if !running {
+		ready = false
+	}
+
+	if message == "" {
+		if running {
+			if ready {
+				message = "Console running"
+			} else {
+				message = "Console starting"
+			}
+		} else {
+			message = "Console stopped"
+		}
+	}
+
+	return terminalTTYDResponse{
+		Running: running,
+		Ready:   ready,
+		URL:     "http://127.0.0.1:" + strconv.Itoa(ttydPort) + "/",
+		Message: message,
+	}
+}
+
+func (a *app) startTerminalTTYD() (int, terminalTTYDResponse) {
+	if _, err := exec.LookPath("ttyd"); err != nil {
+		return http.StatusBadRequest, a.terminalTTYDStatus("ttyd is not installed in this image")
+	}
+
+	a.terminalMu.Lock()
+	if a.ttydCmd != nil {
+		a.terminalMu.Unlock()
+		return http.StatusOK, a.terminalTTYDStatus("Console already running")
+	}
+
+	cmd := exec.Command("ttyd", "-p", strconv.Itoa(ttydPort), "bash", "-l")
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	if err := cmd.Start(); err != nil {
+		a.terminalMu.Unlock()
+		return http.StatusBadRequest, a.terminalTTYDStatus("Failed to start ttyd: " + err.Error())
+	}
+	a.ttydCmd = cmd
+	a.terminalMu.Unlock()
+
+	go func(started *exec.Cmd) {
+		_ = started.Wait()
+		a.terminalMu.Lock()
+		if a.ttydCmd == started {
+			a.ttydCmd = nil
+		}
+		a.terminalMu.Unlock()
+	}(cmd)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if ttydReady() {
+			return http.StatusOK, a.terminalTTYDStatus("Console running")
+		}
+		time.Sleep(120 * time.Millisecond)
+	}
+
+	return http.StatusAccepted, a.terminalTTYDStatus("Console started, waiting for readiness")
+}
+
+func (a *app) stopTerminalTTYD() (int, terminalTTYDResponse) {
+	a.terminalMu.Lock()
+	cmd := a.ttydCmd
+	a.ttydCmd = nil
+	a.terminalMu.Unlock()
+
+	if cmd == nil {
+		return http.StatusOK, a.terminalTTYDStatus("Console already stopped")
+	}
+
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+
+	return http.StatusOK, a.terminalTTYDStatus("Console stopped")
+}
+
+func ttydReady() bool {
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(ttydPort), 200*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func (a *app) handleWifiScan(w http.ResponseWriter, r *http.Request) {

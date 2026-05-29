@@ -11,6 +11,7 @@ FROM debian:trixie
 
 ARG XANMOD_ARCHIVE_SHA256=ed26eb39330fd296cd037b8229adccea0197b21989ec0a1ad4f4f74f5a41c7a7
 ARG XANMOD_ARCHIVE_FINGERPRINT=D38D7D1DA1349567ADED882D86F7D09EE734E623
+ARG TTYD_VERSION=1.7.7
 
 COPY tcfiles/debian.sources /etc/apt/sources.list.d/debian.sources
 
@@ -38,6 +39,16 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         adwaita-icon-theme-legacy libfuse2 \
     libcap2-bin \
     grub-common
+
+# ttyd is not currently packaged in Debian Trixie's main repos, so install a pinned upstream binary.
+RUN arch="$(dpkg --print-architecture)" && \
+    case "$arch" in \
+        amd64) asset="ttyd.x86_64" ;; \
+        arm64) asset="ttyd.aarch64" ;; \
+        *) echo "Unsupported architecture for ttyd: $arch" >&2; exit 1 ;; \
+    esac && \
+    wget -qO /usr/bin/ttyd "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/${asset}" && \
+    chmod 0755 /usr/bin/ttyd
 
 # Disable audible terminal/system bell where possible.
 RUN printf '%s\n' 'blacklist pcspkr' 'install pcspkr /bin/false' > /etc/modprobe.d/nobeep.conf && \

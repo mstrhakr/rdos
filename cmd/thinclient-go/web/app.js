@@ -157,6 +157,13 @@ const SETTINGS_TABS = [
     ],
   },
   {
+    id: "terminal",
+    label: "Terminal",
+    title: "Recovery terminal",
+    subtitle: "Run shell commands when direct console access is unavailable.",
+    cards: [],
+  },
+  {
     id: "support",
     label: "Support",
     title: "Help and recovery",
@@ -198,6 +205,12 @@ const appState = {
   status: null,
   wifiNetworks: [],
   wireguardUSBConfigs: [],
+  terminal: {
+    running: false,
+    ready: false,
+    url: "http://127.0.0.1:7681/",
+    message: "Console is stopped.",
+  },
   activeTab: "connection",
 };
 
@@ -573,6 +586,10 @@ function renderSettingsPanels() {
       return buildOTAPanel(tab);
     }
 
+    if (tab.id === "terminal") {
+      return buildTerminalPanel(tab);
+    }
+
     if (tab.id === "network") {
       return `
         <section class="tab-panel ${tab.id === appState.activeTab ? "active" : ""}" data-panel-id="${tab.id}" role="tabpanel">
@@ -709,6 +726,24 @@ function attachSettingsActions() {
   if (rollbackButton && !rollbackButton.dataset.bound) {
     rollbackButton.dataset.bound = "1";
     rollbackButton.addEventListener("click", () => triggerOTARollback());
+  }
+
+  const startTerminalButton = document.getElementById("startTerminalConsole");
+  if (startTerminalButton && !startTerminalButton.dataset.bound) {
+    startTerminalButton.dataset.bound = "1";
+    startTerminalButton.addEventListener("click", () => startTTYD());
+  }
+
+  const stopTerminalButton = document.getElementById("stopTerminalConsole");
+  if (stopTerminalButton && !stopTerminalButton.dataset.bound) {
+    stopTerminalButton.dataset.bound = "1";
+    stopTerminalButton.addEventListener("click", () => stopTTYD());
+  }
+
+  const refreshTerminalButton = document.getElementById("refreshTerminalConsole");
+  if (refreshTerminalButton && !refreshTerminalButton.dataset.bound) {
+    refreshTerminalButton.dataset.bound = "1";
+    refreshTerminalButton.addEventListener("click", () => refreshTTYDStatus());
   }
 }
 
@@ -859,6 +894,43 @@ function buildNetworkForm() {
   `;
 }
 
+function buildTerminalPanel(tab) {
+  const terminal = appState.terminal || { running: false, ready: false, url: "http://127.0.0.1:7681/", message: "Console is stopped." };
+  const status = terminal.running
+    ? (terminal.ready ? `Console running at ${terminal.url}` : "Console starting...")
+    : (terminal.message || "Console is stopped.");
+  const iframe = terminal.running && terminal.ready
+    ? `<iframe class="terminal-frame" src="${escapeHtml(terminal.url)}" title="Embedded terminal console"></iframe>`
+    : `<div class="status-card compact">Start the console to open an interactive shell here.</div>`;
+
+  return `
+    <section class="tab-panel ${tab.id === appState.activeTab ? "active" : ""}" data-panel-id="${tab.id}" role="tabpanel">
+      <div class="status-card">${escapeHtml(tab.title)}</div>
+      <div class="tab-panel-grid">
+        <div class="tab-column">
+          <div class="status-card">${escapeHtml(tab.subtitle)}</div>
+          <section class="tab-card">
+            <h3>Interactive console</h3>
+            <div class="actions tight">
+              <button type="button" id="startTerminalConsole">Start console</button>
+              <button type="button" id="stopTerminalConsole" class="secondary">Stop console</button>
+              <button type="button" id="refreshTerminalConsole" class="secondary">Refresh status</button>
+            </div>
+            <div class="status-card compact">${escapeHtml(status)}</div>
+            ${iframe}
+          </section>
+        </div>
+        <div class="tab-column">
+          <section class="tab-card">
+            <h3>Notes</h3>
+            <div class="status-card">This opens a full interactive pseudo-terminal via ttyd. Use it for networking and service recovery when no local console is available.</div>
+          </section>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function buildMainNetworkRows() {
   renderWifiRows("wifiList");
 }
@@ -898,7 +970,7 @@ function openSettings(tabId = "connection") {
   syncNetworkFields();
   updateText("settingsNote", "Changes save to tcconfig.");
   // Refresh live data whenever the modal opens
-  Promise.all([refreshNetwork(), refreshNetworkInterfaces()]).catch(() => {});
+  Promise.all([refreshNetwork(), refreshNetworkInterfaces(), refreshTTYDStatus()]).catch(() => {});
 }
 
 function closeSettings() {
@@ -1038,8 +1110,53 @@ async function refreshWifi() {
   }
 }
 
+async function refreshTTYDStatus() {
+  try {
+    const payload = await api("/api/v1/terminal/ttyd");
+    appState.terminal = {
+      running: Boolean(payload.running),
+      ready: Boolean(payload.ready),
+      url: payload.url || "http://127.0.0.1:7681/",
+      message: payload.message || (payload.running ? "Console running." : "Console is stopped."),
+    };
+    renderSettingsPanels();
+  } catch (err) {
+    appState.terminal = {
+      running: false,
+      ready: false,
+      url: "http://127.0.0.1:7681/",
+      message: `console error: ${err.message}`,
+    };
+    renderSettingsPanels();
+  }
+}
+
+async function startTTYD() {
+  updateText("settingsNote", "Starting embedded console...");
+  try {
+    await api("/api/v1/terminal/ttyd", "POST", {});
+    await refreshTTYDStatus();
+    updateText("settingsNote", "Console started.");
+  } catch (err) {
+    updateText("settingsNote", `console start error: ${err.message}`);
+    await refreshTTYDStatus();
+  }
+}
+
+async function stopTTYD() {
+  updateText("settingsNote", "Stopping embedded console...");
+  try {
+    await api("/api/v1/terminal/ttyd", "DELETE", {});
+    await refreshTTYDStatus();
+    updateText("settingsNote", "Console stopped.");
+  } catch (err) {
+    updateText("settingsNote", `console stop error: ${err.message}`);
+    await refreshTTYDStatus();
+  }
+}
+
 async function refreshAll() {
-  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces(), refreshWireGuardUSB(), refreshOTA(), refreshOTAReleases()]);
+  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces(), refreshWireGuardUSB(), refreshOTA(), refreshOTAReleases(), refreshTTYDStatus()]);
   await refreshWifi();
 }
 
@@ -1227,6 +1344,11 @@ function wireGlobalShortcuts() {
 }
 
 function initStaticPanels() {
+  const connectionTab = SETTINGS_TABS.find((tab) => tab.id === "connection") || { cards: [] };
+  const deviceTab = SETTINGS_TABS.find((tab) => tab.id === "device") || { cards: [] };
+  const statusTab = SETTINGS_TABS.find((tab) => tab.id === "status") || { cards: [] };
+  const supportTab = SETTINGS_TABS.find((tab) => tab.id === "support") || { cards: [] };
+
   const networkPanel = document.querySelector(".network-panel .network-layout");
   if (networkPanel) {
     networkPanel.innerHTML = `
@@ -1258,7 +1380,7 @@ function initStaticPanels() {
           <div class="status-card">Remote desktop launch defaults.</div>
           <div class="tab-panel-grid">
             <div class="tab-column">
-              ${SETTINGS_TABS[0].cards.map((card) => buildCard(card)).join("")}
+              ${connectionTab.cards.map((card) => buildCard(card)).join("")}
             </div>
             <div class="tab-column">
               <section class="tab-card">
@@ -1300,7 +1422,7 @@ function initStaticPanels() {
         <section class="tab-panel" data-panel-id="device" role="tabpanel">
           <div class="status-card">Audio, brightness, keyboard layout, and background mode.</div>
           <div class="tab-panel-grid">
-            ${SETTINGS_TABS[2].cards.map((card) => buildCard(card)).join("")}
+            ${deviceTab.cards.map((card) => buildCard(card)).join("")}
           </div>
         </section>
       `,
@@ -1308,7 +1430,7 @@ function initStaticPanels() {
         <section class="tab-panel" data-panel-id="status" role="tabpanel">
           <div class="status-card">Overlay toggles and indicators used by the desktop shell.</div>
           <div class="tab-panel-grid">
-            ${SETTINGS_TABS[3].cards.map((card) => buildCard(card)).join("")}
+            ${statusTab.cards.map((card) => buildCard(card)).join("")}
           </div>
         </section>
       `,
@@ -1316,7 +1438,7 @@ function initStaticPanels() {
         <section class="tab-panel" data-panel-id="support" role="tabpanel">
           <div class="status-card">Recovery, helpdesk, and deployment details.</div>
           <div class="tab-panel-grid">
-            ${SETTINGS_TABS[4].cards.map((card) => buildCard(card)).join("")}
+            ${supportTab.cards.map((card) => buildCard(card)).join("")}
           </div>
         </section>
       `,
