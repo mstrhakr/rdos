@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -57,57 +58,11 @@ func LoadConfig(path string) (*Config, error) {
 				cfg.Position = val
 			}
 		case "overlay_pin_timeout":
-			var t int
-			if _, err := sscanf(val, "%d", &t); err == nil && t > 0 {
+			if t, err := strconv.Atoi(val); err == nil && t > 0 {
 				cfg.PinTimeout = t
 			}
 		}
 	}
 
 	return cfg, scanner.Err()
-}
-
-// Simple sscanf-like function for basic parsing
-func sscanf(s string, format string, args ...interface{}) (int, error) {
-	if format == "%d" && len(args) > 0 {
-		if pi, ok := args[0].(*int); ok {
-			var num int
-			_, err := parseInteger(s, &num)
-			if err == nil {
-				*pi = num
-				return 1, nil
-			}
-			return 0, err
-		}
-	}
-	return 0, nil
-}
-
-func parseInteger(s string, pi *int) (int, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, nil
-	}
-
-	var result int
-	negative := false
-	if s[0] == '-' {
-		negative = true
-		s = s[1:]
-	}
-
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
-		if ch < '0' || ch > '9' {
-			break
-		}
-		result = result*10 + int(ch-'0')
-	}
-
-	if negative {
-		result = -result
-	}
-
-	*pi = result
-	return 1, nil
 }

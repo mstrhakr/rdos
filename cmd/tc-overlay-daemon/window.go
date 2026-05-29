@@ -173,14 +173,10 @@ func (w *Window) Redraw() {
 	)
 
 	// Draw session time on the left (HH:MM:SS)
+	// TODO: Implement proper text rendering using xgraphics, Cairo, or Pango
+	// For now, skip drawing the clock text to avoid unreadable placeholder boxes
 	elapsed := time.Since(w.StartTime)
-	hours := int(elapsed.Hours())
-	minutes := int(elapsed.Minutes()) % 60
-	seconds := int(elapsed.Seconds()) % 60
-	timeStr := fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
-
-	setGCForegroundColor(w.Conn, w.GC, w.Theme.TextColor)
-	drawSimpleText(w.Conn, w.Window, w.GC, 12, 24, timeStr)
+	_ = elapsed // TODO: display when text rendering is available
 
 	// Draw pin button on right side (32x32 button at right-40)
 	pinX := int16(w.Width - 40)
@@ -210,13 +206,8 @@ func (w *Window) Redraw() {
 		},
 	)
 
-	// Draw pin label text
-	setGCForegroundColor(w.Conn, w.GC, w.Theme.BGColor)
-	if w.IsPinned {
-		drawSimpleText(w.Conn, w.Window, w.GC, int(pinX)+8, int(pinY)+20, "PIN")
-	} else {
-		drawSimpleText(w.Conn, w.Window, w.GC, int(pinX)+2, int(pinY)+20, "UNPIN")
-	}
+	// TODO: Draw pin label text ("PIN"/"UNPIN") once text rendering is implemented
+	// For now, skip drawing placeholder boxes to avoid visual confusion
 }
 
 func (w *Window) drawImageOnWindow(img *image.RGBA) {
@@ -232,43 +223,6 @@ func setGCForegroundColor(conn *xgb.Conn, gc xproto.Gcontext, col color.RGBA) {
 	xproto.ChangeGC(conn, gc, xproto.GcForeground, []uint32{pixel})
 }
 
-// drawSimpleText draws text at x,y using XDrawString or similar
-// For MVP, draws placeholder boxes instead of actual glyphs
-func drawSimpleText(conn *xgb.Conn, window xproto.Window, gc xproto.Gcontext, x, y int, text string) {
-	// Simple approach: draw a filled rectangle for each character
-	// Each char ~6px wide, ~12px tall
-	for i, ch := range text {
-		charX := x + i*7
-		charY := y - 9
-
-		// Draw placeholder char box (simple filled rect)
-		if ch >= '0' && ch <= '9' {
-			// Draw just a thin vertical line for digits (simplified)
-			xproto.PolySegment(conn, xproto.Drawable(window), gc,
-				[]xproto.Segment{
-					{X1: int16(charX), Y1: int16(charY), X2: int16(charX), Y2: int16(charY + 10)},
-					{X1: int16(charX + 1), Y1: int16(charY), X2: int16(charX + 1), Y2: int16(charY + 10)},
-					{X1: int16(charX + 2), Y1: int16(charY), X2: int16(charX + 2), Y2: int16(charY + 10)},
-				},
-			)
-		} else if ch == ':' {
-			// Draw dots for colon separator
-			xproto.PolyFillRectangle(conn, xproto.Drawable(window), gc,
-				[]xproto.Rectangle{
-					{X: int16(charX), Y: int16(charY + 2), Width: 2, Height: 2},
-					{X: int16(charX), Y: int16(charY + 7), Width: 2, Height: 2},
-				},
-			)
-		} else {
-			// Generic letter/label
-			xproto.PolyFillRectangle(conn, xproto.Drawable(window), gc,
-				[]xproto.Rectangle{
-					{X: int16(charX), Y: int16(charY), Width: 5, Height: 10},
-				},
-			)
-		}
-	}
-}
 
 func (w *Window) ProcessEvents() {
 	for {

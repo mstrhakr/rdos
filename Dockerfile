@@ -15,8 +15,7 @@ COPY go.mod ./
 COPY go.sum ./
 COPY cmd ./cmd
 COPY internal ./internal
-RUN apt-get update && apt-get install -y libx11-dev libxcb1-dev && \
-    CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o /out/tc-overlay-daemon ./cmd/tc-overlay-daemon
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o /out/tc-overlay-daemon ./cmd/tc-overlay-daemon
 
 FROM debian:trixie
 

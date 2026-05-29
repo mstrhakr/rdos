@@ -176,5 +176,6 @@ if [[ -z ${DISPLAY} && ( ${TTY} == 'tty1' || ${TTY} == 'console' || ${TTY} == 'h
 
         sleep 2
     done
+
+    unset TTY mode fail_count
 fi
-unset TTY

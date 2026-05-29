@@ -372,7 +372,6 @@ func (a *app) handleSessionStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snapshot := a.sessions.Snapshot()
-	a.reconcileTerminalForSession(snapshot)
 	respondJSON(w, http.StatusOK, snapshot)
 }
 
@@ -985,15 +984,6 @@ func (a *app) handleSessionDisconnect(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, a.sessions.Snapshot())
 }
 
-func (a *app) reconcileTerminalForSession(snapshot session.Snapshot) {
-	switch snapshot.State {
-	case session.StateConnecting, session.StateConnected:
-		_, _ = a.stopTerminalTTYD()
-	default:
-		_, _ = a.startTerminalTTYD()
-	}
-}
-
 func respondJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -1280,10 +1270,9 @@ func readSlotVersion(slot string) string {
 		return ""
 	}
 
-	for _, candidate := range []string{filepath.Join("/boot/slots", slot+"-version")} {
-		if b, err := os.ReadFile(candidate); err == nil {
-			return strings.TrimSpace(string(b))
-		}
+	candidate := filepath.Join("/boot/slots", slot+"-version")
+	if b, err := os.ReadFile(candidate); err == nil {
+		return strings.TrimSpace(string(b))
 	}
 
 	return ""

@@ -327,6 +327,9 @@ EFI_GRUBCFG
                 echo "Warning: EFI GRUB binary was not created in EFI/BOOT or EFI/RDOS" >&2
             fi
 
+        else
+            echo "Warning: EFI grub-install failed; artifact may not boot on UEFI-only hypervisors" >&2
+
         fi
 
     fi
