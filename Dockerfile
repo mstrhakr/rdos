@@ -3,9 +3,20 @@ FROM golang:1.23-bookworm AS thinclient_go_builder
 
 WORKDIR /src
 COPY go.mod ./
+COPY go.sum ./
 COPY cmd ./cmd
 COPY internal ./internal
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o /out/thinclient-go ./cmd/thinclient-go
+
+FROM golang:1.23-bookworm AS tc_overlay_daemon_builder
+
+WORKDIR /src
+COPY go.mod ./
+COPY go.sum ./
+COPY cmd ./cmd
+COPY internal ./internal
+RUN apt-get update && apt-get install -y libx11-dev libxcb1-dev && \
+    CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o /out/tc-overlay-daemon ./cmd/tc-overlay-daemon
 
 FROM debian:trixie
 
@@ -22,7 +33,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y \
         sudo curl wget \
-        xterm xinit x11-xserver-utils \
+        xterm xinit x11-xserver-utils libxcb1 \
         fvwm yad light feh \
         chromium \
         freerdp3-x11 \
@@ -94,6 +105,7 @@ RUN --mount=type=bind,source=.,target=/build-context,ro \
 
 COPY tcfiles/thinclient /usr/bin/thinclient
 COPY --from=thinclient_go_builder /out/thinclient-go /usr/bin/thinclient-go
+COPY --from=tc_overlay_daemon_builder /out/tc-overlay-daemon /usr/bin/tc-overlay-daemon
 COPY tcfiles/tc-ui-launch /usr/bin/tc-ui-launch
 COPY tcfiles/tc-settings /usr/bin/tc-settings
 COPY tcfiles/tc-import-usb /usr/bin/tc-import-usb

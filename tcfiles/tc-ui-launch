@@ -117,6 +117,15 @@ run_web_mode() {
         return 1
     fi
 
+    # Start overlay daemon early
+    if command -v /usr/bin/tc-overlay-daemon >/dev/null 2>&1; then
+        log "starting overlay daemon"
+        /usr/bin/tc-overlay-daemon -tcconfig="${HOME}/tcconfig" -log="${HOME}/.tc-overlay.log" >/dev/null 2>&1 &
+        # Note: daemon will run in background and exit when user logs out
+    else
+        log "overlay daemon not found; skipping"
+    fi
+
     if [ "${RDOS_UI_CHROMIUM_NO_SANDBOX:-}" = "1" ]; then
         use_no_sandbox="1"
     elif [ ! -e /proc/sys/kernel/unprivileged_userns_clone ] || [ "$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || printf '1')" != "1" ]; then
