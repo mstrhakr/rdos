@@ -78,7 +78,7 @@ read_mode_from_tcconfig() {
 
 wait_for_backend() {
     local i
-    for i in $(seq 1 120); do
+    for ((i = 1; i <= 120; i++)); do
         if curl -fsS "$BACKEND_URL/api/v1/health" >/dev/null 2>&1; then
             return 0
         fi
@@ -87,11 +87,19 @@ wait_for_backend() {
     return 1
 }
 
+cleanup_chromium_profile() {
+    local profile_dir="$1"
+    [ -n "$profile_dir" ] || return 0
+    rm -rf "$profile_dir" >/dev/null 2>&1 || true
+}
+
 run_web_mode() {
     local backend_pid=""
     local chromium_bin=""
     local use_no_sandbox="0"
     local chromium_rc="0"
+    local profile_dir=""
+    local -a chromium_args=()
 
     if ! command -v /usr/bin/thinclient-go >/dev/null 2>&1; then
         log "thinclient-go not found; falling back to legacy UI"
@@ -100,6 +108,12 @@ run_web_mode() {
 
     if ! chromium_bin="$(find_chromium)"; then
         log "chromium not found; web UI cannot start"
+        return 1
+    fi
+
+    profile_dir="$(mktemp -d /tmp/rdos-chromium-profile.XXXXXX 2>/dev/null || true)"
+    if [ -z "$profile_dir" ] || [ ! -d "$profile_dir" ]; then
+        warn "failed to create temporary Chromium profile directory"
         return 1
     fi
 
@@ -124,36 +138,37 @@ run_web_mode() {
         fi
         kill "$backend_pid" >/dev/null 2>&1 || true
         wait "$backend_pid" >/dev/null 2>&1 || true
+        cleanup_chromium_profile "$profile_dir"
         return 1
     fi
 
+    chromium_args=(
+        --kiosk
+        "$BACKEND_URL"
+        --user-data-dir="$profile_dir"
+        --no-first-run
+        --no-default-browser-check
+        --disable-session-crashed-bubble
+        --disable-infobars
+        --overscroll-history-navigation=0
+        --autoplay-policy=no-user-gesture-required
+        --disable-gpu
+        --disable-dev-shm-usage
+        --start-fullscreen
+        --start-maximized
+        --disable-background-networking
+        --disable-component-update
+        --disable-sync
+        "--disable-features=Translate,AutofillServerCommunication,AutofillEnableAccountWalletStorage,PasswordManagerOnboarding,PasswordManagerRedesign"
+    )
+
     if [ "$use_no_sandbox" = "1" ]; then
         warn "Launching Chromium with --no-sandbox for kernel compatibility"
-        "$chromium_bin" \
-            --kiosk \
-            --app="$BACKEND_URL" \
-            --no-first-run \
-            --disable-session-crashed-bubble \
-            --disable-infobars \
-            --overscroll-history-navigation=0 \
-            --autoplay-policy=no-user-gesture-required \
-            --disable-gpu \
-            --disable-dev-shm-usage \
-            --no-sandbox \
-            >>"$BROWSER_LOG" 2>&1
+        chromium_args+=(--no-sandbox)
+        "$chromium_bin" "${chromium_args[@]}" >>"$BROWSER_LOG" 2>&1
         chromium_rc=$?
     else
-        "$chromium_bin" \
-            --kiosk \
-            --app="$BACKEND_URL" \
-            --no-first-run \
-            --disable-session-crashed-bubble \
-            --disable-infobars \
-            --overscroll-history-navigation=0 \
-            --autoplay-policy=no-user-gesture-required \
-            --disable-gpu \
-            --disable-dev-shm-usage \
-            >>"$BROWSER_LOG" 2>&1
+        "$chromium_bin" "${chromium_args[@]}" >>"$BROWSER_LOG" 2>&1
         chromium_rc=$?
     fi
 
@@ -167,6 +182,7 @@ run_web_mode() {
 
     kill "$backend_pid" >/dev/null 2>&1 || true
     wait "$backend_pid" >/dev/null 2>&1 || true
+    cleanup_chromium_profile "$profile_dir"
     return "$chromium_rc"
 }
 

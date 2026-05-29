@@ -23,6 +23,7 @@ html,
 body {
   width: 100%;
   height: 100%;
+  min-height: 100dvh;
   overflow: hidden;
 }
 
@@ -34,6 +35,7 @@ body {
     radial-gradient(circle at 88% 0%, rgba(46, 112, 181, 0.22), transparent 28%),
     linear-gradient(165deg, var(--bg), var(--bg-2) 55%, var(--bg-3));
   font-family: "Aptos", "Segoe UI", "Helvetica Neue", sans-serif;
+  cursor: default;
 }
 
 body::before {
@@ -119,6 +121,38 @@ label {
   z-index: 1;
   width: 100vw;
   height: 100vh;
+  min-height: 100dvh;
+}
+
+html,
+body,
+.app,
+main,
+section,
+label,
+div,
+p,
+h1,
+h2,
+h3,
+span,
+strong,
+button {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+input,
+textarea,
+select,
+[contenteditable=""],
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 .panel,

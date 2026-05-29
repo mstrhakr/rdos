@@ -177,6 +177,10 @@ COPY tcfiles/dhcp.network /etc/systemd/network/dhcp.network
 COPY tcfiles/systemd-resolved.conf /etc/tmpfiles.d/systemd-resolved.conf
 RUN systemctl enable systemd-networkd.service systemd-resolved.service
 
+RUN install -d -m 755 /etc/chromium/policies/managed /etc/chromium-browser/policies/managed
+COPY tcfiles/chromium-policies/managed/rdos-kiosk.json /etc/chromium/policies/managed/rdos-kiosk.json
+COPY tcfiles/chromium-policies/managed/rdos-kiosk.json /etc/chromium-browser/policies/managed/rdos-kiosk.json
+
 COPY tcfiles/xorg.conf /etc/X11/xorg.conf.d/thinclient.conf
 COPY tcfiles/Xwrapper.config /etc/X11/Xwrapper.config
 

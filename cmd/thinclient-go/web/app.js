@@ -1422,13 +1422,66 @@ async function connectWifi() {
   }
 }
 
+function isEditableTarget(target) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  return Boolean(target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
+}
+
+function shouldBlockGlobalShortcut(event) {
+  if (isEditableTarget(event.target)) {
+    return false;
+  }
+
+  const key = String(event.key || "").toLowerCase();
+  const hasPrimaryModifier = event.ctrlKey || event.metaKey;
+
+  if (event.key === "F12") {
+    return true;
+  }
+
+  if (hasPrimaryModifier && event.shiftKey && (key === "i" || key === "j" || key === "c")) {
+    return true;
+  }
+
+  if (hasPrimaryModifier && (key === "u" || key === "a" || key === "c" || key === "x" || key === "v")) {
+    return true;
+  }
+
+  return false;
+}
+
 function wireGlobalShortcuts() {
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       closeCertTrustModal();
       closeSettings();
     }
+
+    if (shouldBlockGlobalShortcut(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
   });
+
+  document.addEventListener("contextmenu", (event) => {
+    if (!isEditableTarget(event.target)) {
+      event.preventDefault();
+    }
+  }, true);
+
+  document.addEventListener("selectstart", (event) => {
+    if (!isEditableTarget(event.target)) {
+      event.preventDefault();
+    }
+  }, true);
+
+  document.addEventListener("dragstart", (event) => {
+    if (!isEditableTarget(event.target)) {
+      event.preventDefault();
+    }
+  }, true);
 }
 
 function initStaticPanels() {
