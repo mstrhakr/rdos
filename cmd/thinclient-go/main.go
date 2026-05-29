@@ -132,6 +132,16 @@ type wireguardUSBImportResponse struct {
 	Message   string `json:"message"`
 }
 
+type wireguardStatusResponse struct {
+	Enabled    bool     `json:"enabled"`
+	HasConfig  bool     `json:"hasConfig"`
+	Interfaces []string `json:"interfaces"`
+}
+
+type wireguardEnableRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
 type wifiNetwork struct {
 	SSID      string `json:"ssid"`
 	Signal    string `json:"signal"`
@@ -222,6 +232,9 @@ func main() {
 	mux.Handle("/api/v1/ota/rollback", application.loopbackOnly(http.HandlerFunc(application.handleOTARollback)))
 	mux.Handle("/api/v1/wireguard/usb", application.loopbackOnly(http.HandlerFunc(application.handleWireGuardUSBScan)))
 	mux.Handle("/api/v1/wireguard/import", application.loopbackOnly(http.HandlerFunc(application.handleWireGuardUSBImport)))
+	mux.Handle("/api/v1/wireguard/enable", application.loopbackOnly(http.HandlerFunc(application.handleWireGuardEnable)))
+	mux.Handle("/api/v1/wireguard", application.loopbackOnly(http.HandlerFunc(application.handleWireGuardStatus)))
+	mux.Handle("/api/v1/wifi/disconnect", application.loopbackOnly(http.HandlerFunc(application.handleWifiDisconnect)))
 	mux.Handle("/api/v1/status", application.loopbackOnly(http.HandlerFunc(application.handleStatus)))
 	mux.Handle("/api/v1/wifi/scan", application.loopbackOnly(http.HandlerFunc(application.handleWifiScan)))
 	mux.Handle("/api/v1/wifi/connect", application.loopbackOnly(http.HandlerFunc(application.handleWifiConnect)))
@@ -626,6 +639,126 @@ func (a *app) handleWireGuardUSBImport(w http.ResponseWriter, r *http.Request) {
 		Interface: config.Interface,
 		Message:   message,
 	})
+}
+
+func (a *app) handleWireGuardStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	a.mu.Lock()
+	cfg := cloneConfig(a.config)
+	a.mu.Unlock()
+
+	enabled := strings.ToLower(strings.TrimSpace(cfg["wireguard_enabled"])) == "true"
+
+	hasConfigOut, _ := exec.Command("sudo", "-n", "/usr/bin/tc-configure-wireguard", "--has-config").Output()
+	hasConfig := strings.TrimSpace(string(hasConfigOut)) == "true"
+
+	var interfaces []string
+	if out, err := exec.Command("wg", "show", "interfaces").Output(); err == nil {
+		for _, iface := range strings.Fields(string(out)) {
+			if iface != "" {
+				interfaces = append(interfaces, iface)
+			}
+		}
+	}
+	if interfaces == nil {
+		interfaces = []string{}
+	}
+
+	respondJSON(w, http.StatusOK, wireguardStatusResponse{
+		Enabled:    enabled,
+		HasConfig:  hasConfig,
+		Interfaces: interfaces,
+	})
+}
+
+func (a *app) handleWireGuardEnable(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	defer r.Body.Close()
+
+	var req wireguardEnableRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "invalid json payload", http.StatusBadRequest)
+		return
+	}
+
+	stateStr := "false"
+	if req.Enabled {
+		stateStr = "true"
+	}
+
+	cmd := exec.Command("sudo", "-n", "/usr/bin/tc-configure-wireguard", "--set-enabled", stateStr)
+	output, err := cmd.CombinedOutput()
+	message := strings.TrimSpace(string(output))
+	if err != nil {
+		if message == "" {
+			message = err.Error()
+		}
+		http.Error(w, "wireguard toggle failed: "+message, http.StatusBadRequest)
+		return
+	}
+
+	actualState := "false"
+	if strings.EqualFold(strings.TrimSpace(message), "true") {
+		actualState = "true"
+	}
+	a.mu.Lock()
+	updated := cloneConfig(a.config)
+	updated["wireguard_enabled"] = actualState
+	a.mu.Unlock()
+
+	if err := a.store.Save(updated); err != nil {
+		http.Error(w, "failed to persist config", http.StatusInternalServerError)
+		return
+	}
+
+	a.mu.Lock()
+	a.config = updated
+	a.mu.Unlock()
+
+	var interfaces []string
+	if out, err2 := exec.Command("wg", "show", "interfaces").Output(); err2 == nil {
+		for _, iface := range strings.Fields(string(out)) {
+			if iface != "" {
+				interfaces = append(interfaces, iface)
+			}
+		}
+	}
+	if interfaces == nil {
+		interfaces = []string{}
+	}
+
+	respondJSON(w, http.StatusOK, wireguardStatusResponse{
+		Enabled:    actualState == "true",
+		HasConfig:  actualState == "true" || strings.EqualFold(strings.TrimSpace(message), "true"),
+		Interfaces: interfaces,
+	})
+}
+
+func (a *app) handleWifiDisconnect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cmd := exec.Command("sudo", "-n", "/usr/bin/tc-configure-wifi", "--disconnect")
+	output, err := cmd.CombinedOutput()
+	message := strings.TrimSpace(string(output))
+	if err != nil {
+		if message == "" {
+			message = err.Error()
+		}
+		http.Error(w, "wifi disconnect failed: "+message, http.StatusBadRequest)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"message": message})
 }
 
 func (a *app) handleWifiScan(w http.ResponseWriter, r *http.Request) {

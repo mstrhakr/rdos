@@ -7,10 +7,13 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
+
+var resolutionPattern = regexp.MustCompile(`^([1-9][0-9]{1,4})x([1-9][0-9]{1,4})$`)
 
 type State string
 
@@ -27,6 +30,7 @@ type ConnectRequest struct {
 	Password   string   `json:"password"`
 	Domain     string   `json:"domain"`
 	CertPolicy string   `json:"certPolicy"`
+	Resolution string   `json:"resolution"` // "dynamic" (default fullscreen) or "WxH" (e.g. "1920x1080")
 	ExtraArgs  []string `json:"extraArgs"`
 }
 
@@ -132,13 +136,21 @@ func (m *Manager) Disconnect() error {
 func (m *Manager) buildCommand(ctx context.Context, req ConnectRequest) (*exec.Cmd, io.WriteCloser, *os.File, error) {
 	args := []string{
 		"/v:" + strings.TrimSpace(req.Server),
-		"/multimon",
 		"+multitouch",
-		"/f",
 		"/network:auto",
-		"/dynamic-resolution",
 		"+auto-reconnect",
 		"+multitransport",
+	}
+
+	// Resolution / display mode.
+	// "dynamic" (default): fullscreen multimon with dynamic resize — standard thin-client mode.
+	// "WxH": windowed at that fixed size with dynamic-resolution so the server still adjusts on resize.
+	resolution := strings.TrimSpace(req.Resolution)
+	if m := resolutionPattern.FindStringSubmatch(strings.ToLower(resolution)); m != nil {
+		args = append(args, "/w:"+m[1], "/h:"+m[2], "/dynamic-resolution")
+	} else {
+		// Default: fullscreen + multimon + dynamic-resolution.
+		args = append(args, "/f", "/multimon", "/dynamic-resolution")
 	}
 
 	if req.Username != "" {
