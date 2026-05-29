@@ -295,6 +295,9 @@ function certificateIssueFromSnapshot(snapshot) {
   if (!snapshot || snapshot.state !== "error") {
     return null;
   }
+  if (normalizeCertPolicy(valueForKey("cert_policy")) === "ignore") {
+    return null;
+  }
   const details = [snapshot.message || "", snapshot.lastOutput || ""].filter(Boolean).join("\n").trim();
   if (!details) {
     return null;
@@ -302,14 +305,13 @@ function certificateIssueFromSnapshot(snapshot) {
 
   const lower = details.toLowerCase();
   const hasCertSignal = [
-    "certificate",
-    "x509",
-    "tls",
-    "cert:",
-    "cert verify",
-    "certification",
-    "self-signed",
-    "hostname mismatch",
+    "host key verification failed",
+    "certificate verification failure",
+    "self-signed certificate",
+    "add correct host key",
+    "the fingerprint for the host key",
+    "host key for",
+    "certificate has changed",
   ].some((token) => lower.includes(token));
 
   if (!hasCertSignal) {
@@ -1027,8 +1029,7 @@ function bindModalActions() {
     try {
       await persistCertPolicy("tofu");
       closeCertTrustModal();
-      appState.certPrompt.dismissedSignature = "";
-      await connectSession("tofu");
+      await connectSession("tofu", true);
     } catch (err) {
       updateText("settingsNote", `certificate trust error: ${err.message}`);
     }
@@ -1037,7 +1038,6 @@ function bindModalActions() {
     try {
       await persistCertPolicy("ignore");
       closeCertTrustModal();
-      appState.certPrompt.dismissedSignature = "";
       await connectSession("ignore");
     } catch (err) {
       updateText("settingsNote", `certificate ignore error: ${err.message}`);
@@ -1083,6 +1083,9 @@ async function refreshSession() {
   try {
     appState.session = await api("/api/v1/session");
     const snapshot = appState.session;
+    if (snapshot.state !== "error") {
+      appState.certPrompt.dismissedSignature = "";
+    }
     let display = `session: ${snapshot.state || "unknown"}`;
     if (snapshot.exitCode !== undefined && snapshot.exitCode !== null && snapshot.exitCode !== 0) {
       display += ` (exit ${snapshot.exitCode})`;
@@ -1266,7 +1269,7 @@ async function triggerOTARollback() {
   }
 }
 
-async function connectSession(certPolicyOverride = "") {
+async function connectSession(certPolicyOverride = "", resetCert = false) {
   const certPolicy = normalizeCertPolicy(certPolicyOverride || valueForKey("cert_policy") || "tofu");
   const payload = {
     server: document.getElementById("server")?.value.trim(),
@@ -1274,6 +1277,7 @@ async function connectSession(certPolicyOverride = "") {
     password: document.getElementById("password")?.value,
     domain: document.getElementById("domain")?.value.trim(),
     certPolicy,
+    resetCert: Boolean(resetCert),
   };
 
   try {

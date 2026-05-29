@@ -32,6 +32,7 @@ type ConnectRequest struct {
 	Password   string   `json:"password"`
 	Domain     string   `json:"domain"`
 	CertPolicy string   `json:"certPolicy"`
+	ResetCert  bool     `json:"resetCert"`
 	Resolution string   `json:"resolution"` // "dynamic" (default fullscreen) or "WxH" (e.g. "1920x1080")
 	ExtraArgs  []string `json:"extraArgs"`
 }
@@ -193,6 +194,13 @@ func (m *Manager) buildCommand(ctx context.Context, req ConnectRequest) (*exec.C
 	if err := os.MkdirAll(freerdpDir, 0o700); err != nil {
 		return nil, nil, nil, fmt.Errorf("ensure freerdp config dir: %w", err)
 	}
+	if req.ResetCert {
+		serverCertDir := filepath.Join(freerdpDir, "server")
+		_ = os.RemoveAll(serverCertDir)
+		if err := os.MkdirAll(serverCertDir, 0o700); err != nil {
+			return nil, nil, nil, fmt.Errorf("reset freerdp server cert cache: %w", err)
+		}
+	}
 	cmd.Env = append(os.Environ(),
 		"HOME="+homeDir,
 		"XDG_CONFIG_HOME="+xdgConfigHome,
@@ -201,7 +209,7 @@ func (m *Manager) buildCommand(ctx context.Context, req ConnectRequest) (*exec.C
 		"WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=.",
 	)
 
-	logFile, err := os.OpenFile(m.logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	logFile, err := os.OpenFile(m.logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("open session log: %w", err)
 	}
