@@ -247,6 +247,14 @@ func main() {
 		config:   cfg,
 	}
 
+	// Keep a recovery console available by default when the UI is active.
+	go func() {
+		statusCode, status := application.startTerminalTTYD()
+		if statusCode >= http.StatusBadRequest {
+			log.Printf("terminal startup skipped: %s", status.Message)
+		}
+	}()
+
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/health", application.loopbackOnly(http.HandlerFunc(application.handleHealth)))
 	mux.Handle("/api/v1/config", application.loopbackOnly(http.HandlerFunc(application.handleConfig)))
@@ -363,7 +371,9 @@ func (a *app) handleSessionStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	respondJSON(w, http.StatusOK, a.sessions.Snapshot())
+	snapshot := a.sessions.Snapshot()
+	a.reconcileTerminalForSession(snapshot)
+	respondJSON(w, http.StatusOK, snapshot)
 }
 
 func (a *app) handleNetwork(w http.ResponseWriter, r *http.Request) {
@@ -792,7 +802,7 @@ func (a *app) startTerminalTTYD() (int, terminalTTYDResponse) {
 		return http.StatusOK, a.terminalTTYDStatus("Console already running")
 	}
 
-	cmd := exec.Command("ttyd", "-p", strconv.Itoa(ttydPort), "bash", "-l")
+	cmd := exec.Command("ttyd", "-W", "-p", strconv.Itoa(ttydPort), "bash", "-l")
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	if err := cmd.Start(); err != nil {
 		a.terminalMu.Unlock()
@@ -950,7 +960,12 @@ func (a *app) handleSessionConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Stop the embedded terminal while an RDP session is active.
+	_, _ = a.stopTerminalTTYD()
+
 	if err := a.sessions.Connect(req); err != nil {
+		// Restore terminal access when RDP launch fails.
+		_, _ = a.startTerminalTTYD()
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -966,7 +981,17 @@ func (a *app) handleSessionDisconnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	_, _ = a.startTerminalTTYD()
 	respondJSON(w, http.StatusOK, a.sessions.Snapshot())
+}
+
+func (a *app) reconcileTerminalForSession(snapshot session.Snapshot) {
+	switch snapshot.State {
+	case session.StateConnecting, session.StateConnected:
+		_, _ = a.stopTerminalTTYD()
+	default:
+		_, _ = a.startTerminalTTYD()
+	}
 }
 
 func respondJSON(w http.ResponseWriter, status int, payload any) {

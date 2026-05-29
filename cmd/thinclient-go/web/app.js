@@ -728,23 +728,6 @@ function attachSettingsActions() {
     rollbackButton.addEventListener("click", () => triggerOTARollback());
   }
 
-  const startTerminalButton = document.getElementById("startTerminalConsole");
-  if (startTerminalButton && !startTerminalButton.dataset.bound) {
-    startTerminalButton.dataset.bound = "1";
-    startTerminalButton.addEventListener("click", () => startTTYD());
-  }
-
-  const stopTerminalButton = document.getElementById("stopTerminalConsole");
-  if (stopTerminalButton && !stopTerminalButton.dataset.bound) {
-    stopTerminalButton.dataset.bound = "1";
-    stopTerminalButton.addEventListener("click", () => stopTTYD());
-  }
-
-  const refreshTerminalButton = document.getElementById("refreshTerminalConsole");
-  if (refreshTerminalButton && !refreshTerminalButton.dataset.bound) {
-    refreshTerminalButton.dataset.bound = "1";
-    refreshTerminalButton.addEventListener("click", () => refreshTTYDStatus());
-  }
 }
 
 function attachNetworkActions() {
@@ -901,32 +884,17 @@ function buildTerminalPanel(tab) {
     : (terminal.message || "Console is stopped.");
   const iframe = terminal.running && terminal.ready
     ? `<iframe class="terminal-frame" src="${escapeHtml(terminal.url)}" title="Embedded terminal console"></iframe>`
-    : `<div class="status-card compact">Start the console to open an interactive shell here.</div>`;
+    : `<div class="status-card compact terminal-empty">Console unavailable right now (for example, while RDP is active).</div>`;
 
   return `
-    <section class="tab-panel ${tab.id === appState.activeTab ? "active" : ""}" data-panel-id="${tab.id}" role="tabpanel">
+    <section class="tab-panel terminal-panel ${tab.id === appState.activeTab ? "active" : ""}" data-panel-id="${tab.id}" role="tabpanel">
       <div class="status-card">${escapeHtml(tab.title)}</div>
-      <div class="tab-panel-grid">
-        <div class="tab-column">
-          <div class="status-card">${escapeHtml(tab.subtitle)}</div>
-          <section class="tab-card">
-            <h3>Interactive console</h3>
-            <div class="actions tight">
-              <button type="button" id="startTerminalConsole">Start console</button>
-              <button type="button" id="stopTerminalConsole" class="secondary">Stop console</button>
-              <button type="button" id="refreshTerminalConsole" class="secondary">Refresh status</button>
-            </div>
-            <div class="status-card compact">${escapeHtml(status)}</div>
-            ${iframe}
-          </section>
+      <section class="tab-card terminal-card">
+        <div class="terminal-toolbar">
+          <div class="terminal-status">${escapeHtml(status)}</div>
         </div>
-        <div class="tab-column">
-          <section class="tab-card">
-            <h3>Notes</h3>
-            <div class="status-card">This opens a full interactive pseudo-terminal via ttyd. Use it for networking and service recovery when no local console is available.</div>
-          </section>
-        </div>
-      </div>
+        ${iframe}
+      </section>
     </section>
   `;
 }
@@ -1128,30 +1096,6 @@ async function refreshTTYDStatus() {
       message: `console error: ${err.message}`,
     };
     renderSettingsPanels();
-  }
-}
-
-async function startTTYD() {
-  updateText("settingsNote", "Starting embedded console...");
-  try {
-    await api("/api/v1/terminal/ttyd", "POST", {});
-    await refreshTTYDStatus();
-    updateText("settingsNote", "Console started.");
-  } catch (err) {
-    updateText("settingsNote", `console start error: ${err.message}`);
-    await refreshTTYDStatus();
-  }
-}
-
-async function stopTTYD() {
-  updateText("settingsNote", "Stopping embedded console...");
-  try {
-    await api("/api/v1/terminal/ttyd", "DELETE", {});
-    await refreshTTYDStatus();
-    updateText("settingsNote", "Console stopped.");
-  } catch (err) {
-    updateText("settingsNote", `console stop error: ${err.message}`);
-    await refreshTTYDStatus();
   }
 }
 

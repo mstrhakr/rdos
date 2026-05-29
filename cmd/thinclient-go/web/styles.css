@@ -270,10 +270,41 @@ label {
 
 .terminal-frame {
   width: 100%;
-  min-height: 52vh;
+  min-height: 62vh;
+  height: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: rgba(2, 8, 12, 0.85);
+}
+
+.terminal-panel.active {
+  grid-template-rows: auto 1fr;
+}
+
+.terminal-card {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0.62rem;
+}
+
+.terminal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.terminal-status {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.terminal-empty {
+  min-height: 62vh;
+  display: grid;
+  place-items: center;
 }
 
 .modal {
