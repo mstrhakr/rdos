@@ -188,6 +188,7 @@ const appState = {
     hasWireless: false,
     defaultInterface: "",
     defaultWireless: "",
+    details: [],
   },
   health: null,
   ota: null,
@@ -896,6 +897,8 @@ function openSettings(tabId = "connection") {
   syncConfigFields();
   syncNetworkFields();
   updateText("settingsNote", "Changes save to tcconfig.");
+  // Refresh live data whenever the modal opens
+  Promise.all([refreshNetwork(), refreshNetworkInterfaces()]).catch(() => {});
 }
 
 function closeSettings() {
@@ -972,6 +975,11 @@ async function refreshNetworkInterfaces() {
     };
     syncInterfaceFields();
     renderSettingsPanels();
+    // renderSettingsPanels resets #networkState to the placeholder; restore it if data is already loaded
+    if (appState.network) {
+      syncNetworkFields();
+      updateText("networkState", JSON.stringify(appState.network, null, 2));
+    }
   } catch (err) {
     updateText("settingsNote", `interface refresh error: ${err.message}`);
   }
