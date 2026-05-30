@@ -62,30 +62,36 @@ RUN arch="$(dpkg --print-architecture)" && \
     echo "Failed to download ttyd from $url after 5 attempts" >&2; \
     exit 1
 
-# Stable system packages — this layer is only invalidated when the list below changes.
-# BuildKit cache mounts keep the apt/dpkg cache between builds so packages are not
-# re-downloaded on every run; use DOCKER_BUILDKIT=1 (or Docker 23+ default) to benefit.
+# Split package installation into categories so a change in one group does not
+# invalidate all package layers.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
         sudo wget openssl \
+        mingetty polkitd systemd-resolved \
+        libcap2-bin grub-common
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
         xterm xinit x11-xserver-utils libxcb1 \
         fvwm yad light feh \
         chromium \
+        adwaita-icon-theme-legacy libfuse2
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
         freerdp3-x11 \
         wpasupplicant iw rfkill net-tools ethtool wireguard-tools \
-        systemd-resolved \
-        polkitd mingetty \
-        pulseaudio pamixer \
-        mesa-utils \
-        firmware-linux firmware-linux-nonfree \
-        firmware-iwlwifi firmware-realtek firmware-atheros firmware-brcm80211 \
         open-vm-tools \
-        ffmpeg \
-        enca nano udiskie mc mtr \
-        adwaita-icon-theme-legacy libfuse2 \
-    libcap2-bin \
-    grub-common
+        pulseaudio pamixer \
+        enca udiskie mtr
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+        firmware-iwlwifi firmware-realtek firmware-atheros firmware-brcm80211
 
 # Disable audible terminal/system bell where possible.
 RUN printf '%s\n' 'blacklist pcspkr' 'install pcspkr /bin/false' > /etc/modprobe.d/nobeep.conf && \
