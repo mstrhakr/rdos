@@ -31,7 +31,7 @@ COPY tcfiles/debian.sources /etc/apt/sources.list.d/debian.sources
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y \
-        sudo curl wget \
+        sudo curl wget openssl \
         xterm xinit x11-xserver-utils libxcb1 \
         fvwm yad light feh \
         chromium \
@@ -120,12 +120,14 @@ COPY tcfiles/tc-ota-updater /usr/bin/tc-ota-updater
 COPY tcfiles/tc-ota-configure-timer /usr/bin/tc-ota-configure-timer
 COPY tcfiles/tc-ota-import-usb /usr/bin/tc-ota-import-usb
 COPY tcfiles/tc-ota-usb-detect /usr/bin/tc-ota-usb-detect
+COPY tcfiles/ota-signing-public.pem /etc/rdos/ota-signing-public.pem
 COPY tcfiles/tc-health-check /usr/bin/tc-health-check
 COPY tcfiles/tc-ota-rollback /usr/bin/tc-ota-rollback
 COPY tcfiles/tc-set-background /usr/bin/tc-set-background
 COPY tcfiles/099_tc /etc/sudoers.d/099_tc
 COPY tcfiles/usb-access.rules /etc/udev/rules.d/usb-access.rules
 RUN chown root:root /etc/sudoers.d/099_tc && chmod 440 /etc/sudoers.d/099_tc
+RUN chown root:root /etc/rdos/ota-signing-public.pem && chmod 0644 /etc/rdos/ota-signing-public.pem
 RUN chmod +x \
     /usr/bin/thinclient \
     /usr/bin/thinclient-go \

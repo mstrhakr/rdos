@@ -5,10 +5,34 @@ IMAGE_PATH="${1:-}"
 LOG_TAG="tc-ota-usb"
 GRUBENV=""
 TEMP_ESP_MOUNT=""
+CONFIG_FILE_PRIMARY="/home/thinclient/tcconfig"
+CONFIG_FILE_LEGACY="/boot/tcconfig"
+OTA_PUBLIC_KEY_PATH="/etc/rdos/ota-signing-public.pem"
+OTA_MANIFEST_NAME="manifest.json"
+OTA_SIGNATURE_NAME="manifest.json.sig"
 
 log()  { logger -t "$LOG_TAG" "$*"; echo "[$LOG_TAG] $*"; }
 warn() { logger -t "$LOG_TAG" "WARNING: $*"; echo "[$LOG_TAG] WARNING: $*" >&2; }
 die()  { logger -t "$LOG_TAG" "ERROR: $*"; echo "[$LOG_TAG] ERROR: $*" >&2; exit 1; }
+
+json_unescape() {
+    local value="$1"
+
+    value="${value//\\\//\/}"
+    value="${value//\\\"/\"}"
+    value="${value//\\\\/\\}"
+    printf '%s\n' "$value"
+}
+
+json_get_string() {
+    local json="$1"
+    local key="$2"
+    local raw
+
+    raw=$(printf '%s' "$json" | tr -d '\n' | sed -nE "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"(([^\"\\\\]|\\\\.)*)\".*/\\1/p" | head -n1)
+    [[ -n "$raw" ]] || return 1
+    json_unescape "$raw"
+}
 
 cleanup_temp_esp() {
     if [[ -n "$TEMP_ESP_MOUNT" ]]; then
@@ -61,6 +85,55 @@ esac
 
 if ! resolve_grubenv; then
     die "grubenv not found; this system may not be A/B-enabled"
+fi
+
+require_signature="false"
+for config_file in "$CONFIG_FILE_PRIMARY" "$CONFIG_FILE_LEGACY"; do
+    if [[ -f "$config_file" ]]; then
+        val=$(awk -F= '/^ota_require_signature=/{print $2; exit}' "$config_file" 2>/dev/null || true)
+        val="${val#\"}"
+        val="${val%\"}"
+        [[ -n "$val" ]] && require_signature="$val"
+        break
+    fi
+done
+
+REQUIRE_SIGNATURE=false
+if [[ "${require_signature,,}" == "true" || "${require_signature,,}" == "1" ]]; then
+    REQUIRE_SIGNATURE=true
+fi
+
+IMAGE_DIR="$(dirname "$IMAGE_PATH")"
+IMAGE_BASENAME="$(basename "$IMAGE_PATH")"
+MANIFEST_PATH="$IMAGE_DIR/$OTA_MANIFEST_NAME"
+SIGNATURE_PATH="$IMAGE_DIR/$OTA_SIGNATURE_NAME"
+
+if [[ "$REQUIRE_SIGNATURE" == "true" ]]; then
+    [[ -f "$MANIFEST_PATH" ]] || die "$OTA_MANIFEST_NAME is required for USB OTA import"
+    [[ -f "$SIGNATURE_PATH" ]] || die "$OTA_SIGNATURE_NAME is required for USB OTA import"
+    [[ -r "$OTA_PUBLIC_KEY_PATH" ]] || die "OTA public key not readable at $OTA_PUBLIC_KEY_PATH"
+fi
+
+if [[ -f "$MANIFEST_PATH" && -f "$SIGNATURE_PATH" ]]; then
+    log "Verifying USB OTA manifest signature..."
+    openssl dgst -sha256 -verify "$OTA_PUBLIC_KEY_PATH" -signature "$SIGNATURE_PATH" "$MANIFEST_PATH" >/dev/null 2>&1 || \
+        die "manifest signature verification failed"
+
+    MANIFEST_JSON="$(cat "$MANIFEST_PATH")"
+    MANIFEST_ARTIFACT="$(json_get_string "$MANIFEST_JSON" "artifact" || true)"
+    EXPECTED_SHA256="$(json_get_string "$MANIFEST_JSON" "sha256" || true)"
+
+    [[ -n "$EXPECTED_SHA256" ]] || die "manifest missing sha256"
+
+    if [[ -n "$MANIFEST_ARTIFACT" && "$MANIFEST_ARTIFACT" != "$IMAGE_BASENAME" ]]; then
+        die "manifest artifact '$MANIFEST_ARTIFACT' does not match selected image '$IMAGE_BASENAME'"
+    fi
+
+    log "Verifying USB OTA image SHA256..."
+    ACTUAL_SHA256="$(sha256sum "$IMAGE_PATH" | awk '{print $1}')"
+    [[ "$ACTUAL_SHA256" == "$EXPECTED_SHA256" ]] || die "SHA256 mismatch for USB OTA image"
+else
+    warn "USB OTA manifest/signature not present; importing without signed verification."
 fi
 
 CURRENT_SLOT="$(grub-editenv "$GRUBENV" list 2>/dev/null | awk -F= '/^current_slot=/{print $2}')"
