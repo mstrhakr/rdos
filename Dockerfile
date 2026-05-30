@@ -21,6 +21,9 @@ FROM debian:trixie
 
 ARG XANMOD_ARCHIVE_SHA256=ed26eb39330fd296cd037b8229adccea0197b21989ec0a1ad4f4f74f5a41c7a7
 ARG XANMOD_ARCHIVE_FINGERPRINT=D38D7D1DA1349567ADED882D86F7D09EE734E623
+# SHA-256 of the DER-encoded OTA signing public key.  Must match tcfiles/ota-signing-public.pem.
+# Run: openssl pkey -pubin -in tcfiles/ota-signing-public.pem -outform DER | openssl dgst -sha256
+ARG OTA_SIGNING_KEY_SHA256=0a2b037364e573df859dd7645afcf1011842811b0ff50577d9159ddbad923fb0
 ARG TTYD_VERSION=1.7.7
 
 COPY tcfiles/debian.sources /etc/apt/sources.list.d/debian.sources
@@ -127,7 +130,12 @@ COPY tcfiles/tc-set-background /usr/bin/tc-set-background
 COPY tcfiles/099_tc /etc/sudoers.d/099_tc
 COPY tcfiles/usb-access.rules /etc/udev/rules.d/usb-access.rules
 RUN chown root:root /etc/sudoers.d/099_tc && chmod 440 /etc/sudoers.d/099_tc
-RUN chown root:root /etc/rdos/ota-signing-public.pem && chmod 0644 /etc/rdos/ota-signing-public.pem
+RUN chown root:root /etc/rdos/ota-signing-public.pem && chmod 0644 /etc/rdos/ota-signing-public.pem && \
+    actual="$(openssl pkey -pubin -in /etc/rdos/ota-signing-public.pem -outform DER | openssl dgst -sha256 | awk '{print $NF}')" && \
+    if [ "$actual" != "$OTA_SIGNING_KEY_SHA256" ]; then \
+        echo "OTA signing key fingerprint mismatch: expected $OTA_SIGNING_KEY_SHA256, got $actual" >&2; exit 1; \
+    fi && \
+    echo "OTA signing key fingerprint verified: $actual"
 RUN chmod +x \
     /usr/bin/thinclient \
     /usr/bin/thinclient-go \

@@ -966,6 +966,130 @@ func TestHelperProcess(t *testing.T) {
 	os.Exit(exitCode)
 }
 
+func TestHandleOTAUpdateReturnsSignatureFailureMessage(t *testing.T) {
+	oldLookPath := otaLookPath
+	oldExecCommand := otaExecCommand
+	t.Cleanup(func() {
+		otaLookPath = oldLookPath
+		otaExecCommand = oldExecCommand
+	})
+
+	otaLookPath = func(file string) (string, error) {
+		return "/usr/bin/sudo", nil
+	}
+	otaExecCommand = fakeExecCommand(t, 1, "manifest signature verification failed")
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/update", strings.NewReader(`{"tag":"v1.2.3"}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAUpdate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(w.Body.String(), "manifest signature verification failed") {
+		t.Fatalf("body = %q, want signature failure detail", w.Body.String())
+	}
+}
+
+func TestHandleOTAUpdateReturnsSHA256MismatchMessage(t *testing.T) {
+	oldLookPath := otaLookPath
+	oldExecCommand := otaExecCommand
+	t.Cleanup(func() {
+		otaLookPath = oldLookPath
+		otaExecCommand = oldExecCommand
+	})
+
+	otaLookPath = func(file string) (string, error) {
+		return "/usr/bin/sudo", nil
+	}
+	otaExecCommand = fakeExecCommand(t, 1, "SHA256 mismatch! Expected abc, got def")
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/update", strings.NewReader(`{"tag":"v1.2.3"}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAUpdate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(w.Body.String(), "SHA256 mismatch") {
+		t.Fatalf("body = %q, want SHA256 mismatch detail", w.Body.String())
+	}
+}
+
+func TestHandleOTAUSBImportReturnsSignatureFailureMessage(t *testing.T) {
+	oldLookPath := otaLookPath
+	oldExecCommand := otaExecCommand
+	t.Cleanup(func() {
+		otaLookPath = oldLookPath
+		otaExecCommand = oldExecCommand
+	})
+
+	otaLookPath = func(file string) (string, error) {
+		return "/usr/bin/sudo", nil
+	}
+	otaExecCommand = fakeExecCommand(t, 1, "manifest signature verification failed")
+
+	oldFindUSBImage := otaFindUSBImage
+	t.Cleanup(func() { otaFindUSBImage = oldFindUSBImage })
+	otaFindUSBImage = func(path string) (otaUSBImage, bool) {
+		return otaUSBImage{Path: path}, true
+	}
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/usb/import", strings.NewReader(`{"path":"/mnt/usb/rdos.raw.zst"}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAUSBImport(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(w.Body.String(), "manifest signature verification failed") {
+		t.Fatalf("body = %q, want signature failure detail", w.Body.String())
+	}
+}
+
+func TestHandleOTAUSBImportReturnsMissingSignatureMessage(t *testing.T) {
+	oldLookPath := otaLookPath
+	oldExecCommand := otaExecCommand
+	t.Cleanup(func() {
+		otaLookPath = oldLookPath
+		otaExecCommand = oldExecCommand
+	})
+
+	otaLookPath = func(file string) (string, error) {
+		return "/usr/bin/sudo", nil
+	}
+	otaExecCommand = fakeExecCommand(t, 1, "manifest.json.sig is required for USB OTA import")
+
+	oldFindUSBImage := otaFindUSBImage
+	t.Cleanup(func() { otaFindUSBImage = oldFindUSBImage })
+	otaFindUSBImage = func(path string) (otaUSBImage, bool) {
+		return otaUSBImage{Path: path}, true
+	}
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/usb/import", strings.NewReader(`{"path":"/mnt/usb/rdos.raw.zst"}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAUSBImport(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(w.Body.String(), "manifest.json.sig is required") {
+		t.Fatalf("body = %q, want missing signature detail", w.Body.String())
+	}
+}
+
 func TestIsSafeInterfaceName(t *testing.T) {
 	t.Parallel()
 

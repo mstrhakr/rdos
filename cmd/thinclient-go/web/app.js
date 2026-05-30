@@ -1553,6 +1553,26 @@ async function refreshOTAUSBEvent() {
   }
 }
 
+function classifyOTAError(message) {
+  const m = String(message).toLowerCase();
+  if (m.includes("signature verification failed") || m.includes("manifest signature")) {
+    return "Manifest signature verification failed. The release may have been tampered with or the wrong signing key is installed.";
+  }
+  if (m.includes("sha256 mismatch")) {
+    return "Image integrity check failed (SHA256 mismatch). The download may be corrupt or tampered.";
+  }
+  if (m.includes("ota public key not readable") || m.includes("ota-signing-public.pem")) {
+    return "OTA signing key is missing or unreadable on this device. Contact your administrator.";
+  }
+  if (m.includes("manifest.json.sig") && m.includes("required")) {
+    return "No manifest signature found on this USB drive. A signed manifest is required.";
+  }
+  if (m.includes("manifest.json") && m.includes("required")) {
+    return "No manifest found on this USB drive. A manifest.json is required.";
+  }
+  return message;
+}
+
 async function importOTAUSB(path) {
   try {
     updateText("settingsNote", "Importing OTA image from USB...");
@@ -1561,7 +1581,7 @@ async function importOTAUSB(path) {
     await refreshOTA();
     await refreshOTAUSB();
   } catch (err) {
-    updateText("settingsNote", `usb ota import error: ${err.message}`);
+    updateText("settingsNote", `USB OTA import error: ${classifyOTAError(err.message)}`);
   }
 }
 
@@ -1660,7 +1680,7 @@ async function triggerOTAUpdate(targetTag = "") {
     }
     updateText("settingsNote", payload?.message || `Update to ${selectedTag} started.`);
   } catch (err) {
-    updateText("settingsNote", `update error: ${err.message}`);
+    updateText("settingsNote", `Update error: ${classifyOTAError(err.message)}`);
   }
 }
 
