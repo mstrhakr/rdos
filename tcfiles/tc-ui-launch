@@ -93,6 +93,33 @@ cleanup_chromium_profile() {
     rm -rf "$profile_dir" >/dev/null 2>&1 || true
 }
 
+normalize_display_layout() {
+    local xrandr_bin=""
+    local connected=""
+    local primary=""
+    local output=""
+
+    if ! xrandr_bin="$(command -v xrandr 2>/dev/null)"; then
+        return 0
+    fi
+
+    connected="$($xrandr_bin --query 2>/dev/null | awk '/ connected/ {print $1}')"
+    [ -n "$connected" ] || return 0
+
+    primary="$($xrandr_bin --query 2>/dev/null | awk '/ connected primary/ {print $1; exit}')"
+    if [ -z "$primary" ]; then
+        primary="$(printf '%s\n' "$connected" | head -n 1)"
+    fi
+
+    for output in $connected; do
+        if [ "$output" = "$primary" ]; then
+            "$xrandr_bin" --output "$output" --auto --primary >/dev/null 2>&1 || true
+        else
+            "$xrandr_bin" --output "$output" --auto >/dev/null 2>&1 || true
+        fi
+    done
+}
+
 run_web_mode() {
     local backend_pid=""
     local chromium_bin=""
@@ -150,6 +177,8 @@ run_web_mode() {
         cleanup_chromium_profile "$profile_dir"
         return 1
     fi
+
+    normalize_display_layout
 
     chromium_args=(
         --kiosk
