@@ -19,6 +19,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o
 
 FROM debian:trixie
 
+ENV DEBIAN_FRONTEND=noninteractive
+
 ARG XANMOD_ARCHIVE_SHA256=ed26eb39330fd296cd037b8229adccea0197b21989ec0a1ad4f4f74f5a41c7a7
 ARG XANMOD_ARCHIVE_FINGERPRINT=D38D7D1DA1349567ADED882D86F7D09EE734E623
 # SHA-256 of the DER-encoded OTA signing public key.  Must match tcfiles/ota-signing-public.pem.
