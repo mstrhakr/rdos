@@ -33,7 +33,7 @@ COPY tcfiles/debian.sources /etc/apt/sources.list.d/debian.sources
 # re-downloaded on every run; use DOCKER_BUILDKIT=1 (or Docker 23+ default) to benefit.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y \
+    apt-get update && apt-get install -y --no-install-recommends \
         sudo curl wget openssl \
         xterm xinit x11-xserver-utils libxcb1 \
         fvwm yad light feh \
@@ -43,7 +43,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         systemd-resolved \
         polkitd mingetty \
         pulseaudio pamixer \
-        cups mesa-utils \
+        mesa-utils \
         firmware-linux firmware-linux-nonfree \
         firmware-iwlwifi firmware-realtek firmware-atheros firmware-brcm80211 \
         open-vm-tools \
