@@ -304,7 +304,7 @@ select,
 
 .terminal-frame {
   width: 100%;
-  min-height: 62vh;
+  min-height: 0;
   height: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -336,7 +336,8 @@ select,
 }
 
 .terminal-empty {
-  min-height: 62vh;
+  min-height: 0;
+  height: 100%;
   display: grid;
   place-items: center;
 }
@@ -372,6 +373,19 @@ select,
   height: auto;
   max-height: min(620px, 100%);
   grid-template-rows: auto auto 1fr auto;
+}
+
+.wifi-scan-modal-surface {
+  width: min(980px, 100%);
+  height: min(760px, 100%);
+  grid-template-rows: auto 1fr;
+}
+
+.wifi-connect-modal-surface {
+  width: min(680px, 100%);
+  height: auto;
+  max-height: min(700px, 100%);
+  grid-template-rows: auto 1fr auto;
 }
 
 .cert-details {
