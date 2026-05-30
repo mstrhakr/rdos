@@ -82,21 +82,7 @@ run_with_heartbeat() {
 docker_build_with_retry() {
     local label="$1"
     shift
-    local attempt
-    local max_attempts=2
-
-    for attempt in $(seq 1 "$max_attempts"); do
-        if run_with_heartbeat "$label (attempt ${attempt}/${max_attempts})" "$@"; then
-            return 0
-        fi
-
-        if (( attempt < max_attempts )); then
-            log_phase "Docker build failed. Pruning BuildKit cache and retrying once"
-            docker builder prune -af >/dev/null 2>&1 || true
-        fi
-    done
-
-    return 1
+    run_with_heartbeat "$label" "$@"
 }
 
 IMAGE_NAME="rdos"
