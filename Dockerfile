@@ -30,6 +30,10 @@ ARG TTYD_VERSION=1.7.7
 
 COPY tcfiles/debian.sources /etc/apt/sources.list.d/debian.sources
 
+# Keep downloaded .deb archives so BuildKit cache mounts can reuse them.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
+    printf '%s\n' 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+
 # Stable system packages — this layer is only invalidated when the list below changes.
 # BuildKit cache mounts keep the apt/dpkg cache between builds so packages are not
 # re-downloaded on every run; use DOCKER_BUILDKIT=1 (or Docker 23+ default) to benefit.
