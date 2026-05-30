@@ -103,12 +103,6 @@ const SETTINGS_TABS = [
           },
         ],
       },
-      {
-        title: "System summary",
-        fields: [
-          { key: "auto_update_enabled", label: "Auto update", type: "checkbox" },
-        ],
-      },
     ],
   },
   {
@@ -120,6 +114,28 @@ const SETTINGS_TABS = [
       {
         title: "Update policy",
         fields: [
+          { key: "auto_check_enabled", label: "Auto check for updates", type: "checkbox" },
+          {
+            key: "auto_check_schedule",
+            label: "Auto check schedule",
+            type: "select",
+            options: [
+              ["hourly", "Hourly"],
+              ["daily", "Daily"],
+              ["weekly", "Weekly"],
+            ],
+          },
+          { key: "auto_update_enabled", label: "Auto update", type: "checkbox" },
+          {
+            key: "auto_update_schedule",
+            label: "Auto update schedule",
+            type: "select",
+            options: [
+              ["hourly", "Hourly"],
+              ["daily", "Daily"],
+              ["weekly", "Weekly"],
+            ],
+          },
           { key: "maintenance_window", label: "Maintenance window", type: "text", placeholder: "02:00" },
           {
             key: "ota_channel",
@@ -130,6 +146,8 @@ const SETTINGS_TABS = [
               ["beta", "Beta"],
             ],
           },
+          { key: "update_pin_semver", label: "Semver pin", type: "text", placeholder: "0 or 1.2 or 1.2.3" },
+          { key: "update_pin_prefix", label: "Tag prefix pin", type: "text", placeholder: "v0 or v1.2" },
         ],
       },
       {
@@ -211,6 +229,8 @@ const appState = {
   otaReleases: [],
   otaCatalog: [],
   otaCheck: null,
+  otaUsbImages: [],
+  otaUsbEvent: null,
   selectedOtaTag: "",
   session: null,
   status: null,
@@ -226,6 +246,9 @@ const appState = {
     open: false,
     lastSignature: "",
     dismissedSignature: "",
+  },
+  otaConfirm: {
+    targetTag: "",
   },
   wifiConnectDraft: {
     interface: "",
@@ -247,6 +270,17 @@ const NETWORK_CONFIG_KEYS = new Set([
   "static_prefix",
   "static_gateway",
   "static_dns",
+]);
+
+const OTA_POLICY_KEYS = new Set([
+  "maintenance_window",
+  "ota_channel",
+  "auto_check_enabled",
+  "auto_check_schedule",
+  "auto_update_enabled",
+  "auto_update_schedule",
+  "update_pin_semver",
+  "update_pin_prefix",
 ]);
 
 function api(path, method = "GET", body) {
@@ -358,6 +392,25 @@ function closeCertTrustModal() {
   }
   appState.certPrompt.open = false;
   appState.certPrompt.dismissedSignature = appState.certPrompt.lastSignature;
+  modal.setAttribute("aria-hidden", "true");
+}
+
+function openOTAConfirmModal(tag) {
+  const modal = document.getElementById("otaConfirmModal");
+  if (!modal) {
+    return;
+  }
+  appState.otaConfirm.targetTag = String(tag || "").trim();
+  const target = appState.otaConfirm.targetTag || "(none)";
+  updateText("otaConfirmDetails", `Target release: ${target}`);
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function closeOTAConfirmModal() {
+  const modal = document.getElementById("otaConfirmModal");
+  if (!modal) {
+    return;
+  }
   modal.setAttribute("aria-hidden", "true");
 }
 
@@ -645,6 +698,57 @@ function renderWireGuardUSBRows(containerId) {
   });
 }
 
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+  if (value < 1024 * 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function renderOTAUSBRows(containerId) {
+  const target = document.getElementById(containerId);
+  if (!target) {
+    return;
+  }
+
+  if (!appState.otaUsbImages.length) {
+    target.innerHTML = '<div class="status-card">No OTA images detected on USB media.</div>';
+    return;
+  }
+
+  target.innerHTML = appState.otaUsbImages
+    .map((image) => `
+      <div class="wifi-row">
+        <div>
+          <div class="wifi-name">${escapeHtml(image.filename || "image")}</div>
+          <div class="wifi-meta">${escapeHtml(image.mount || "")}</div>
+        </div>
+        <span class="wifi-meta">${escapeHtml(formatBytes(image.size))}</span>
+        <button type="button" data-ota-usb-path="${escapeHtml(image.path)}">Import</button>
+      </div>
+    `)
+    .join("");
+
+  target.querySelectorAll("button[data-ota-usb-path]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const path = button.getAttribute("data-ota-usb-path") || "";
+      if (path) {
+        importOTAUSB(path);
+      }
+    });
+  });
+}
+
 function buildField(field) {
   const currentValue = valueForKey(field.key);
   if (field.type === "checkbox") {
@@ -761,6 +865,16 @@ function buildOTAPanel(tab) {
               <button type="button" id="runOTARollback" ${ota?.canRollback ? "" : "disabled"}>Rollback to previous slot</button>
             </div>
           </section>
+
+          <section class="tab-card wifi-connect">
+            <h3>USB image update</h3>
+            <div class="status-card compact" id="otaUsbEventState">No USB OTA event detected.</div>
+            <div class="actions tight">
+              <button type="button" id="scanOTAUsb" class="secondary">Scan USB images</button>
+              <button type="button" id="refreshOTAUsbEvent" class="secondary">Refresh insert event</button>
+            </div>
+            <div id="otaUsbList" class="wifi-list"></div>
+          </section>
         </div>
       </div>
     </section>
@@ -865,6 +979,7 @@ function renderSettingsPanels() {
   syncInterfaceFields();
   renderWifiRows("settingsWifiList");
   renderWireGuardUSBRows("wireguardUsbList");
+  renderOTAUSBRows("otaUsbList");
 }
 
 function attachSettingsActions() {
@@ -938,7 +1053,10 @@ function attachSettingsActions() {
   const runOTAUpdateButton = document.getElementById("runOTAUpdate");
   if (runOTAUpdateButton && !runOTAUpdateButton.dataset.bound) {
     runOTAUpdateButton.dataset.bound = "1";
-    runOTAUpdateButton.addEventListener("click", () => triggerOTAUpdate());
+    runOTAUpdateButton.addEventListener("click", () => {
+      const selectedTag = appState.selectedOtaTag || document.getElementById("otaReleaseTag")?.value || "";
+      openOTAConfirmModal(selectedTag);
+    });
   }
 
   const rollbackButton = document.getElementById("runOTARollback");
@@ -947,10 +1065,25 @@ function attachSettingsActions() {
     rollbackButton.addEventListener("click", () => triggerOTARollback());
   }
 
+  const scanOTAUsbButton = document.getElementById("scanOTAUsb");
+  if (scanOTAUsbButton && !scanOTAUsbButton.dataset.bound) {
+    scanOTAUsbButton.dataset.bound = "1";
+    scanOTAUsbButton.addEventListener("click", () => refreshOTAUSB());
+  }
+
+  const refreshOTAUsbEventButton = document.getElementById("refreshOTAUsbEvent");
+  if (refreshOTAUsbEventButton && !refreshOTAUsbEventButton.dataset.bound) {
+    refreshOTAUsbEventButton.dataset.bound = "1";
+    refreshOTAUsbEventButton.addEventListener("click", () => refreshOTAUSBEvent());
+  }
+
   const otaBannerUpdateNow = document.getElementById("otaBannerUpdateNow");
   if (otaBannerUpdateNow && !otaBannerUpdateNow.dataset.bound) {
     otaBannerUpdateNow.dataset.bound = "1";
-    otaBannerUpdateNow.addEventListener("click", () => triggerOTAUpdate());
+    otaBannerUpdateNow.addEventListener("click", () => {
+      const selectedTag = appState.otaCheck?.latestTag || appState.selectedOtaTag || "";
+      openOTAConfirmModal(selectedTag);
+    });
   }
 
   const otaBannerDismiss = document.getElementById("otaBannerDismiss");
@@ -1197,6 +1330,14 @@ function bindModalActions() {
     };
     await connectWifi(payload);
   });
+
+  document.getElementById("otaConfirmClose")?.addEventListener("click", closeOTAConfirmModal);
+  document.getElementById("otaConfirmCancel")?.addEventListener("click", closeOTAConfirmModal);
+  document.getElementById("otaConfirmInstall")?.addEventListener("click", async () => {
+    const tag = appState.otaConfirm.targetTag || appState.selectedOtaTag || "";
+    closeOTAConfirmModal();
+    await triggerOTAUpdate(tag);
+  });
 }
 
 function openSettings(tabId = "connection") {
@@ -1385,6 +1526,45 @@ async function refreshOTACheck() {
   }
 }
 
+async function refreshOTAUSB() {
+  try {
+    const payload = await api("/api/v1/ota/usb");
+    appState.otaUsbImages = payload.images || [];
+    renderOTAUSBRows("otaUsbList");
+    updateText("settingsNote", `Detected ${appState.otaUsbImages.length} USB OTA image(s).`);
+  } catch (err) {
+    appState.otaUsbImages = [];
+    renderOTAUSBRows("otaUsbList");
+    updateText("settingsNote", `usb scan error: ${err.message}`);
+  }
+}
+
+async function refreshOTAUSBEvent() {
+  try {
+    const payload = await api("/api/v1/ota/usb/event");
+    appState.otaUsbEvent = payload;
+    if (payload?.detected) {
+      updateText("otaUsbEventState", `USB image detected: ${payload.filename || payload.path}`);
+    } else {
+      updateText("otaUsbEventState", "No USB OTA event detected.");
+    }
+  } catch (err) {
+    updateText("otaUsbEventState", `usb event error: ${err.message}`);
+  }
+}
+
+async function importOTAUSB(path) {
+  try {
+    updateText("settingsNote", "Importing OTA image from USB...");
+    const payload = await api("/api/v1/ota/usb/import", "POST", { path });
+    updateText("settingsNote", payload?.message || "USB OTA import staged.");
+    await refreshOTA();
+    await refreshOTAUSB();
+  } catch (err) {
+    updateText("settingsNote", `usb ota import error: ${err.message}`);
+  }
+}
+
 async function startOTACheck() {
   try {
     updateText("settingsNote", "Checking for updates in background...");
@@ -1460,12 +1640,12 @@ async function refreshTTYDStatus() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces(), refreshWireGuardUSB(), refreshOTA(), refreshOTACatalog(), refreshOTACheck(), refreshTTYDStatus()]);
+  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces(), refreshWireGuardUSB(), refreshOTA(), refreshOTACatalog(), refreshOTACheck(), refreshOTAUSB(), refreshOTAUSBEvent(), refreshTTYDStatus()]);
   await refreshWifi();
 }
 
-async function triggerOTAUpdate() {
-  const selectedTag = appState.selectedOtaTag || document.getElementById("otaReleaseTag")?.value || "";
+async function triggerOTAUpdate(targetTag = "") {
+  const selectedTag = String(targetTag || appState.selectedOtaTag || document.getElementById("otaReleaseTag")?.value || "").trim();
   if (!selectedTag) {
     updateText("settingsNote", "Select a release first.");
     return;
@@ -1549,6 +1729,10 @@ async function saveSettings() {
     const values = collectConfigValues();
     const payload = await api("/api/v1/config", "POST", { values });
     appState.config = payload.values || values;
+    const changedOTAPolicy = Object.keys(values).some((key) => OTA_POLICY_KEYS.has(key));
+    if (changedOTAPolicy) {
+      await api("/api/v1/ota/apply-policy", "POST", {});
+    }
     renderSettingsPanels();
     await refreshStatus();
     updateText("settingsNote", "Settings saved.");
@@ -1689,6 +1873,7 @@ function shouldBlockGlobalShortcut(event) {
 function wireGlobalShortcuts() {
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      closeOTAConfirmModal();
       closeWifiConnectModal();
       closeWifiScanModal();
       closeCertTrustModal();
@@ -1846,6 +2031,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (isModalOpen("settingsModal") || isModalOpen("wifiScanModal") || isModalOpen("wifiConnectModal")) {
       refreshNetworkInterfaces().catch(() => {});
       refreshNetwork().catch(() => {});
+      refreshOTAUSBEvent().catch(() => {});
     }
   }, 8000);
   setInterval(refreshHealth, 15000);

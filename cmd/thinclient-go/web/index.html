@@ -160,6 +160,29 @@
       </div>
     </aside>
 
+    <aside class="modal" id="otaConfirmModal" aria-hidden="true">
+      <div class="modal-surface cert-modal-surface" role="dialog" aria-modal="true" aria-labelledby="otaConfirmTitle">
+        <header class="modal-head">
+          <div>
+            <p class="eyebrow">OTA update</p>
+            <h2 id="otaConfirmTitle">Confirm update installation</h2>
+          </div>
+          <button id="otaConfirmClose" class="secondary" type="button">Close</button>
+        </header>
+
+        <div class="status-card">This will stage the selected image to the inactive slot and reboot to complete the update.</div>
+        <div class="status-card compact" id="otaConfirmDetails">No target selected.</div>
+
+        <footer class="modal-foot">
+          <div class="modal-foot-note">If an active RDP session is detected, reboot may be deferred by policy.</div>
+          <div class="actions tight">
+            <button id="otaConfirmCancel" class="secondary" type="button">Cancel</button>
+            <button id="otaConfirmInstall" type="button">Install update</button>
+          </div>
+        </footer>
+      </div>
+    </aside>
+
     <script src="/app.js"></script>
   </body>
 </html>

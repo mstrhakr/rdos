@@ -295,14 +295,190 @@ func TestOTAStatusFromConfigDefaults(t *testing.T) {
 
 	status := otaStatusFromConfig(map[string]string{})
 
+	if !status.AutoCheckEnabled {
+		t.Fatal("auto check should default to enabled")
+	}
+	if status.AutoCheckSchedule != "daily" {
+		t.Fatalf("auto check schedule = %q, want daily", status.AutoCheckSchedule)
+	}
 	if !status.AutoUpdateEnabled {
 		t.Fatal("auto update should default to enabled")
+	}
+	if status.AutoUpdateSchedule != "daily" {
+		t.Fatalf("auto update schedule = %q, want daily", status.AutoUpdateSchedule)
 	}
 	if status.Channel != "stable" {
 		t.Fatalf("channel = %q, want stable", status.Channel)
 	}
 	if status.PendingRecovery {
 		t.Fatal("pending recovery should default to false")
+	}
+}
+
+func TestHandleOTAApplyPolicyRejectsWrongMethod(t *testing.T) {
+	t.Parallel()
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ota/apply-policy", nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAApplyPolicy(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandleOTAApplyPolicyReturnsUnavailableWithoutSudo(t *testing.T) {
+	oldLookPath := otaLookPath
+	t.Cleanup(func() {
+		otaLookPath = oldLookPath
+	})
+	otaLookPath = func(file string) (string, error) {
+		return "", errors.New("missing")
+	}
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/apply-policy", strings.NewReader(`{}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAApplyPolicy(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestHandleOTAApplyPolicyReturnsOKOnSuccess(t *testing.T) {
+	oldLookPath := otaLookPath
+	oldExecCommand := otaExecCommand
+	t.Cleanup(func() {
+		otaLookPath = oldLookPath
+		otaExecCommand = oldExecCommand
+	})
+
+	otaLookPath = func(file string) (string, error) {
+		return "/usr/bin/sudo", nil
+	}
+	otaExecCommand = fakeExecCommand(t, 0, "timer reloaded")
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/apply-policy", strings.NewReader(`{}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAApplyPolicy(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestHandleOTAUSBScanReturnsImages(t *testing.T) {
+	oldScan := otaScanUSBImages
+	t.Cleanup(func() {
+		otaScanUSBImages = oldScan
+	})
+
+	otaScanUSBImages = func() []otaUSBImage {
+		return []otaUSBImage{{Path: "/mnt/u/rdos.raw.zst", Mount: "/mnt/u", Filename: "rdos.raw.zst", Size: 123}}
+	}
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ota/usb", nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAUSBScan(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestHandleOTAUSBImportRejectsUnknownPath(t *testing.T) {
+	oldFind := otaFindUSBImage
+	t.Cleanup(func() {
+		otaFindUSBImage = oldFind
+	})
+	otaFindUSBImage = func(path string) (otaUSBImage, bool) {
+		return otaUSBImage{}, false
+	}
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/usb/import", strings.NewReader(`{"path":"/mnt/u/rdos.raw.zst"}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAUSBImport(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleOTAUSBImportAcceptedOnSuccess(t *testing.T) {
+	oldFind := otaFindUSBImage
+	oldLookPath := otaLookPath
+	oldExecCommand := otaExecCommand
+	t.Cleanup(func() {
+		otaFindUSBImage = oldFind
+		otaLookPath = oldLookPath
+		otaExecCommand = oldExecCommand
+	})
+
+	otaFindUSBImage = func(path string) (otaUSBImage, bool) {
+		return otaUSBImage{Path: path}, true
+	}
+	otaLookPath = func(file string) (string, error) {
+		return "/usr/bin/sudo", nil
+	}
+	otaExecCommand = fakeExecCommand(t, 0, "usb ota staged")
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/usb/import", strings.NewReader(`{"path":"/mnt/u/rdos.raw.zst"}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAUSBImport(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusAccepted)
+	}
+}
+
+func TestHandleOTAUSBEventReadsStateFile(t *testing.T) {
+	oldPath := otaUSBEventFile
+	t.Cleanup(func() {
+		otaUSBEventFile = oldPath
+	})
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ota-event.json")
+	if err := os.WriteFile(path, []byte(`{"detected":true,"filename":"rdos.raw.zst"}`), 0o600); err != nil {
+		t.Fatalf("write event: %v", err)
+	}
+	otaUSBEventFile = path
+
+	a := &app{}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ota/usb/event", nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTAUSBEvent(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var payload otaUSBEvent
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if !payload.Detected {
+		t.Fatal("detected should be true")
 	}
 }
 

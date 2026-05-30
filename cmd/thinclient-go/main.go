@@ -48,9 +48,14 @@ type networkSettingsResponse struct {
 }
 
 type otaStatusResponse struct {
+	AutoCheckEnabled  bool   `json:"autoCheckEnabled"`
+	AutoCheckSchedule string `json:"autoCheckSchedule"`
 	AutoUpdateEnabled bool   `json:"autoUpdateEnabled"`
+	AutoUpdateSchedule string `json:"autoUpdateSchedule"`
 	Channel           string `json:"channel"`
 	MaintenanceWindow string `json:"maintenanceWindow"`
+	UpdatePinSemver   string `json:"updatePinSemver"`
+	UpdatePinPrefix   string `json:"updatePinPrefix"`
 	CurrentSlot       string `json:"currentSlot"`
 	PreviousSlot      string `json:"previousSlot"`
 	BootTries         string `json:"bootTries"`
@@ -108,6 +113,35 @@ type otaUpdateResponse struct {
 	Message string            `json:"message"`
 	Tag     string            `json:"tag,omitempty"`
 	Status  otaStatusResponse `json:"status"`
+}
+
+type otaUSBImage struct {
+	Path     string `json:"path"`
+	Mount    string `json:"mount"`
+	Filename string `json:"filename"`
+	Size     int64  `json:"size"`
+}
+
+type otaUSBScanResponse struct {
+	Images []otaUSBImage `json:"images"`
+}
+
+type otaUSBImportRequest struct {
+	Path string `json:"path"`
+}
+
+type otaUSBImportResponse struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
+}
+
+type otaUSBEvent struct {
+	Detected bool   `json:"detected"`
+	Device   string `json:"device,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Mount    string `json:"mount,omitempty"`
+	Filename string `json:"filename,omitempty"`
+	Time     string `json:"time,omitempty"`
 }
 
 type githubReleaseAsset struct {
@@ -249,6 +283,9 @@ var otaLookPath = exec.LookPath
 var otaExecCommand = exec.Command
 var otaFetchReleases = fetchOTAReleases
 var otaHTTPClient = &http.Client{Timeout: 20 * time.Second}
+var otaScanUSBImages = scanOTAUSBImages
+var otaFindUSBImage = findOTAUSBImage
+var otaUSBEventFile = "/run/rdos-ota-usb-event.json"
 
 func main() {
 	listenAddr := flag.String("listen", envOrDefault("RDOS_UI_LISTEN", "127.0.0.1:8080"), "web server listen address")
@@ -293,6 +330,10 @@ func main() {
 	mux.Handle("/api/v1/ota/releases", application.loopbackOnly(http.HandlerFunc(application.handleOTAReleases)))
 	mux.Handle("/api/v1/ota/catalog", application.loopbackOnly(http.HandlerFunc(application.handleOTACatalog)))
 	mux.Handle("/api/v1/ota/check", application.loopbackOnly(http.HandlerFunc(application.handleOTACheck)))
+	mux.Handle("/api/v1/ota/apply-policy", application.loopbackOnly(http.HandlerFunc(application.handleOTAApplyPolicy)))
+	mux.Handle("/api/v1/ota/usb", application.loopbackOnly(http.HandlerFunc(application.handleOTAUSBScan)))
+	mux.Handle("/api/v1/ota/usb/import", application.loopbackOnly(http.HandlerFunc(application.handleOTAUSBImport)))
+	mux.Handle("/api/v1/ota/usb/event", application.loopbackOnly(http.HandlerFunc(application.handleOTAUSBEvent)))
 	mux.Handle("/api/v1/ota/update", application.loopbackOnly(http.HandlerFunc(application.handleOTAUpdate)))
 	mux.Handle("/api/v1/ota/rollback", application.loopbackOnly(http.HandlerFunc(application.handleOTARollback)))
 	mux.Handle("/api/v1/wireguard/usb", application.loopbackOnly(http.HandlerFunc(application.handleWireGuardUSBScan)))
@@ -646,6 +687,106 @@ func (a *app) handleOTACheck(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (a *app) handleOTAApplyPolicy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if _, err := otaLookPath("sudo"); err != nil {
+		http.Error(w, "policy apply unavailable: sudo not found", http.StatusInternalServerError)
+		return
+	}
+
+	cmd := otaExecCommand("sudo", "-n", "/usr/bin/tc-ota-configure-timer")
+	output, err := cmd.CombinedOutput()
+	message := strings.TrimSpace(string(output))
+	if err != nil {
+		if message == "" {
+			message = err.Error()
+		}
+		http.Error(w, "failed to apply ota policy: "+message, http.StatusBadRequest)
+		return
+	}
+
+	if message == "" {
+		message = "OTA policy applied"
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"message": message})
+}
+
+func (a *app) handleOTAUSBScan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	respondJSON(w, http.StatusOK, otaUSBScanResponse{Images: otaScanUSBImages()})
+}
+
+func (a *app) handleOTAUSBImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	defer r.Body.Close()
+
+	var req otaUSBImportRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "invalid json payload", http.StatusBadRequest)
+		return
+	}
+	req.Path = strings.TrimSpace(req.Path)
+	if req.Path == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	if _, ok := otaFindUSBImage(req.Path); !ok {
+		http.Error(w, "image not found on USB media", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := otaLookPath("sudo"); err != nil {
+		http.Error(w, "usb ota import unavailable: sudo not found", http.StatusInternalServerError)
+		return
+	}
+
+	cmd := otaExecCommand("sudo", "-n", "/usr/bin/tc-ota-import-usb", req.Path)
+	output, err := cmd.CombinedOutput()
+	message := strings.TrimSpace(string(output))
+	if err != nil {
+		if message == "" {
+			message = err.Error()
+		}
+		http.Error(w, "usb ota import failed: "+message, http.StatusBadRequest)
+		return
+	}
+	if message == "" {
+		message = "USB OTA import staged"
+	}
+
+	respondJSON(w, http.StatusAccepted, otaUSBImportResponse{Path: req.Path, Message: message})
+}
+
+func (a *app) handleOTAUSBEvent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	event := otaUSBEvent{Detected: false}
+	b, err := os.ReadFile(otaUSBEventFile)
+	if err != nil {
+		respondJSON(w, http.StatusOK, event)
+		return
+	}
+	if err := json.Unmarshal(b, &event); err != nil {
+		respondJSON(w, http.StatusOK, otaUSBEvent{Detected: false})
+		return
+	}
+	respondJSON(w, http.StatusOK, event)
 }
 
 func (a *app) runOTACheck() {
@@ -1336,17 +1477,22 @@ func otaStatusFromConfig(cfg map[string]string) otaStatusResponse {
 	inactiveVersion := readSlotVersion(inactiveSlot)
 
 	return otaStatusResponse{
-		AutoUpdateEnabled: boolValue(cfg["auto_update_enabled"], true),
-		Channel:           strings.TrimSpace(defaultString(cfg["ota_channel"], "stable")),
-		MaintenanceWindow: strings.TrimSpace(cfg["maintenance_window"]),
-		CurrentSlot:       currentSlot,
-		PreviousSlot:      previousSlot,
-		BootTries:         bootTries,
-		PendingRecovery:   pendingRecovery,
-		CurrentVersion:    currentVersion,
-		InactiveVersion:   inactiveVersion,
-		GrubenvPath:       grubenvPath,
-		CanRollback:       currentSlot != "" && previousSlot != "" && currentSlot != previousSlot,
+		AutoCheckEnabled:   boolValue(cfg["auto_check_enabled"], true),
+		AutoCheckSchedule:  strings.TrimSpace(defaultString(cfg["auto_check_schedule"], "daily")),
+		AutoUpdateEnabled:  boolValue(cfg["auto_update_enabled"], true),
+		AutoUpdateSchedule: strings.TrimSpace(defaultString(cfg["auto_update_schedule"], "daily")),
+		Channel:            strings.TrimSpace(defaultString(cfg["ota_channel"], "stable")),
+		MaintenanceWindow:  strings.TrimSpace(cfg["maintenance_window"]),
+		UpdatePinSemver:    strings.TrimSpace(cfg["update_pin_semver"]),
+		UpdatePinPrefix:    strings.TrimSpace(cfg["update_pin_prefix"]),
+		CurrentSlot:        currentSlot,
+		PreviousSlot:       previousSlot,
+		BootTries:          bootTries,
+		PendingRecovery:    pendingRecovery,
+		CurrentVersion:     currentVersion,
+		InactiveVersion:    inactiveVersion,
+		GrubenvPath:        grubenvPath,
+		CanRollback:        currentSlot != "" && previousSlot != "" && currentSlot != previousSlot,
 	}
 }
 
@@ -1726,6 +1872,31 @@ func scanWireGuardUSBConfigs() []wireguardUSBConfig {
 	return configs
 }
 
+func scanOTAUSBImages() []otaUSBImage {
+	images := make([]otaUSBImage, 0)
+	for _, mount := range usbMountPoints() {
+		for _, path := range otaImagesOnMount(mount) {
+			images = append(images, newOTAUSBImage(mount, path))
+		}
+	}
+	sort.Slice(images, func(i, j int) bool {
+		if images[i].Mount == images[j].Mount {
+			return images[i].Filename < images[j].Filename
+		}
+		return images[i].Mount < images[j].Mount
+	})
+	return images
+}
+
+func findOTAUSBImage(path string) (otaUSBImage, bool) {
+	for _, image := range scanOTAUSBImages() {
+		if image.Path == path {
+			return image, true
+		}
+	}
+	return otaUSBImage{}, false
+}
+
 func findWireGuardUSBConfig(path string) (wireguardUSBConfig, bool) {
 	for _, config := range scanWireGuardUSBConfigs() {
 		if config.Path == path {
@@ -1777,6 +1948,19 @@ func wireGuardConfigsOnMount(mount string) []string {
 	return uniqueSortedStrings(configs)
 }
 
+func otaImagesOnMount(mount string) []string {
+	images := make([]string, 0)
+	for _, pattern := range []string{"*.raw.zst", "*.img.zst"} {
+		matches, _ := filepath.Glob(filepath.Join(mount, pattern))
+		for _, match := range matches {
+			if info, err := os.Stat(match); err == nil && info.Mode().IsRegular() {
+				images = append(images, match)
+			}
+		}
+	}
+	return uniqueSortedStrings(images)
+}
+
 func newWireGuardUSBConfig(mount, path string) wireguardUSBConfig {
 	filename := filepath.Base(path)
 	iface := strings.TrimSuffix(filename, filepath.Ext(filename))
@@ -1794,6 +1978,20 @@ func newWireGuardUSBConfig(mount, path string) wireguardUSBConfig {
 		Filename:    filename,
 		Interface:   iface,
 		NeedsImport: needsImport,
+	}
+}
+
+func newOTAUSBImage(mount, path string) otaUSBImage {
+	info, _ := os.Stat(path)
+	size := int64(0)
+	if info != nil {
+		size = info.Size()
+	}
+	return otaUSBImage{
+		Path:     path,
+		Mount:    mount,
+		Filename: filepath.Base(path),
+		Size:     size,
 	}
 }
 

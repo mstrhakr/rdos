@@ -1,0 +1,45 @@
+#!/bin/bash
+set -euo pipefail
+
+DEVICE="${1:-}"
+EVENT_FILE="/run/rdos-ota-usb-event.json"
+
+if [[ -z "$DEVICE" ]]; then
+    exit 0
+fi
+
+if [[ "$DEVICE" == /dev/* ]]; then
+    DEV_PATH="$DEVICE"
+else
+    DEV_PATH="/dev/$DEVICE"
+fi
+
+mounts="$(lsblk -o MOUNTPOINT -n "$DEV_PATH" 2>/dev/null || true)"
+if [[ -z "$mounts" ]]; then
+    exit 0
+fi
+
+found_path=""
+found_mount=""
+for mount in $mounts; do
+    [[ -n "$mount" ]] || continue
+    [[ "$mount" != "/" && "$mount" != "/boot" ]] || continue
+
+    candidate="$(find "$mount" -maxdepth 2 -type f \( -name '*.raw.zst' -o -name '*.img.zst' \) 2>/dev/null | head -n1 || true)"
+    if [[ -n "$candidate" ]]; then
+        found_path="$candidate"
+        found_mount="$mount"
+        break
+    fi
+done
+
+if [[ -z "$found_path" ]]; then
+    exit 0
+fi
+
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+filename="$(basename "$found_path")"
+
+cat > "$EVENT_FILE" <<EOF
+{"detected":true,"device":"$DEV_PATH","path":"$found_path","mount":"$found_mount","filename":"$filename","time":"$now"}
+EOF

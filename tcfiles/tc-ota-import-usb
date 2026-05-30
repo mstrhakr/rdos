@@ -1,0 +1,98 @@
+#!/bin/bash
+set -euo pipefail
+
+IMAGE_PATH="${1:-}"
+LOG_TAG="tc-ota-usb"
+GRUBENV=""
+TEMP_ESP_MOUNT=""
+
+log()  { logger -t "$LOG_TAG" "$*"; echo "[$LOG_TAG] $*"; }
+warn() { logger -t "$LOG_TAG" "WARNING: $*"; echo "[$LOG_TAG] WARNING: $*" >&2; }
+die()  { logger -t "$LOG_TAG" "ERROR: $*"; echo "[$LOG_TAG] ERROR: $*" >&2; exit 1; }
+
+cleanup_temp_esp() {
+    if [[ -n "$TEMP_ESP_MOUNT" ]]; then
+        umount "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        rmdir "$TEMP_ESP_MOUNT" 2>/dev/null || true
+    fi
+}
+
+resolve_grubenv() {
+    local candidate
+    local esp_dev
+
+    for candidate in /boot/grub/grubenv /boot/efi/grub/grubenv /efi/grub/grubenv; do
+        if [[ -f "$candidate" ]]; then
+            GRUBENV="$candidate"
+            return 0
+        fi
+    done
+
+    esp_dev="$(blkid -L ESP 2>/dev/null || true)"
+    if [[ -n "$esp_dev" ]]; then
+        TEMP_ESP_MOUNT="/run/rdos-esp-$$"
+        mkdir -p "$TEMP_ESP_MOUNT"
+        if mount "$esp_dev" "$TEMP_ESP_MOUNT" 2>/dev/null; then
+            if [[ -f "$TEMP_ESP_MOUNT/grub/grubenv" ]]; then
+                GRUBENV="$TEMP_ESP_MOUNT/grub/grubenv"
+                return 0
+            fi
+            umount "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        fi
+        rmdir "$TEMP_ESP_MOUNT" 2>/dev/null || true
+        TEMP_ESP_MOUNT=""
+    fi
+
+    return 1
+}
+
+trap cleanup_temp_esp EXIT
+
+[[ -n "$IMAGE_PATH" ]] || die "usage: tc-ota-import-usb <path-to-raw.zst>"
+[[ -f "$IMAGE_PATH" ]] || die "image file not found: $IMAGE_PATH"
+
+case "$IMAGE_PATH" in
+    *.raw.zst|*.img.zst)
+        ;;
+    *)
+        die "unsupported image extension: $IMAGE_PATH"
+        ;;
+esac
+
+if ! resolve_grubenv; then
+    die "grubenv not found; this system may not be A/B-enabled"
+fi
+
+CURRENT_SLOT="$(grub-editenv "$GRUBENV" list 2>/dev/null | awk -F= '/^current_slot=/{print $2}')"
+if [[ "$CURRENT_SLOT" != "a" && "$CURRENT_SLOT" != "b" ]]; then
+    die "cannot determine current_slot from grubenv"
+fi
+
+INACTIVE_SLOT="b"
+[[ "$CURRENT_SLOT" == "b" ]] && INACTIVE_SLOT="a"
+INACTIVE_LABEL="ROOT_$(echo "$INACTIVE_SLOT" | tr '[:lower:]' '[:upper:]')"
+
+SLOT_DEV="$(blkid -L "$INACTIVE_LABEL" 2>/dev/null || true)"
+[[ -n "$SLOT_DEV" ]] || die "cannot find block device with label $INACTIVE_LABEL"
+
+log "Validating compressed image..."
+zstd -t "$IMAGE_PATH" >/dev/null
+
+log "Writing USB image to inactive slot $INACTIVE_SLOT ($SLOT_DEV)..."
+zstdcat "$IMAGE_PATH" | dd of="$SLOT_DEV" bs=4M conv=fsync status=progress
+
+grub-editenv "$GRUBENV" set \
+    pending_recovery=true \
+    previous_slot="$CURRENT_SLOT" \
+    pending_slot="$INACTIVE_SLOT"
+
+log "USB OTA staging complete. System will reboot to recovery to commit slot $INACTIVE_SLOT."
+
+if pgrep -x xfreerdp3 >/dev/null 2>&1; then
+    log "Active RDP session detected - scheduling reboot for 03:00."
+    systemd-run --on-calendar="*-*-* 03:00:00" --unit="rdos-ota-reboot" /bin/systemctl reboot 2>/dev/null || \
+        warn "Could not schedule deferred reboot; reboot manually when convenient."
+else
+    log "No active RDP session - rebooting now."
+    systemctl reboot
+fi

@@ -1,0 +1,10 @@
+[Unit]
+Description=RDOS OTA USB detect for device %I
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/tc-ota-usb-detect %I
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tc-ota-usb-detect

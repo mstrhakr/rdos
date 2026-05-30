@@ -6,6 +6,8 @@ OVERRIDE_DIR="/etc/systemd/system/tc-ota-updater.timer.d"
 OVERRIDE_FILE="${OVERRIDE_DIR}/override.conf"
 DEFAULT_WINDOW="02:00"
 maintenance_window="$DEFAULT_WINDOW"
+DEFAULT_SCHEDULE="daily"
+auto_check_schedule="$DEFAULT_SCHEDULE"
 
 if [[ -f "$CONFIG_FILE" ]]; then
     value="$(awk -F= '/^maintenance_window=/{print $2; exit}' "$CONFIG_FILE" 2>/dev/null || true)"
@@ -14,6 +16,13 @@ if [[ -f "$CONFIG_FILE" ]]; then
     if [[ -n "$value" ]]; then
         maintenance_window="$value"
     fi
+
+    value="$(awk -F= '/^auto_check_schedule=/{print $2; exit}' "$CONFIG_FILE" 2>/dev/null || true)"
+    value="${value#\"}"
+    value="${value%\"}"
+    if [[ -n "$value" ]]; then
+        auto_check_schedule="$value"
+    fi
 fi
 
 if [[ ! "$maintenance_window" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
@@ -21,11 +30,28 @@ if [[ ! "$maintenance_window" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
     maintenance_window="$DEFAULT_WINDOW"
 fi
 
+auto_check_schedule="${auto_check_schedule,,}"
+case "$auto_check_schedule" in
+    hourly|daily|weekly)
+        ;;
+    *)
+        echo "[tc-ota-configure-timer] Invalid auto_check_schedule '$auto_check_schedule', using $DEFAULT_SCHEDULE" >&2
+        auto_check_schedule="$DEFAULT_SCHEDULE"
+        ;;
+esac
+
+calendar="*-*-* ${maintenance_window}:00"
+if [[ "$auto_check_schedule" == "hourly" ]]; then
+    calendar="*-*-* *:$(printf '%s' "$maintenance_window" | cut -d: -f2):00"
+elif [[ "$auto_check_schedule" == "weekly" ]]; then
+    calendar="Mon *-*-* ${maintenance_window}:00"
+fi
+
 install -d -m 755 "$OVERRIDE_DIR"
 cat > "$OVERRIDE_FILE" <<EOF
 [Timer]
 OnCalendar=
-OnCalendar=*-*-* ${maintenance_window}:00
+OnCalendar=${calendar}
 EOF
 
 systemctl daemon-reload

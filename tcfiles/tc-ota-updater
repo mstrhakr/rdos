@@ -22,6 +22,7 @@ REQUIRED_FREE_KB=$((5 * 1024 * 1024))   # 5 GB minimum free in STAGING_DIR
 MANUAL_CHECK=false
 OTA_CHANNEL="stable"
 SELECTED_TAG=""
+RELEASE_TAG=""
 
 log()  { logger -t "$LOG_TAG" "$*"; echo "[$LOG_TAG] $*"; }
 warn() { logger -t "$LOG_TAG" "WARNING: $*"; echo "[$LOG_TAG] WARNING: $*" >&2; }
@@ -128,6 +129,40 @@ json_get_first_rc_tag() {
     printf '%s\n' "$tag"
 }
 
+json_get_first_tag() {
+    local json="$1"
+    local tag
+
+    tag=$(printf '%s' "$json" | tr -d '\n' | grep -oE '"tag_name":"v[^"]+"' | head -n1 | cut -d'"' -f4)
+    [[ -n "$tag" ]] || return 1
+    printf '%s\n' "$tag"
+}
+
+version_matches_semver_pin() {
+    local version="$1"
+    local pin="$2"
+
+    version="${version#v}"
+    pin="${pin#v}"
+
+    if [[ "$pin" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        [[ "$version" == "$pin" || "$version" == "$pin"-* || "$version" == "$pin"+* ]]
+        return
+    fi
+
+    if [[ "$pin" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        [[ "$version" == "$pin".* ]]
+        return
+    fi
+
+    if [[ "$pin" =~ ^[0-9]+$ ]]; then
+        [[ "$version" == "$pin".* ]]
+        return
+    fi
+
+    return 1
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --manual)
@@ -150,12 +185,42 @@ done
 # Read user config (auto_update_enabled, maintenance_window, ota_channel)
 # ---------------------------------------------------------------------------
 auto_update_enabled="true"
+auto_check_enabled="true"
+auto_update_schedule="daily"
+auto_check_schedule="daily"
+update_pin_semver=""
+update_pin_prefix=""
 for config_file in "$CONFIG_FILE_PRIMARY" "$CONFIG_FILE_LEGACY"; do
     if [[ -f "$config_file" ]]; then
+        val=$(awk -F= '/^auto_check_enabled=/{print $2; exit}' "$config_file" 2>/dev/null || true)
+        val="${val#\"}"
+        val="${val%\"}"
+        [[ -n "$val" ]] && auto_check_enabled="$val"
+
         val=$(awk -F= '/^auto_update_enabled=/{print $2; exit}' "$config_file" 2>/dev/null || true)
         val="${val#\"}"
         val="${val%\"}"
         [[ -n "$val" ]] && auto_update_enabled="$val"
+
+        val=$(awk -F= '/^auto_update_schedule=/{print $2; exit}' "$config_file" 2>/dev/null || true)
+        val="${val#\"}"
+        val="${val%\"}"
+        [[ -n "$val" ]] && auto_update_schedule="$val"
+
+        val=$(awk -F= '/^auto_check_schedule=/{print $2; exit}' "$config_file" 2>/dev/null || true)
+        val="${val#\"}"
+        val="${val%\"}"
+        [[ -n "$val" ]] && auto_check_schedule="$val"
+
+        val=$(awk -F= '/^update_pin_semver=/{print $2; exit}' "$config_file" 2>/dev/null || true)
+        val="${val#\"}"
+        val="${val%\"}"
+        [[ -n "$val" ]] && update_pin_semver="$val"
+
+        val=$(awk -F= '/^update_pin_prefix=/{print $2; exit}' "$config_file" 2>/dev/null || true)
+        val="${val#\"}"
+        val="${val%\"}"
+        [[ -n "$val" ]] && update_pin_prefix="$val"
 
         val=$(awk -F= '/^ota_channel=/{print $2; exit}' "$config_file" 2>/dev/null || true)
         val="${val#\"}"
@@ -175,12 +240,13 @@ case "$OTA_CHANNEL" in
         ;;
 esac
 
-if [[ "$MANUAL_CHECK" != "true" ]] && [[ "${auto_update_enabled,,}" != "true" && "${auto_update_enabled,,}" != "1" ]]; then
-    log "Auto-update disabled in config, exiting."
+if [[ "$MANUAL_CHECK" != "true" ]] && [[ "${auto_check_enabled,,}" != "true" && "${auto_check_enabled,,}" != "1" ]]; then
+    log "Auto-check disabled in config, exiting."
     exit 0
 fi
 
 log "Using OTA channel: $OTA_CHANNEL"
+log "Auto-check schedule: ${auto_check_schedule} | Auto-update schedule: ${auto_update_schedule}"
 
 # ---------------------------------------------------------------------------
 # Determine active and inactive slots from grubenv
@@ -237,20 +303,20 @@ if [[ -n "$SELECTED_TAG" ]]; then
         exit 0
     }
 elif [[ "$OTA_CHANNEL" == "beta" ]]; then
-    log "Checking GitHub for latest beta (RC) release..."
+    log "Checking GitHub for latest beta-eligible release..."
     RELEASE_LIST_JSON=$(curl -fsSL --connect-timeout 10 --max-time 30 "${GITHUB_API_RELEASES}?per_page=20") || {
         warn "Failed to reach GitHub API, skipping update check."
         exit 0
     }
 
-    RC_TAG="$(json_get_first_rc_tag "$RELEASE_LIST_JSON" || true)"
-    if [[ -z "$RC_TAG" ]]; then
-        log "No beta RC release found, skipping update check."
+    RELEASE_TAG="$(json_get_first_tag "$RELEASE_LIST_JSON" || true)"
+    if [[ -z "$RELEASE_TAG" ]]; then
+        log "No beta-eligible release found, skipping update check."
         exit 0
     fi
 
-    RELEASE_JSON=$(curl -fsSL --connect-timeout 10 --max-time 30 "${GITHUB_API_RELEASES}/tags/${RC_TAG}") || {
-        warn "Failed to fetch beta release '$RC_TAG', skipping update check."
+    RELEASE_JSON=$(curl -fsSL --connect-timeout 10 --max-time 30 "${GITHUB_API_RELEASES}/tags/${RELEASE_TAG}") || {
+        warn "Failed to fetch beta release '$RELEASE_TAG', skipping update check."
         exit 0
     }
 else
@@ -259,6 +325,10 @@ else
         warn "Failed to reach GitHub API, skipping update check."
         exit 0
     }
+fi
+
+if [[ -z "$RELEASE_TAG" ]]; then
+    RELEASE_TAG="$(json_get_string "$RELEASE_JSON" "tag_name" || true)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -301,6 +371,20 @@ if [[ -n "$MANIFEST_CHANNEL" ]]; then
     fi
 fi
 
+if [[ -n "$update_pin_semver" ]] && [[ "$MANUAL_CHECK" != "true" ]]; then
+    if ! version_matches_semver_pin "$REMOTE_VERSION" "$update_pin_semver"; then
+        log "Remote version '$REMOTE_VERSION' does not match semver pin '$update_pin_semver', skipping."
+        exit 0
+    fi
+fi
+
+if [[ -n "$update_pin_prefix" ]] && [[ "$MANUAL_CHECK" != "true" ]]; then
+    if [[ -z "$RELEASE_TAG" || "$RELEASE_TAG" != "$update_pin_prefix"* ]]; then
+        log "Release tag '${RELEASE_TAG:-unknown}' does not match prefix pin '$update_pin_prefix', skipping."
+        exit 0
+    fi
+fi
+
 log "Remote version: $REMOTE_VERSION | Expected SHA256: ${EXPECTED_SHA256:0:12}..."
 
 # ---------------------------------------------------------------------------
@@ -320,6 +404,11 @@ else
     fi
 
     log "Update available: ${ACTIVE_VERSION:-none} → $REMOTE_VERSION"
+fi
+
+if [[ "$MANUAL_CHECK" != "true" ]] && [[ "${auto_update_enabled,,}" != "true" && "${auto_update_enabled,,}" != "1" ]]; then
+    log "Auto-update disabled; check completed without staging update."
+    exit 0
 fi
 
 # ---------------------------------------------------------------------------

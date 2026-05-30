@@ -24,6 +24,7 @@ thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wireguard
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-ota-updater
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-ota-updater --manual
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-ota-configure-timer
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-ota-import-usb
 
 # OTA health check and rollback
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-health-check

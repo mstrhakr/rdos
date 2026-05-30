@@ -118,6 +118,8 @@ COPY tcfiles/set-hostname /usr/bin/set-hostname
 COPY tcfiles/auto-maintenance.debian /usr/bin/auto-maintenance
 COPY tcfiles/tc-ota-updater /usr/bin/tc-ota-updater
 COPY tcfiles/tc-ota-configure-timer /usr/bin/tc-ota-configure-timer
+COPY tcfiles/tc-ota-import-usb /usr/bin/tc-ota-import-usb
+COPY tcfiles/tc-ota-usb-detect /usr/bin/tc-ota-usb-detect
 COPY tcfiles/tc-health-check /usr/bin/tc-health-check
 COPY tcfiles/tc-ota-rollback /usr/bin/tc-ota-rollback
 COPY tcfiles/tc-set-background /usr/bin/tc-set-background
@@ -140,6 +142,8 @@ RUN chmod +x \
         /usr/bin/auto-maintenance \
         /usr/bin/tc-ota-updater \
         /usr/bin/tc-ota-configure-timer \
+        /usr/bin/tc-ota-import-usb \
+        /usr/bin/tc-ota-usb-detect \
         /usr/bin/tc-health-check \
         /usr/bin/tc-ota-rollback \
         /usr/bin/tc-set-background
@@ -184,6 +188,9 @@ COPY tcfiles/tc-ota-updater.timer /etc/systemd/system/tc-ota-updater.timer
 RUN chmod 0644 /etc/systemd/system/tc-ota-updater.service /etc/systemd/system/tc-ota-updater.timer
 RUN systemctl enable tc-ota-updater.timer
 
+COPY tcfiles/tc-ota-usb-detect@.service /etc/systemd/system/tc-ota-usb-detect@.service
+RUN chmod 0644 /etc/systemd/system/tc-ota-usb-detect@.service
+
 COPY tcfiles/dhcp.network /etc/systemd/network/dhcp.network
 COPY tcfiles/systemd-resolved.conf /etc/tmpfiles.d/systemd-resolved.conf
 RUN systemctl enable systemd-networkd.service systemd-resolved.service
@@ -191,6 +198,7 @@ RUN systemctl enable systemd-networkd.service systemd-resolved.service
 RUN install -d -m 755 /etc/chromium/policies/managed /etc/chromium-browser/policies/managed
 COPY tcfiles/chromium-policies/managed/rdos-kiosk.json /etc/chromium/policies/managed/rdos-kiosk.json
 COPY tcfiles/chromium-policies/managed/rdos-kiosk.json /etc/chromium-browser/policies/managed/rdos-kiosk.json
+COPY tcfiles/99-rdos-ota-usb.rules /etc/udev/rules.d/99-rdos-ota-usb.rules
 
 COPY tcfiles/xorg.conf /etc/X11/xorg.conf.d/thinclient.conf
 COPY tcfiles/Xwrapper.config /etc/X11/Xwrapper.config
