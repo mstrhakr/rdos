@@ -1,0 +1,215 @@
+#!/bin/bash
+set -u
+
+MODE_DEFAULT="web"
+BACKEND_URL="http://127.0.0.1:8080"
+BACKEND_LOG="${HOME}/.thinclient-go.log"
+BROWSER_LOG="${HOME}/.chromium.log"
+
+log() {
+    printf '[tc-ui-launch] %s\n' "$*"
+}
+
+warn() {
+    printf '[tc-ui-launch] WARNING: %s\n' "$*" >&2
+}
+
+find_chromium() {
+    if command -v chromium >/dev/null 2>&1; then
+        command -v chromium
+        return 0
+    fi
+    if command -v chromium-browser >/dev/null 2>&1; then
+        command -v chromium-browser
+        return 0
+    fi
+    return 1
+}
+
+read_mode_from_cmdline() {
+    local token
+    local cmdline
+
+    if [ ! -r /proc/cmdline ]; then
+        return 1
+    fi
+
+    cmdline="$(< /proc/cmdline)"
+    for token in $cmdline; do
+        case "$token" in
+            rdos.ui=web)
+                printf '%s\n' "web"
+                return 0
+                ;;
+            rdos.ui=legacy)
+                printf '%s\n' "legacy"
+                return 0
+                ;;
+        esac
+    done
+
+    return 1
+}
+
+read_mode_from_tcconfig() {
+    local key
+    local value
+    local cfg_path="${HOME}/tcconfig"
+
+    [ -r "$cfg_path" ] || return 1
+
+    while IFS='=' read -r key value || [ -n "$key" ]; do
+        [ -z "$key" ] && continue
+        case "$key" in
+            ui_mode)
+                value="${value#\"}"
+                value="${value%\"}"
+                value="${value,,}"
+                if [ "$value" = "web" ] || [ "$value" = "legacy" ]; then
+                    printf '%s\n' "$value"
+                    return 0
+                fi
+                ;;
+        esac
+    done < "$cfg_path"
+
+    return 1
+}
+
+wait_for_backend() {
+    local i
+    for ((i = 1; i <= 120; i++)); do
+        if curl -fsS "$BACKEND_URL/api/v1/health" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.5
+    done
+    return 1
+}
+
+cleanup_chromium_profile() {
+    local profile_dir="$1"
+    [ -n "$profile_dir" ] || return 0
+    rm -rf "$profile_dir" >/dev/null 2>&1 || true
+}
+
+run_web_mode() {
+    local backend_pid=""
+    local chromium_bin=""
+    local use_no_sandbox="0"
+    local chromium_rc="0"
+    local profile_dir=""
+    local -a chromium_args=()
+
+    if ! command -v /usr/bin/thinclient-go >/dev/null 2>&1; then
+        log "thinclient-go not found; falling back to legacy UI"
+        return 1
+    fi
+
+    if ! chromium_bin="$(find_chromium)"; then
+        log "chromium not found; web UI cannot start"
+        return 1
+    fi
+
+    profile_dir="$(mktemp -d /tmp/rdos-chromium-profile.XXXXXX 2>/dev/null || true)"
+    if [ -z "$profile_dir" ] || [ ! -d "$profile_dir" ]; then
+        warn "failed to create temporary Chromium profile directory"
+        return 1
+    fi
+
+    # Start overlay daemon early
+    if command -v /usr/bin/tc-overlay-daemon >/dev/null 2>&1; then
+        log "starting overlay daemon"
+        /usr/bin/tc-overlay-daemon -tcconfig="${HOME}/tcconfig" -log="${HOME}/.tc-overlay.log" >/dev/null 2>&1 &
+        # Note: daemon will run in background and exit when user logs out
+    else
+        log "overlay daemon not found; skipping"
+    fi
+
+    if [ "${RDOS_UI_CHROMIUM_NO_SANDBOX:-}" = "1" ]; then
+        use_no_sandbox="1"
+    elif [ ! -e /proc/sys/kernel/unprivileged_userns_clone ] || [ "$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || printf '1')" != "1" ]; then
+        # Some hardened kernels disable unprivileged namespaces, which Chromium sandbox needs.
+        use_no_sandbox="1"
+    fi
+
+    RDOS_UI_LISTEN="127.0.0.1:8080" \
+    RDOS_TCCONFIG="${HOME}/tcconfig" \
+    RDOS_SESSION_LOG="${HOME}/session.log" \
+    /usr/bin/thinclient-go >>"$BACKEND_LOG" 2>&1 &
+    backend_pid=$!
+
+    if ! wait_for_backend; then
+        warn "thinclient-go failed to become ready at ${BACKEND_URL}"
+        if [ -s "$BACKEND_LOG" ]; then
+            warn "Recent backend log:" 
+            tail -n 40 "$BACKEND_LOG" >&2 || true
+        fi
+        kill "$backend_pid" >/dev/null 2>&1 || true
+        wait "$backend_pid" >/dev/null 2>&1 || true
+        cleanup_chromium_profile "$profile_dir"
+        return 1
+    fi
+
+    chromium_args=(
+        --kiosk
+        "$BACKEND_URL"
+        --user-data-dir="$profile_dir"
+        --no-first-run
+        --no-default-browser-check
+        --disable-session-crashed-bubble
+        --disable-infobars
+        --overscroll-history-navigation=0
+        --autoplay-policy=no-user-gesture-required
+        --disable-gpu
+        --disable-dev-shm-usage
+        --start-fullscreen
+        --start-maximized
+        --disable-background-networking
+        --disable-component-update
+        --disable-sync
+        "--disable-features=Translate,AutofillServerCommunication,AutofillEnableAccountWalletStorage,PasswordManagerOnboarding,PasswordManagerRedesign"
+    )
+
+    if [ "$use_no_sandbox" = "1" ]; then
+        warn "Launching Chromium with --no-sandbox for kernel compatibility"
+        chromium_args+=(--no-sandbox)
+        "$chromium_bin" "${chromium_args[@]}" >>"$BROWSER_LOG" 2>&1
+        chromium_rc=$?
+    else
+        "$chromium_bin" "${chromium_args[@]}" >>"$BROWSER_LOG" 2>&1
+        chromium_rc=$?
+    fi
+
+    if [ "$chromium_rc" -ne 0 ]; then
+        warn "Chromium exited with status ${chromium_rc}"
+        if [ -s "$BROWSER_LOG" ]; then
+            warn "Recent Chromium log:"
+            tail -n 60 "$BROWSER_LOG" >&2 || true
+        fi
+    fi
+
+    kill "$backend_pid" >/dev/null 2>&1 || true
+    wait "$backend_pid" >/dev/null 2>&1 || true
+    cleanup_chromium_profile "$profile_dir"
+    return "$chromium_rc"
+}
+
+mode="$MODE_DEFAULT"
+if detected_mode="$(read_mode_from_cmdline 2>/dev/null)"; then
+    mode="$detected_mode"
+elif detected_mode="$(read_mode_from_tcconfig 2>/dev/null)"; then
+    mode="$detected_mode"
+fi
+
+log "Selected mode: $mode"
+
+if [ "$mode" = "web" ]; then
+    if run_web_mode; then
+        exit 0
+    fi
+    log "Web mode failed; not loading legacy UI from web boot path"
+    exit 1
+fi
+
+exec /usr/bin/thinclient

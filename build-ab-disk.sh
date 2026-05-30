@@ -356,6 +356,7 @@ mkdir -p "$WORK_DIR/root_a/boot/grub"
 cat > "$WORK_DIR/root_a/boot/grub/grub.cfg" <<'GRUBCFG'
 insmod all_video
 insmod gfxterm
+insmod search_label
 set default="0"
 set timeout=5
 set timeout_style=menu
@@ -385,9 +386,9 @@ else
 
     # Select the correct slot menu entry
     if [ "${current_slot}" = "b" ]; then
-        set default="slot_b"
+        set default="slot_b_web"
     else
-        set default="slot_a"
+        set default="slot_a_web"
     fi
 
     # Increment the boot attempt counter (skip if already committed = 99)
@@ -399,15 +400,27 @@ else
     fi
 fi
 
-menuentry "RDOS (Slot A)" --id slot_a {
+menuentry "RDOS (Slot A, Web UI)" --id slot_a_web {
     search --no-floppy --label --set=root ESP
-    linux  /vmlinuz-a root=LABEL=ROOT_A rw quiet loglevel=3
+    linux  /vmlinuz-a root=LABEL=ROOT_A rw quiet loglevel=3 rdos.ui=web
     initrd /initrd-a.img
 }
 
-menuentry "RDOS (Slot B)" --id slot_b {
+menuentry "RDOS (Slot A, Legacy UI)" --id slot_a_legacy {
     search --no-floppy --label --set=root ESP
-    linux  /vmlinuz-b root=LABEL=ROOT_B rw quiet loglevel=3
+    linux  /vmlinuz-a root=LABEL=ROOT_A rw quiet loglevel=3 rdos.ui=legacy
+    initrd /initrd-a.img
+}
+
+menuentry "RDOS (Slot B, Web UI)" --id slot_b_web {
+    search --no-floppy --label --set=root ESP
+    linux  /vmlinuz-b root=LABEL=ROOT_B rw quiet loglevel=3 rdos.ui=web
+    initrd /initrd-b.img
+}
+
+menuentry "RDOS (Slot B, Legacy UI)" --id slot_b_legacy {
+    search --no-floppy --label --set=root ESP
+    linux  /vmlinuz-b root=LABEL=ROOT_B rw quiet loglevel=3 rdos.ui=legacy
     initrd /initrd-b.img
 }
 
@@ -423,12 +436,14 @@ if [[ "$SKIP_EFI" == false ]]; then
     mkdir -p "$WORK_DIR/root_a/boot/EFI/RDOS" "$WORK_DIR/root_a/boot/EFI/BOOT"
 
     cat > "$WORK_DIR/root_a/boot/EFI/RDOS/grub.cfg" <<'EFI_GRUBCFG'
+insmod search_label
 search --no-floppy --label --set=esp ESP
 set prefix=($esp)/grub
 configfile ($esp)/grub/grub.cfg
 EFI_GRUBCFG
 
     cat > "$WORK_DIR/root_a/boot/EFI/BOOT/grub.cfg" <<'EFI_FALLBACK_CFG'
+insmod search_label
 search --no-floppy --label --set=esp ESP
 set prefix=($esp)/grub
 configfile ($esp)/grub/grub.cfg

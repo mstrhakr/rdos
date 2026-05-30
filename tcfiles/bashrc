@@ -116,29 +116,66 @@ if ! shopt -oq posix; then
   fi
 fi
 
-TTY="$(/usr/bin/tty | sed 's:.*/::')"
-if [[ -z ${DISPLAY} && ( ${TTY} == 'tty1' || ${TTY} == 'console' || ${TTY} == 'ttyS0' ) ]]; then
-    unset TTY
+TTY="$(/usr/bin/tty 2>/dev/null | sed 's:.*/::')"
+
+# Only auto-launch X on the local interactive console.
+# Keep serial sessions text-only for troubleshooting.
+if [[ -z ${DISPLAY} && ( ${TTY} == 'tty1' || ${TTY} == 'console' || ${TTY} == 'hvc0' ) ]]; then
+    mode="legacy"
+    fail_count=0
+    if [ -r /proc/cmdline ]; then
+        for token in $(cat /proc/cmdline); do
+            case "$token" in
+                rdos.ui=web)
+                    mode="web"
+                    break
+                    ;;
+                rdos.ui=legacy)
+                    mode="legacy"
+                    break
+                    ;;
+            esac
+        done
+    fi
+
     udiskie &
 
-    # Keep retrying X startup so transient boot-time failures do not leave the user at a text console.
+    # Keep retrying X startup so transient failures do not leave the user at a shell.
     while true; do
-        startx >>"$HOME/.startx.log" 2>&1
+        if [ "$mode" = "web" ]; then
+            startx /usr/bin/tc-ui-launch >>"$HOME/.startx.log" 2>&1
+        else
+            startx >>"$HOME/.startx.log" 2>&1
+        fi
         startx_rc=$?
 
         if [ "$startx_rc" -eq 0 ]; then
-            # X session ended cleanly (for example logout); restart login UI.
             sleep 1
             continue
         fi
 
-        warning_msg="startx failed (exit ${startx_rc}); retrying."
+        fail_count=$((fail_count + 1))
+        warning_msg="startx failed in ${mode} mode (exit ${startx_rc}); retrying."
         printf 'WARNING: %s\n' "$warning_msg" >&2
         if command -v logger >/dev/null 2>&1; then
             logger -t thinclient-bashrc "$warning_msg"
         fi
 
+        if [ -s "$HOME/.startx.log" ]; then
+            if grep -q 'Only console users are allowed to run the X server' "$HOME/.startx.log"; then
+                printf '%s\n' 'ERROR: Xorg wrapper denied this login session. Check /etc/X11/Xwrapper.config (allowed_users=anybody).' >&2
+            fi
+
+            # Print recent logs on first failure and then every fifth retry to reduce console spam.
+            if [ "$fail_count" -eq 1 ] || [ $((fail_count % 5)) -eq 0 ]; then
+                printf '%s\n' '--- recent ~/.startx.log ---' >&2
+                tail -n 40 "$HOME/.startx.log" >&2
+                printf '%s\n' '--- end ~/.startx.log ---' >&2
+            fi
+        fi
+
         sleep 2
     done
+
+    unset TTY mode fail_count
 fi
-unset TTY

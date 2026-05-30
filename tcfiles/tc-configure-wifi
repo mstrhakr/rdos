@@ -236,6 +236,16 @@ main() {
         --disable-powersave)
             disable_powersave
             ;;
+        --disconnect)
+            iface="$(find_wireless_interface || true)"
+            if [ -z "$iface" ]; then
+                echo "No wireless interface found" >&2
+                exit 1
+            fi
+            systemctl stop "wpa_supplicant@${iface}.service" 2>/dev/null || true
+            ip link set "$iface" down 2>/dev/null || true
+            echo "WiFi disconnected on ${iface}"
+            ;;
         *)
             exit 1
             ;;

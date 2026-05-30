@@ -106,12 +106,17 @@ apply_tcconfig() {
 
 reload_network() {
     local target_interface="$1"
+    local iface
 
     networkctl reload >/dev/null 2>&1 || true
 
     if [ -n "$target_interface" ] && ip link show "$target_interface" >/dev/null 2>&1; then
+        ip link set "$target_interface" up >/dev/null 2>&1 || true
         networkctl reconfigure "$target_interface" >/dev/null 2>&1 || systemctl restart systemd-networkd.service
     else
+        for iface in $(list_interfaces); do
+            ip link set "$iface" up >/dev/null 2>&1 || true
+        done
         systemctl restart systemd-networkd.service
     fi
 

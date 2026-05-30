@@ -1,0 +1,47 @@
+#!/bin/bash
+
+set -euo pipefail
+
+find_wireless_interface() {
+    local device
+
+    for device in /sys/class/net/*; do
+        [ -d "$device/wireless" ] || continue
+        basename "$device"
+        return 0
+    done
+
+    return 1
+}
+
+request_file="${1:-/tmp/rdos-wifi-request.txt}"
+
+if [ ! -f "$request_file" ]; then
+    echo "wifi request file not found: $request_file" >&2
+    exit 1
+fi
+
+iface="$(awk -F= '/^interface=/{sub(/^[^=]*=/, ""); print; exit}' "$request_file")"
+ssid="$(awk -F= '/^ssid=/{sub(/^[^=]*=/, ""); print; exit}' "$request_file")"
+hidden="$(awk -F= '/^hidden=/{sub(/^[^=]*=/, ""); print; exit}' "$request_file")"
+password="$(awk -F= '/^password=/{sub(/^[^=]*=/, ""); print; exit}' "$request_file")"
+
+if [ -z "$iface" ]; then
+    iface="$(find_wireless_interface || true)"
+fi
+
+if [ -z "$iface" ]; then
+    echo "no wireless interface found" >&2
+    exit 1
+fi
+
+if [ -z "$ssid" ]; then
+    echo "ssid is required" >&2
+    exit 1
+fi
+
+if [ -n "$password" ]; then
+    printf '%s\n' "$password" | /usr/bin/tc-configure-wifi --configure "$iface" "$ssid" "$hidden"
+else
+    /usr/bin/tc-configure-wifi --configure "$iface" "$ssid" "$hidden"
+fi

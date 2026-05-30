@@ -15,6 +15,7 @@ thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-network --apply-tcconfig /
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wifi
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wifi --disable-powersave
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-scan-wifi
+thinclient ALL=(root) NOPASSWD: /usr/bin/tc-apply-wifi-request
 
 # WireGuard tunneling (enable/disable and configuration)
 thinclient ALL=(root) NOPASSWD: /usr/bin/tc-configure-wireguard

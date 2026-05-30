@@ -1,8 +1,27 @@
 # syntax=docker/dockerfile:1
+FROM golang:1.23-bookworm AS thinclient_go_builder
+
+WORKDIR /src
+COPY go.mod ./
+COPY go.sum ./
+COPY cmd ./cmd
+COPY internal ./internal
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o /out/thinclient-go ./cmd/thinclient-go
+
+FROM golang:1.23-bookworm AS tc_overlay_daemon_builder
+
+WORKDIR /src
+COPY go.mod ./
+COPY go.sum ./
+COPY cmd ./cmd
+COPY internal ./internal
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o /out/tc-overlay-daemon ./cmd/tc-overlay-daemon
+
 FROM debian:trixie
 
 ARG XANMOD_ARCHIVE_SHA256=ed26eb39330fd296cd037b8229adccea0197b21989ec0a1ad4f4f74f5a41c7a7
 ARG XANMOD_ARCHIVE_FINGERPRINT=D38D7D1DA1349567ADED882D86F7D09EE734E623
+ARG TTYD_VERSION=1.7.7
 
 COPY tcfiles/debian.sources /etc/apt/sources.list.d/debian.sources
 
@@ -13,8 +32,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y \
         sudo curl wget \
-        xterm xinit x11-xserver-utils \
+        xterm xinit x11-xserver-utils libxcb1 \
         fvwm yad light feh \
+        chromium \
         freerdp3-x11 \
         wpasupplicant iw rfkill net-tools ethtool wireguard-tools \
         systemd-resolved \
@@ -29,6 +49,16 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         adwaita-icon-theme-legacy libfuse2 \
     libcap2-bin \
     grub-common
+
+# ttyd is not currently packaged in Debian Trixie's main repos, so install a pinned upstream binary.
+RUN arch="$(dpkg --print-architecture)" && \
+    case "$arch" in \
+        amd64) asset="ttyd.x86_64" ;; \
+        arm64) asset="ttyd.aarch64" ;; \
+        *) echo "Unsupported architecture for ttyd: $arch" >&2; exit 1 ;; \
+    esac && \
+    wget -qO /usr/bin/ttyd "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/${asset}" && \
+    chmod 0755 /usr/bin/ttyd
 
 # Disable audible terminal/system bell where possible.
 RUN printf '%s\n' 'blacklist pcspkr' 'install pcspkr /bin/false' > /etc/modprobe.d/nobeep.conf && \
@@ -73,6 +103,9 @@ RUN --mount=type=bind,source=.,target=/build-context,ro \
     fi
 
 COPY tcfiles/thinclient /usr/bin/thinclient
+COPY --from=thinclient_go_builder /out/thinclient-go /usr/bin/thinclient-go
+COPY --from=tc_overlay_daemon_builder /out/tc-overlay-daemon /usr/bin/tc-overlay-daemon
+COPY tcfiles/tc-ui-launch /usr/bin/tc-ui-launch
 COPY tcfiles/tc-settings /usr/bin/tc-settings
 COPY tcfiles/tc-import-usb /usr/bin/tc-import-usb
 COPY tcfiles/tc-configure-network /usr/bin/tc-configure-network
@@ -80,6 +113,7 @@ COPY tcfiles/tc-configure-wifi /usr/bin/tc-configure-wifi
 COPY tcfiles/tc-configure-wireguard /usr/bin/tc-configure-wireguard
 COPY tcfiles/tc-scan-wifi /usr/bin/tc-scan-wifi
 COPY tcfiles/tc-wifi-wizard /usr/bin/tc-wifi-wizard
+COPY tcfiles/tc-apply-wifi-request /usr/bin/tc-apply-wifi-request
 COPY tcfiles/set-hostname /usr/bin/set-hostname
 COPY tcfiles/auto-maintenance.debian /usr/bin/auto-maintenance
 COPY tcfiles/tc-ota-updater /usr/bin/tc-ota-updater
@@ -92,6 +126,8 @@ COPY tcfiles/usb-access.rules /etc/udev/rules.d/usb-access.rules
 RUN chown root:root /etc/sudoers.d/099_tc && chmod 440 /etc/sudoers.d/099_tc
 RUN chmod +x \
     /usr/bin/thinclient \
+    /usr/bin/thinclient-go \
+    /usr/bin/tc-ui-launch \
     /usr/bin/tc-settings \
     /usr/bin/tc-import-usb \
     /usr/bin/tc-configure-network \
@@ -99,6 +135,7 @@ RUN chmod +x \
     /usr/bin/tc-configure-wireguard \
     /usr/bin/tc-scan-wifi \
     /usr/bin/tc-wifi-wizard \
+    /usr/bin/tc-apply-wifi-request \
     /usr/bin/set-hostname \
         /usr/bin/auto-maintenance \
         /usr/bin/tc-ota-updater \
@@ -151,7 +188,12 @@ COPY tcfiles/dhcp.network /etc/systemd/network/dhcp.network
 COPY tcfiles/systemd-resolved.conf /etc/tmpfiles.d/systemd-resolved.conf
 RUN systemctl enable systemd-networkd.service systemd-resolved.service
 
+RUN install -d -m 755 /etc/chromium/policies/managed /etc/chromium-browser/policies/managed
+COPY tcfiles/chromium-policies/managed/rdos-kiosk.json /etc/chromium/policies/managed/rdos-kiosk.json
+COPY tcfiles/chromium-policies/managed/rdos-kiosk.json /etc/chromium-browser/policies/managed/rdos-kiosk.json
+
 COPY tcfiles/xorg.conf /etc/X11/xorg.conf.d/thinclient.conf
+COPY tcfiles/Xwrapper.config /etc/X11/Xwrapper.config
 
 #This line is for pipewire, because pipewire has limited mic support its currently replaced with pulseaudio
 #Pulseaudio has the auto switch behavior by default

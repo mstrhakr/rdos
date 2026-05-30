@@ -21,6 +21,7 @@ LOG_TAG="tc-ota"
 REQUIRED_FREE_KB=$((5 * 1024 * 1024))   # 5 GB minimum free in STAGING_DIR
 MANUAL_CHECK=false
 OTA_CHANNEL="stable"
+SELECTED_TAG=""
 
 log()  { logger -t "$LOG_TAG" "$*"; echo "[$LOG_TAG] $*"; }
 warn() { logger -t "$LOG_TAG" "WARNING: $*"; echo "[$LOG_TAG] WARNING: $*" >&2; }
@@ -133,6 +134,12 @@ while [[ $# -gt 0 ]]; do
             MANUAL_CHECK=true
             shift
             ;;
+        --tag)
+            shift
+            [[ $# -gt 0 ]] || die "--tag requires a value"
+            SELECTED_TAG="$1"
+            shift
+            ;;
         *)
             die "Unknown argument: $1"
             ;;
@@ -221,9 +228,15 @@ fi
 log "Current slot: $CURRENT_SLOT (${ACTIVE_VERSION:-unknown}) | Inactive slot: $INACTIVE_SLOT (${INACTIVE_VERSION:-never installed})"
 
 # ---------------------------------------------------------------------------
-# Query GitHub API for the latest release
+# Query GitHub API for the target release
 # ---------------------------------------------------------------------------
-if [[ "$OTA_CHANNEL" == "beta" ]]; then
+if [[ -n "$SELECTED_TAG" ]]; then
+    log "Checking GitHub for selected release tag '$SELECTED_TAG'..."
+    RELEASE_JSON=$(curl -fsSL --connect-timeout 10 --max-time 30 "${GITHUB_API_RELEASES}/tags/${SELECTED_TAG}") || {
+        warn "Failed to fetch selected release '$SELECTED_TAG', skipping update check."
+        exit 0
+    }
+elif [[ "$OTA_CHANNEL" == "beta" ]]; then
     log "Checking GitHub for latest beta (RC) release..."
     RELEASE_LIST_JSON=$(curl -fsSL --connect-timeout 10 --max-time 30 "${GITHUB_API_RELEASES}?per_page=20") || {
         warn "Failed to reach GitHub API, skipping update check."
@@ -298,12 +311,16 @@ version_gt() {
     [[ "$(printf '%s\n' "$1" "$2" | sort -V | head -1)" != "$1" ]]
 }
 
-if ! version_gt "$REMOTE_VERSION" "${ACTIVE_VERSION:-0.0.0}"; then
-    log "No update available ($REMOTE_VERSION <= ${ACTIVE_VERSION:-none}), exiting."
-    exit 0
-fi
+if [[ -n "$SELECTED_TAG" ]]; then
+    log "Selected tag mode: staging ${ACTIVE_VERSION:-none} → $REMOTE_VERSION"
+else
+    if ! version_gt "$REMOTE_VERSION" "${ACTIVE_VERSION:-0.0.0}"; then
+        log "No update available ($REMOTE_VERSION <= ${ACTIVE_VERSION:-none}), exiting."
+        exit 0
+    fi
 
-log "Update available: ${ACTIVE_VERSION:-none} → $REMOTE_VERSION"
+    log "Update available: ${ACTIVE_VERSION:-none} → $REMOTE_VERSION"
+fi
 
 # ---------------------------------------------------------------------------
 # Find the OTA image download URL
