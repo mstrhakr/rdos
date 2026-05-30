@@ -225,6 +225,12 @@ const appState = {
     lastSignature: "",
     dismissedSignature: "",
   },
+  wifiConnectDraft: {
+    interface: "",
+    ssid: "",
+    security: "",
+    hidden: false,
+  },
   activeTab: "connection",
 };
 
@@ -407,6 +413,11 @@ function wifiInterfaceOptionsMarkup() {
     .join("");
 }
 
+function isModalOpen(id) {
+  const modal = document.getElementById(id);
+  return Boolean(modal && modal.getAttribute("aria-hidden") === "false");
+}
+
 function syncInterfaceFields() {
   const networkInterface = document.getElementById("networkInterface");
   if (networkInterface) {
@@ -421,6 +432,22 @@ function syncInterfaceFields() {
     wifiInterface.disabled = !appState.networkInterfaces.hasWireless;
     const selectedWifi = appState.networkInterfaces.defaultWireless || wifiInterface.value || "";
     wifiInterface.value = selectedWifi;
+  }
+
+  const wifiScanInterface = document.getElementById("wifiScanInterface");
+  if (wifiScanInterface) {
+    wifiScanInterface.innerHTML = wifiInterfaceOptionsMarkup();
+    wifiScanInterface.disabled = !appState.networkInterfaces.hasWireless;
+    const selectedWifi = appState.networkInterfaces.defaultWireless || wifiScanInterface.value || "";
+    wifiScanInterface.value = selectedWifi;
+  }
+
+  const wifiConnectInterface = document.getElementById("wifiConnectInterface");
+  if (wifiConnectInterface) {
+    wifiConnectInterface.innerHTML = wifiInterfaceOptionsMarkup();
+    wifiConnectInterface.disabled = !appState.networkInterfaces.hasWireless;
+    const selectedWifi = appState.wifiConnectDraft.interface || appState.networkInterfaces.defaultWireless || wifiConnectInterface.value || "";
+    wifiConnectInterface.value = selectedWifi;
   }
 }
 
@@ -504,18 +531,78 @@ function renderWifiRows(containerId) {
     button.addEventListener("click", () => {
       const ssid = button.getAttribute("data-wifi-ssid") || "";
       const security = button.getAttribute("data-wifi-security") || "";
-      openSettings("network");
-      const ssidField = document.getElementById("wifiSSID");
-      const passwordField = document.getElementById("wifiPassword");
-      if (ssidField) {
-        ssidField.value = ssid;
-      }
-      if (passwordField && security.toLowerCase() === "open") {
-        passwordField.value = "";
-      }
-      updateText("settingsNote", `Prepared WiFi connection for ${ssid}.`);
+      openWifiConnectModal({ ssid, security });
     });
   });
+}
+
+function openWifiScanModal() {
+  const modal = document.getElementById("wifiScanModal");
+  if (!modal) {
+    return;
+  }
+  modal.setAttribute("aria-hidden", "false");
+  syncInterfaceFields();
+  renderWifiRows("modalWifiList");
+}
+
+function closeWifiScanModal() {
+  const modal = document.getElementById("wifiScanModal");
+  if (!modal) {
+    return;
+  }
+  modal.setAttribute("aria-hidden", "true");
+}
+
+function openWifiConnectModal(network = {}) {
+  const modal = document.getElementById("wifiConnectModal");
+  if (!modal) {
+    return;
+  }
+
+  appState.wifiConnectDraft = {
+    interface: appState.networkInterfaces.defaultWireless || appState.status?.wifiInterface || "",
+    ssid: network.ssid || "",
+    security: network.security || "",
+    hidden: false,
+  };
+
+  const wifiConnectInterface = document.getElementById("wifiConnectInterface");
+  if (wifiConnectInterface) {
+    wifiConnectInterface.innerHTML = wifiInterfaceOptionsMarkup();
+    wifiConnectInterface.value = appState.wifiConnectDraft.interface;
+  }
+
+  const ssidField = document.getElementById("wifiConnectSSID");
+  if (ssidField) {
+    ssidField.value = appState.wifiConnectDraft.ssid;
+  }
+
+  const passwordField = document.getElementById("wifiConnectPassword");
+  if (passwordField) {
+    passwordField.value = "";
+    if (String(network.security || "").toLowerCase() === "open") {
+      passwordField.placeholder = "open network - leave blank";
+    } else {
+      passwordField.placeholder = "password";
+    }
+  }
+
+  const hiddenField = document.getElementById("wifiConnectHidden");
+  if (hiddenField) {
+    hiddenField.checked = false;
+  }
+
+  updateText("wifiConnectState", network.ssid ? `Connecting to ${network.ssid}` : "Pick a network to connect.");
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function closeWifiConnectModal() {
+  const modal = document.getElementById("wifiConnectModal");
+  if (!modal) {
+    return;
+  }
+  modal.setAttribute("aria-hidden", "true");
 }
 
 function renderWireGuardUSBRows(containerId) {
@@ -771,7 +858,7 @@ function attachSettingsActions() {
   const scanButton = document.getElementById("scanWifiSettings");
   if (scanButton && !scanButton.dataset.bound) {
     scanButton.dataset.bound = "1";
-    scanButton.addEventListener("click", () => scanWifi());
+    scanButton.addEventListener("click", () => scanWifi(true));
   }
 
   const applyButton = document.getElementById("applyWifi");
@@ -1016,7 +1103,7 @@ function bindMainActions() {
   document.getElementById("refreshAll")?.addEventListener("click", refreshAll);
   document.getElementById("openSettings")?.addEventListener("click", () => openSettings("connection"));
   document.getElementById("openNetworkTab")?.addEventListener("click", () => openSettings("network"));
-  document.getElementById("scanWifi")?.addEventListener("click", () => scanWifi());
+  document.getElementById("scanWifi")?.addEventListener("click", () => scanWifi(true));
   document.getElementById("loadNetwork")?.addEventListener("click", refreshNetwork);
   document.getElementById("saveNetwork")?.addEventListener("click", saveNetwork);
 }
@@ -1051,6 +1138,22 @@ function bindModalActions() {
     } catch (err) {
       updateText("settingsNote", `certificate ignore error: ${err.message}`);
     }
+  });
+
+  document.getElementById("wifiScanClose")?.addEventListener("click", closeWifiScanModal);
+  document.getElementById("wifiScanRefresh")?.addEventListener("click", () => scanWifi(true));
+  document.getElementById("wifiScanInterface")?.addEventListener("change", () => scanWifi(false));
+
+  document.getElementById("wifiConnectClose")?.addEventListener("click", closeWifiConnectModal);
+  document.getElementById("wifiConnectCancel")?.addEventListener("click", closeWifiConnectModal);
+  document.getElementById("wifiConnectSubmit")?.addEventListener("click", async () => {
+    const payload = {
+      interface: document.getElementById("wifiConnectInterface")?.value.trim() || appState.networkInterfaces.defaultWireless || "",
+      ssid: document.getElementById("wifiConnectSSID")?.value.trim() || "",
+      password: document.getElementById("wifiConnectPassword")?.value || "",
+      hidden: Boolean(document.getElementById("wifiConnectHidden")?.checked),
+    };
+    await connectWifi(payload);
   });
 }
 
@@ -1159,6 +1262,9 @@ async function refreshNetworkInterfaces() {
     if (appState.network) {
       syncNetworkFields();
       updateText("networkState", JSON.stringify(appState.network, null, 2));
+    }
+    if (isModalOpen("wifiScanModal")) {
+      renderWifiRows("modalWifiList");
     }
   } catch (err) {
     updateText("settingsNote", `interface refresh error: ${err.message}`);
@@ -1365,11 +1471,15 @@ async function saveNetwork() {
   }
 }
 
-async function scanWifi() {
+async function scanWifi(openModal = false) {
   try {
-    const interfaceValue = document.getElementById("wifiInterface")?.value.trim() || appState.networkInterfaces.defaultWireless || "";
+    const interfaceValue = document.getElementById("wifiScanInterface")?.value.trim()
+      || document.getElementById("wifiInterface")?.value.trim()
+      || appState.networkInterfaces.defaultWireless
+      || "";
     if (!interfaceValue && appState.networkInterfaces.hasWireless) {
       updateText("settingsNote", "No wireless adapter selected.");
+      updateText("wifiScanState", "No wireless adapter selected.");
       return;
     }
     const query = interfaceValue ? `?interface=${encodeURIComponent(interfaceValue)}` : "";
@@ -1377,12 +1487,18 @@ async function scanWifi() {
     appState.wifiNetworks = payload.networks || [];
     buildMainNetworkRows();
     renderWifiRows("settingsWifiList");
+    renderWifiRows("modalWifiList");
+    updateText("wifiScanState", `Found ${appState.wifiNetworks.length} WiFi network(s) on ${interfaceValue || "auto"}.`);
     updateText("settingsNote", `Found ${appState.wifiNetworks.length} WiFi network(s).`);
+    if (openModal) {
+      openWifiScanModal();
+    }
   } catch (err) {
     appState.wifiNetworks = [];
     const message = `wifi scan error: ${err.message}`;
     updateText("wifiList", message);
     updateText("settingsWifiList", message);
+    updateText("wifiScanState", message);
   }
 }
 
@@ -1398,9 +1514,9 @@ async function importWireGuardUSB(path) {
   }
 }
 
-async function connectWifi() {
+async function connectWifi(overridePayload = null) {
   const selectedInterface = document.getElementById("wifiInterface")?.value.trim() || appState.networkInterfaces.defaultWireless || "";
-  const payload = {
+  const payload = overridePayload || {
     interface: selectedInterface,
     ssid: document.getElementById("wifiSSID")?.value.trim() || "",
     password: document.getElementById("wifiPassword")?.value || "",
@@ -1414,11 +1530,15 @@ async function connectWifi() {
 
   try {
     await api("/api/v1/wifi/connect", "POST", payload);
+    closeWifiConnectModal();
     updateText("settingsNote", `Connecting to ${payload.ssid || "WiFi"}.`);
+    updateText("wifiConnectState", `Connecting to ${payload.ssid || "WiFi"}.`);
     await refreshNetwork();
+    await refreshNetworkInterfaces();
     await refreshStatus();
   } catch (err) {
     updateText("settingsNote", `wifi connect error: ${err.message}`);
+    updateText("wifiConnectState", `wifi connect error: ${err.message}`);
   }
 }
 
@@ -1455,6 +1575,8 @@ function shouldBlockGlobalShortcut(event) {
 function wireGlobalShortcuts() {
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      closeWifiConnectModal();
+      closeWifiScanModal();
       closeCertTrustModal();
       closeSettings();
     }
@@ -1601,10 +1723,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   renderCornerClock();
 
   await refreshAll();
-  await scanWifi();
+  await scanWifi(false);
   renderSettingsPanels();
   setInterval(renderCornerClock, 1000);
   setInterval(refreshSession, 5000);
   setInterval(refreshStatus, 7000);
+  setInterval(() => {
+    if (isModalOpen("settingsModal") || isModalOpen("wifiScanModal") || isModalOpen("wifiConnectModal")) {
+      refreshNetworkInterfaces().catch(() => {});
+      refreshNetwork().catch(() => {});
+    }
+  }, 8000);
   setInterval(refreshHealth, 15000);
 });

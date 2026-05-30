@@ -91,6 +91,67 @@
       </div>
     </aside>
 
+    <aside class="modal" id="wifiScanModal" aria-hidden="true">
+      <div class="modal-surface wifi-scan-modal-surface" role="dialog" aria-modal="true" aria-labelledby="wifiScanTitle">
+        <header class="modal-head">
+          <div>
+            <p class="eyebrow">Wireless networks</p>
+            <h2 id="wifiScanTitle">Scan and connect</h2>
+          </div>
+          <button id="wifiScanClose" class="secondary" type="button">Close</button>
+        </header>
+
+        <section class="tab-card wifi-connect">
+          <div class="form-grid">
+            <label>Adapter
+              <select id="wifiScanInterface"></select>
+            </label>
+          </div>
+          <div class="actions tight">
+            <button id="wifiScanRefresh" class="secondary" type="button">Rescan</button>
+          </div>
+          <div id="wifiScanState" class="status-card compact">No scan yet.</div>
+          <div id="modalWifiList" class="wifi-list"></div>
+        </section>
+      </div>
+    </aside>
+
+    <aside class="modal" id="wifiConnectModal" aria-hidden="true">
+      <div class="modal-surface wifi-connect-modal-surface" role="dialog" aria-modal="true" aria-labelledby="wifiConnectTitle">
+        <header class="modal-head">
+          <div>
+            <p class="eyebrow">WiFi connection</p>
+            <h2 id="wifiConnectTitle">Enter network credentials</h2>
+          </div>
+          <button id="wifiConnectClose" class="secondary" type="button">Close</button>
+        </header>
+
+        <section class="tab-card wifi-connect">
+          <div class="form-grid">
+            <label>Adapter
+              <select id="wifiConnectInterface"></select>
+            </label>
+            <label>SSID
+              <input id="wifiConnectSSID" type="text" readonly />
+            </label>
+            <label>Password
+              <input id="wifiConnectPassword" type="password" placeholder="password" />
+            </label>
+            <label class="switch-row"><input id="wifiConnectHidden" type="checkbox" /> <span>Hidden network</span></label>
+          </div>
+          <div id="wifiConnectState" class="status-card compact">Pick a network to connect.</div>
+        </section>
+
+        <footer class="modal-foot">
+          <div class="modal-foot-note">Open networks can leave password blank.</div>
+          <div class="actions tight">
+            <button id="wifiConnectCancel" class="secondary" type="button">Cancel</button>
+            <button id="wifiConnectSubmit" type="button">Connect WiFi</button>
+          </div>
+        </footer>
+      </div>
+    </aside>
+
     <script src="/app.js"></script>
   </body>
 </html>
