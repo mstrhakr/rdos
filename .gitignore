@@ -2,7 +2,7 @@
 *.vhd*
 *.deb
 *.Identifier
-tcconfig*
+/tcconfig*
 *.AppImage
 .installer-*
 *.iso
