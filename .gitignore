@@ -9,3 +9,4 @@
 *.img
 *.raw
 *.img.zst*
+.dev/tcconfig
