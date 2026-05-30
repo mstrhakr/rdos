@@ -34,13 +34,41 @@ COPY tcfiles/debian.sources /etc/apt/sources.list.d/debian.sources
 RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
     printf '%s\n' 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
 
+# Install tiny prerequisites first so external binary fetch failures fail fast.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl
+
+# ttyd is not currently packaged in Debian Trixie's main repos, so install a pinned upstream binary.
+RUN arch="$(dpkg --print-architecture)" && \
+    case "$arch" in \
+        amd64) asset="ttyd.x86_64" ;; \
+        arm64) asset="ttyd.aarch64" ;; \
+        *) echo "Unsupported architecture for ttyd: $arch" >&2; exit 1 ;; \
+    esac && \
+    url="https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/${asset}" && \
+    i=1 && \
+    while [ "$i" -le 5 ]; do \
+        if curl -fsSL --connect-timeout 15 --max-time 180 "$url" -o /usr/bin/ttyd; then \
+            chmod 0755 /usr/bin/ttyd; \
+            exit 0; \
+        fi; \
+        echo "ttyd download failed (attempt ${i}/5); retrying..." >&2; \
+        sleep "$i"; \
+        i=$((i + 1)); \
+    done; \
+    echo "Failed to download ttyd from $url after 5 attempts" >&2; \
+    exit 1
+
 # Stable system packages — this layer is only invalidated when the list below changes.
 # BuildKit cache mounts keep the apt/dpkg cache between builds so packages are not
 # re-downloaded on every run; use DOCKER_BUILDKIT=1 (or Docker 23+ default) to benefit.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
-        sudo curl wget openssl \
+        sudo wget openssl \
         xterm xinit x11-xserver-utils libxcb1 \
         fvwm yad light feh \
         chromium \
@@ -58,16 +86,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         adwaita-icon-theme-legacy libfuse2 \
     libcap2-bin \
     grub-common
-
-# ttyd is not currently packaged in Debian Trixie's main repos, so install a pinned upstream binary.
-RUN arch="$(dpkg --print-architecture)" && \
-    case "$arch" in \
-        amd64) asset="ttyd.x86_64" ;; \
-        arm64) asset="ttyd.aarch64" ;; \
-        *) echo "Unsupported architecture for ttyd: $arch" >&2; exit 1 ;; \
-    esac && \
-    wget -qO /usr/bin/ttyd "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/${asset}" && \
-    chmod 0755 /usr/bin/ttyd
 
 # Disable audible terminal/system bell where possible.
 RUN printf '%s\n' 'blacklist pcspkr' 'install pcspkr /bin/false' > /etc/modprobe.d/nobeep.conf && \
