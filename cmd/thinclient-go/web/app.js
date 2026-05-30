@@ -209,6 +209,8 @@ const appState = {
   health: null,
   ota: null,
   otaReleases: [],
+  otaCatalog: [],
+  otaCheck: null,
   selectedOtaTag: "",
   session: null,
   status: null,
@@ -704,13 +706,21 @@ function buildOTAPanel(tab) {
   const currentVersion = ota?.currentVersion || "unknown";
   const inactiveVersion = ota?.inactiveVersion || "unknown";
   const recovery = ota?.pendingRecovery ? "pending" : "clear";
-  const releases = appState.otaReleases || [];
-  const selectedTag = appState.selectedOtaTag || releases[0]?.tag || "";
-  const releaseOptions = releases.length
-    ? releases
-        .map((release) => {
-          const label = `${release.tag}${release.prerelease ? " (beta)" : ""}${release.publishedAt ? ` - ${release.publishedAt.slice(0, 10)}` : ""}`;
-          return `<option value="${escapeHtml(release.tag)}"${release.tag === selectedTag ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  const entries = appState.otaCatalog || [];
+  const selectedTag = appState.selectedOtaTag || entries[0]?.tag || "";
+  const latestTag = appState.otaCheck?.latestTag || entries[0]?.tag || "";
+  const checkState = appState.otaCheck?.running
+    ? "Checking in background..."
+    : (appState.otaCheck?.checkedAt
+      ? `Last checked ${new Date(appState.otaCheck.checkedAt).toLocaleString()}`
+      : "No background check yet.");
+
+  const releaseOptions = entries.length
+    ? entries
+        .map((entry) => {
+          const labels = (entry.labels || []).join(", ");
+          const label = `${entry.tag}${labels ? ` [${labels}]` : ""}${entry.publishedAt ? ` - ${entry.publishedAt.slice(0, 10)}` : ""}`;
+          return `<option value="${escapeHtml(entry.tag)}"${entry.tag === selectedTag ? " selected" : ""}>${escapeHtml(label)}</option>`;
         })
         .join("")
     : "<option value=\"\">No releases available</option>";
@@ -734,6 +744,8 @@ function buildOTAPanel(tab) {
               <label>Recovery<input type="text" value="${escapeHtml(recovery)}" readonly /></label>
               <label>Current version<input type="text" value="${escapeHtml(currentVersion)}" readonly /></label>
               <label>Inactive version<input type="text" value="${escapeHtml(inactiveVersion)}" readonly /></label>
+              <label>Latest available<input type="text" value="${escapeHtml(latestTag || "none")}" readonly /></label>
+              <label>Check status<input type="text" value="${escapeHtml(checkState)}" readonly /></label>
             </div>
             <h3>Available releases</h3>
             <div class="form-grid">
@@ -742,8 +754,9 @@ function buildOTAPanel(tab) {
               </label>
             </div>
             <div class="actions tight">
+              <button type="button" id="runOTACheck">Check for updates</button>
               <button type="button" id="refreshOTAStatus" class="secondary">Refresh OTA</button>
-              <button type="button" id="refreshOTAReleases" class="secondary">Refresh releases</button>
+              <button type="button" id="refreshOTACatalog" class="secondary">Refresh releases</button>
               <button type="button" id="runOTAUpdate" ${selectedTag ? "" : "disabled"}>Update to selected</button>
               <button type="button" id="runOTARollback" ${ota?.canRollback ? "" : "disabled"}>Rollback to previous slot</button>
             </div>
@@ -899,7 +912,19 @@ function attachSettingsActions() {
   const refreshOTAReleasesButton = document.getElementById("refreshOTAReleases");
   if (refreshOTAReleasesButton && !refreshOTAReleasesButton.dataset.bound) {
     refreshOTAReleasesButton.dataset.bound = "1";
-    refreshOTAReleasesButton.addEventListener("click", () => refreshOTAReleases());
+    refreshOTAReleasesButton.addEventListener("click", () => refreshOTACatalog());
+  }
+
+  const refreshOTACatalogButton = document.getElementById("refreshOTACatalog");
+  if (refreshOTACatalogButton && !refreshOTACatalogButton.dataset.bound) {
+    refreshOTACatalogButton.dataset.bound = "1";
+    refreshOTACatalogButton.addEventListener("click", () => refreshOTACatalog());
+  }
+
+  const runOTACheckButton = document.getElementById("runOTACheck");
+  if (runOTACheckButton && !runOTACheckButton.dataset.bound) {
+    runOTACheckButton.dataset.bound = "1";
+    runOTACheckButton.addEventListener("click", () => startOTACheck());
   }
 
   const otaReleaseTag = document.getElementById("otaReleaseTag");
@@ -920,6 +945,23 @@ function attachSettingsActions() {
   if (rollbackButton && !rollbackButton.dataset.bound) {
     rollbackButton.dataset.bound = "1";
     rollbackButton.addEventListener("click", () => triggerOTARollback());
+  }
+
+  const otaBannerUpdateNow = document.getElementById("otaBannerUpdateNow");
+  if (otaBannerUpdateNow && !otaBannerUpdateNow.dataset.bound) {
+    otaBannerUpdateNow.dataset.bound = "1";
+    otaBannerUpdateNow.addEventListener("click", () => triggerOTAUpdate());
+  }
+
+  const otaBannerDismiss = document.getElementById("otaBannerDismiss");
+  if (otaBannerDismiss && !otaBannerDismiss.dataset.bound) {
+    otaBannerDismiss.dataset.bound = "1";
+    otaBannerDismiss.addEventListener("click", () => {
+      const banner = document.getElementById("otaUpdateBanner");
+      if (banner) {
+        banner.setAttribute("aria-hidden", "true");
+      }
+    });
   }
 
 }
@@ -1293,20 +1335,92 @@ async function refreshOTA() {
   }
 }
 
-async function refreshOTAReleases() {
+function renderOTABanner() {
+  const banner = document.getElementById("otaUpdateBanner");
+  if (!banner) {
+    return;
+  }
+
+  const check = appState.otaCheck;
+  if (!check || !check.available || !check.latestTag) {
+    banner.setAttribute("aria-hidden", "true");
+    return;
+  }
+
+  updateText("otaBannerText", `Update available: ${check.latestTag}`);
+  banner.setAttribute("aria-hidden", "false");
+}
+
+async function refreshOTACatalog() {
   try {
-    const payload = await api("/api/v1/ota/releases?limit=10");
-    appState.otaReleases = payload.releases || [];
-    const knownTags = new Set(appState.otaReleases.map((release) => release.tag));
+    const payload = await api("/api/v1/ota/catalog");
+    appState.otaCatalog = payload.entries || [];
+    appState.otaReleases = appState.otaCatalog.map((entry) => ({
+      tag: entry.tag,
+      name: entry.name,
+      publishedAt: entry.publishedAt,
+      prerelease: entry.prerelease,
+    }));
+    const knownTags = new Set(appState.otaCatalog.map((entry) => entry.tag));
     if (!appState.selectedOtaTag || !knownTags.has(appState.selectedOtaTag)) {
-      appState.selectedOtaTag = appState.otaReleases[0]?.tag || "";
+      appState.selectedOtaTag = appState.otaCatalog[0]?.tag || "";
     }
     renderSettingsPanels();
   } catch (err) {
-    appState.otaReleases = [];
+    appState.otaCatalog = [];
     appState.selectedOtaTag = "";
-    updateText("settingsNote", `release refresh error: ${err.message}`);
+    updateText("settingsNote", `catalog refresh error: ${err.message}`);
     renderSettingsPanels();
+  }
+}
+
+async function refreshOTACheck() {
+  try {
+    appState.otaCheck = await api("/api/v1/ota/check");
+    renderOTABanner();
+    return appState.otaCheck;
+  } catch (err) {
+    updateText("settingsNote", `check status error: ${err.message}`);
+    return null;
+  }
+}
+
+async function startOTACheck() {
+  try {
+    updateText("settingsNote", "Checking for updates in background...");
+    await api("/api/v1/ota/check", "POST", {});
+
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const state = await refreshOTACheck();
+      if (!state || !state.running) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+
+    await Promise.all([refreshOTACatalog(), refreshOTA()]);
+    if (appState.otaCheck?.error) {
+      updateText("settingsNote", `update check failed: ${appState.otaCheck.error}`);
+    } else if (appState.otaCheck?.available) {
+      const latest = appState.otaCheck?.latestTag || "new release";
+      updateText("settingsNote", `${latest} is available.`);
+      if (appState.otaCheck.latestTag) {
+        appState.selectedOtaTag = appState.otaCheck.latestTag;
+        renderSettingsPanels();
+      }
+    } else {
+      updateText("settingsNote", "No new updates available.");
+    }
+  } catch (err) {
+    updateText("settingsNote", `check error: ${err.message}`);
+  }
+}
+
+async function refreshOTAReleases() {
+  try {
+    await refreshOTACatalog();
+  } catch (err) {
+    updateText("settingsNote", `release refresh error: ${err.message}`);
   }
 }
 
@@ -1346,7 +1460,7 @@ async function refreshTTYDStatus() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces(), refreshWireGuardUSB(), refreshOTA(), refreshOTAReleases(), refreshTTYDStatus()]);
+  await Promise.all([refreshHealth(), refreshSession(), refreshConfig(), refreshNetwork(), refreshStatus(), refreshNetworkInterfaces(), refreshWireGuardUSB(), refreshOTA(), refreshOTACatalog(), refreshOTACheck(), refreshTTYDStatus()]);
   await refreshWifi();
 }
 

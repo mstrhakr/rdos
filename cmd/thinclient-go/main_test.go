@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mstrhakr/rdos/internal/session"
 	"github.com/mstrhakr/rdos/internal/tcconfig"
@@ -404,6 +405,140 @@ func TestHandleOTAReleasesReturnsResults(t *testing.T) {
 	}
 	if len(payload.Releases) != 1 || payload.Releases[0].Tag != "v1.2.3-rc.1" {
 		t.Fatalf("unexpected releases: %+v", payload.Releases)
+	}
+}
+
+func TestHandleOTACatalogReturnsEntries(t *testing.T) {
+	oldFetchReleases := otaFetchReleases
+	t.Cleanup(func() {
+		otaFetchReleases = oldFetchReleases
+	})
+
+	otaFetchReleases = func(channel string, limit int) ([]otaReleaseEntry, error) {
+		if channel != "beta" {
+			t.Fatalf("channel = %q, want beta", channel)
+		}
+		if limit != otaMaxLimit {
+			t.Fatalf("limit = %d, want %d", limit, otaMaxLimit)
+		}
+		return []otaReleaseEntry{
+			{Tag: "v1.3.0", Name: "v1.3.0", PublishedAt: "2026-05-29T00:00:00Z", Prerelease: false},
+			{Tag: "v1.2.9", Name: "v1.2.9", PublishedAt: "2026-05-25T00:00:00Z", Prerelease: false},
+		}, nil
+	}
+
+	a := &app{config: map[string]string{"ota_channel": "beta"}}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ota/catalog", nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	w := httptest.NewRecorder()
+
+	a.handleOTACatalog(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var payload otaCatalogResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if payload.Channel != "beta" {
+		t.Fatalf("channel = %q, want beta", payload.Channel)
+	}
+	if payload.LatestTag != "v1.3.0" {
+		t.Fatalf("latestTag = %q, want v1.3.0", payload.LatestTag)
+	}
+	if len(payload.Entries) != 2 {
+		t.Fatalf("entries len = %d, want 2", len(payload.Entries))
+	}
+}
+
+func TestHandleOTACheckRunsInBackground(t *testing.T) {
+	oldFetchReleases := otaFetchReleases
+	t.Cleanup(func() {
+		otaFetchReleases = oldFetchReleases
+	})
+
+	otaFetchReleases = func(channel string, limit int) ([]otaReleaseEntry, error) {
+		return []otaReleaseEntry{{Tag: "v1.3.0", Name: "v1.3.0", Prerelease: false}}, nil
+	}
+
+	a := &app{config: map[string]string{"ota_channel": "stable"}}
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v1/ota/check", strings.NewReader(`{}`))
+	postReq.RemoteAddr = "127.0.0.1:5555"
+	postW := httptest.NewRecorder()
+	a.handleOTACheck(postW, postReq)
+
+	if postW.Code != http.StatusAccepted {
+		t.Fatalf("post status = %d, want %d", postW.Code, http.StatusAccepted)
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/ota/check", nil)
+		getReq.RemoteAddr = "127.0.0.1:5555"
+		getW := httptest.NewRecorder()
+		a.handleOTACheck(getW, getReq)
+
+		if getW.Code != http.StatusOK {
+			t.Fatalf("get status = %d, want %d", getW.Code, http.StatusOK)
+		}
+
+		var payload otaCheckResponse
+		if err := json.Unmarshal(getW.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode json: %v", err)
+		}
+
+		if !payload.Running {
+			if payload.LatestTag != "v1.3.0" {
+				t.Fatalf("latestTag = %q, want v1.3.0", payload.LatestTag)
+			}
+			if !payload.Available {
+				t.Fatal("available should be true")
+			}
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatal("ota check did not complete before deadline")
+}
+
+func TestOTAReleaseMatchesChannelBetaIncludesStable(t *testing.T) {
+	t.Parallel()
+
+	betaStable := otaReleaseMatchesChannel(githubRelease{TagName: "v1.2.3", Prerelease: false}, "beta")
+	if !betaStable {
+		t.Fatal("beta channel should include stable releases")
+	}
+
+	stableRC := otaReleaseMatchesChannel(githubRelease{TagName: "v1.2.3-rc.1", Prerelease: true}, "stable")
+	if stableRC {
+		t.Fatal("stable channel should exclude rc/prerelease")
+	}
+}
+
+func TestBuildOTACatalogEntriesLabels(t *testing.T) {
+	t.Parallel()
+
+	entries, latestTag := buildOTACatalogEntries([]otaReleaseEntry{
+		{Tag: "v1.2.4", Name: "v1.2.4", Prerelease: false},
+		{Tag: "v1.2.3-rc.1", Name: "v1.2.3-rc.1", Prerelease: true},
+	}, "1.2.4")
+
+	if latestTag != "v1.2.4" {
+		t.Fatalf("latestTag = %q, want v1.2.4", latestTag)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries len = %d, want 2", len(entries))
+	}
+	if !strings.Contains(strings.Join(entries[0].Labels, ","), "installed") {
+		t.Fatalf("expected installed label on first entry: %+v", entries[0].Labels)
+	}
+	if !strings.Contains(strings.Join(entries[1].Labels, ","), "beta") {
+		t.Fatalf("expected beta label on second entry: %+v", entries[1].Labels)
 	}
 }
 

@@ -73,6 +73,33 @@ type otaReleasesResponse struct {
 	Releases []otaReleaseEntry `json:"releases"`
 }
 
+type otaCatalogEntry struct {
+	Tag         string   `json:"tag"`
+	Name        string   `json:"name"`
+	PublishedAt string   `json:"publishedAt"`
+	Prerelease  bool     `json:"prerelease"`
+	Labels      []string `json:"labels"`
+}
+
+type otaCatalogResponse struct {
+	Channel        string            `json:"channel"`
+	CurrentVersion string            `json:"currentVersion"`
+	LatestTag      string            `json:"latestTag,omitempty"`
+	Entries        []otaCatalogEntry `json:"entries"`
+}
+
+type otaCheckResponse struct {
+	Running        bool              `json:"running"`
+	CheckedAt      string            `json:"checkedAt,omitempty"`
+	Channel        string            `json:"channel,omitempty"`
+	CurrentVersion string            `json:"currentVersion,omitempty"`
+	LatestTag      string            `json:"latestTag,omitempty"`
+	LatestName     string            `json:"latestName,omitempty"`
+	Available      bool              `json:"available"`
+	Error          string            `json:"error,omitempty"`
+	Entries        []otaCatalogEntry `json:"entries,omitempty"`
+}
+
 type otaUpdateRequest struct {
 	Tag string `json:"tag"`
 }
@@ -214,6 +241,8 @@ type app struct {
 	config     map[string]string
 	terminalMu sync.Mutex
 	ttydCmd    *exec.Cmd
+	otaCheckMu sync.Mutex
+	otaCheck   otaCheckResponse
 }
 
 var otaLookPath = exec.LookPath
@@ -262,6 +291,8 @@ func main() {
 	mux.Handle("/api/v1/network/interfaces", application.loopbackOnly(http.HandlerFunc(application.handleNetworkInterfaces)))
 	mux.Handle("/api/v1/ota", application.loopbackOnly(http.HandlerFunc(application.handleOTAStatus)))
 	mux.Handle("/api/v1/ota/releases", application.loopbackOnly(http.HandlerFunc(application.handleOTAReleases)))
+	mux.Handle("/api/v1/ota/catalog", application.loopbackOnly(http.HandlerFunc(application.handleOTACatalog)))
+	mux.Handle("/api/v1/ota/check", application.loopbackOnly(http.HandlerFunc(application.handleOTACheck)))
 	mux.Handle("/api/v1/ota/update", application.loopbackOnly(http.HandlerFunc(application.handleOTAUpdate)))
 	mux.Handle("/api/v1/ota/rollback", application.loopbackOnly(http.HandlerFunc(application.handleOTARollback)))
 	mux.Handle("/api/v1/wireguard/usb", application.loopbackOnly(http.HandlerFunc(application.handleWireGuardUSBScan)))
@@ -556,6 +587,101 @@ func (a *app) handleOTAUpdate(w http.ResponseWriter, r *http.Request) {
 		Tag:     tag,
 		Status:  otaStatusFromConfig(cfg),
 	})
+}
+
+func (a *app) handleOTACatalog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	a.mu.Lock()
+	cfg := cloneConfig(a.config)
+	a.mu.Unlock()
+
+	channel := otaChannelFromConfig(cfg)
+	status := otaStatusFromConfig(cfg)
+	releases, err := otaFetchReleases(channel, otaMaxLimit)
+	if err != nil {
+		http.Error(w, "failed to fetch catalog: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	entries, latestTag := buildOTACatalogEntries(releases, status.CurrentVersion)
+	respondJSON(w, http.StatusOK, otaCatalogResponse{
+		Channel:        channel,
+		CurrentVersion: status.CurrentVersion,
+		LatestTag:      latestTag,
+		Entries:        entries,
+	})
+}
+
+func (a *app) handleOTACheck(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		a.otaCheckMu.Lock()
+		snapshot := a.otaCheck
+		a.otaCheckMu.Unlock()
+		respondJSON(w, http.StatusOK, snapshot)
+		return
+	case http.MethodPost:
+		a.otaCheckMu.Lock()
+		if a.otaCheck.Running {
+			snapshot := a.otaCheck
+			a.otaCheckMu.Unlock()
+			respondJSON(w, http.StatusAccepted, snapshot)
+			return
+		}
+		a.otaCheck.Running = true
+		a.otaCheck.Error = ""
+		a.otaCheckMu.Unlock()
+
+		go a.runOTACheck()
+
+		a.otaCheckMu.Lock()
+		snapshot := a.otaCheck
+		a.otaCheckMu.Unlock()
+		respondJSON(w, http.StatusAccepted, snapshot)
+		return
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *app) runOTACheck() {
+	a.mu.Lock()
+	cfg := cloneConfig(a.config)
+	a.mu.Unlock()
+
+	channel := otaChannelFromConfig(cfg)
+	status := otaStatusFromConfig(cfg)
+	result := otaCheckResponse{
+		Running:        false,
+		CheckedAt:      time.Now().UTC().Format(time.RFC3339),
+		Channel:        channel,
+		CurrentVersion: status.CurrentVersion,
+	}
+
+	releases, err := otaFetchReleases(channel, otaMaxLimit)
+	if err != nil {
+		result.Error = "failed to fetch releases: " + err.Error()
+		a.otaCheckMu.Lock()
+		a.otaCheck = result
+		a.otaCheckMu.Unlock()
+		return
+	}
+
+	entries, latestTag := buildOTACatalogEntries(releases, status.CurrentVersion)
+	result.Entries = entries
+	result.LatestTag = latestTag
+	if len(entries) > 0 {
+		result.LatestName = entries[0].Name
+	}
+	result.Available = latestTag != "" && !otaTagMatchesCurrentVersion(latestTag, status.CurrentVersion)
+
+	a.otaCheckMu.Lock()
+	a.otaCheck = result
+	a.otaCheckMu.Unlock()
 }
 
 func (a *app) handleOTARollback(w http.ResponseWriter, r *http.Request) {
@@ -1306,6 +1432,56 @@ func otaChannelFromConfig(cfg map[string]string) string {
 	return "stable"
 }
 
+func otaTagMatchesCurrentVersion(tag, current string) bool {
+	tag = strings.TrimSpace(tag)
+	current = strings.TrimSpace(current)
+	if tag == "" || current == "" {
+		return false
+	}
+	if tag == current {
+		return true
+	}
+	if strings.HasPrefix(tag, "v") && strings.TrimPrefix(tag, "v") == current {
+		return true
+	}
+	if strings.HasPrefix(current, "v") && strings.TrimPrefix(current, "v") == tag {
+		return true
+	}
+	return false
+}
+
+func buildOTACatalogEntries(releases []otaReleaseEntry, currentVersion string) ([]otaCatalogEntry, string) {
+	entries := make([]otaCatalogEntry, 0, len(releases))
+	latestTag := ""
+	for idx, release := range releases {
+		labels := make([]string, 0, 4)
+		if idx == 0 {
+			labels = append(labels, "latest")
+			latestTag = strings.TrimSpace(release.Tag)
+		}
+		if release.Prerelease || strings.Contains(strings.ToLower(release.Tag), "-rc.") {
+			labels = append(labels, "beta")
+		} else {
+			labels = append(labels, "stable")
+		}
+		if otaTagMatchesCurrentVersion(release.Tag, currentVersion) {
+			labels = append(labels, "installed")
+		} else {
+			labels = append(labels, "available")
+		}
+
+		entries = append(entries, otaCatalogEntry{
+			Tag:         release.Tag,
+			Name:        release.Name,
+			PublishedAt: release.PublishedAt,
+			Prerelease:  release.Prerelease,
+			Labels:      labels,
+		})
+	}
+
+	return entries, latestTag
+}
+
 func fetchOTAReleases(channel string, limit int) ([]otaReleaseEntry, error) {
 	if limit < 1 {
 		limit = otaDefaultLimit
@@ -1380,7 +1556,7 @@ func otaReleaseMatchesChannel(release githubRelease, channel string) bool {
 	tag := strings.ToLower(strings.TrimSpace(release.TagName))
 	isRC := strings.Contains(tag, "-rc.")
 	if channel == "beta" {
-		return release.Prerelease || isRC
+		return true
 	}
 	return !release.Prerelease && !isRC
 }
