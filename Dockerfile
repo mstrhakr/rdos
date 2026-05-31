@@ -69,6 +69,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
         sudo wget openssl \
         mingetty polkitd systemd-resolved \
+        initramfs-tools \
         libcap2-bin grub-common
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -117,7 +118,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rm -f /etc/apt/sources.list.d/xanmod-release.list && \
     mkdir -p /etc/initramfs-tools/conf.d && \
     printf 'RESUME=none\n' > /etc/initramfs-tools/conf.d/resume && \
-    if ls /lib/modules/* >/dev/null 2>&1; then update-initramfs -u -k all; fi
+    if command -v update-initramfs >/dev/null 2>&1 && ls /lib/modules/* >/dev/null 2>&1; then \
+        update-initramfs -u -k all; \
+    fi
 
 # Optional: Citrix ICA client and Moonlight AppImage from the build context.
 RUN --mount=type=bind,source=.,target=/build-context,ro \
