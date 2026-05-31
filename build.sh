@@ -404,7 +404,7 @@ for cmd in sgdisk mkfs.fat mkfs.ext4 losetup partprobe qemu-img rsync grub-insta
 done
 
 if [[ "$SKIP_DOCKER_BUILD" != "1" ]]; then
-    docker_args=()
+    docker_args=(--pull)
     [[ "$NO_CACHE" == "1" ]] && docker_args+=(--no-cache)
     docker_build_with_retry "Building production Docker image ($IMAGE_NAME)" docker build "${docker_args[@]}" . -t "$IMAGE_NAME"
 
