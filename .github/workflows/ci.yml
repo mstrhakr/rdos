@@ -122,7 +122,7 @@ jobs:
           ls -lh "$TARGET_DIR/rdos-prod.raw.zst" "$TARGET_DIR/rdos-installer.iso"
 
       - name: Upload compressed production raw artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rdos-prod-raw-zst
           path: rdos-prod.raw.zst
@@ -130,7 +130,7 @@ jobs:
           retention-days: 7
 
       - name: Upload ISO artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rdos-installer-iso
           path: rdos-installer.iso
