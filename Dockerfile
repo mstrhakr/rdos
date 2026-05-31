@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 FROM golang:1.23-bookworm AS thinclient_go_builder
 
+RUN apt-get update && apt-get -y upgrade
+
 WORKDIR /src
 COPY go.mod ./
 COPY go.sum ./
@@ -9,6 +11,8 @@ COPY internal ./internal
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o /out/thinclient-go ./cmd/thinclient-go
 
 FROM golang:1.23-bookworm AS tc_overlay_daemon_builder
+
+RUN apt-get update && apt-get -y upgrade
 
 WORKDIR /src
 COPY go.mod ./
