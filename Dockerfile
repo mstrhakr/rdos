@@ -94,7 +94,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         firmware-iwlwifi firmware-realtek firmware-atheros firmware-brcm80211
 
 # Disable audible terminal/system bell where possible.
-RUN printf '%s\n' 'blacklist pcspkr' 'install pcspkr /bin/false' > /etc/modprobe.d/nobeep.conf && \
+RUN install -d -m 755 /etc/modprobe.d && \
+    printf '%s\n' 'blacklist pcspkr' 'install pcspkr /bin/false' > /etc/modprobe.d/nobeep.conf && \
     printf '%s\n' 'set bell-style none' >> /etc/inputrc
 
 # XanMod kernel — installed during Docker build so no VM first-boot is needed.
