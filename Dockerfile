@@ -109,11 +109,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     test "$(gpg --show-keys --with-colons /tmp/xanmod-archive.key | awk -F: '$1=="fpr"{print $10; exit}')" = "$XANMOD_ARCHIVE_FINGERPRINT" && \
     gpg --dearmor -o /etc/apt/keyrings/xanmod-archive-keyring.gpg /tmp/xanmod-archive.key && \
     rm -f /tmp/xanmod-archive.key && \
-    echo 'deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' > /etc/apt/sources.list.d/xanmod-release.list && \
+    . /etc/os-release && \
+    echo "deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org ${VERSION_CODENAME} main" > /etc/apt/sources.list.d/xanmod-release.list && \
     apt-get update && \
     INITRD=No DEBIAN_FRONTEND=noninteractive apt-get install -y linux-xanmod-lts-x64v1 || \
         echo 'Warning: linux-xanmod-lts-x64v1 not available; continuing with current kernel packages in image.' && \
     rm -f /etc/apt/sources.list.d/xanmod-release.list && \
+    mkdir -p /etc/initramfs-tools/conf.d && \
     printf 'RESUME=none\n' > /etc/initramfs-tools/conf.d/resume && \
     if ls /lib/modules/* >/dev/null 2>&1; then update-initramfs -u -k all; fi
 
@@ -232,6 +234,8 @@ RUN systemctl enable tc-ota-updater.timer
 COPY tcfiles/tc-ota-usb-detect@.service /etc/systemd/system/tc-ota-usb-detect@.service
 RUN chmod 0644 /etc/systemd/system/tc-ota-usb-detect@.service
 
+RUN install -d -m 755 /etc/systemd/network /etc/tmpfiles.d /etc/udev/rules.d /etc/X11/xorg.conf.d
+RUN install -d -m 755 /etc/rdos
 COPY tcfiles/dhcp.network /etc/systemd/network/dhcp.network
 COPY tcfiles/systemd-resolved.conf /etc/tmpfiles.d/systemd-resolved.conf
 RUN systemctl enable systemd-networkd.service systemd-resolved.service
