@@ -79,6 +79,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
         xterm xinit x11-xserver-utils libxcb1 \
+        xserver-xorg-core xserver-xorg-video-all xserver-xorg-input-all \
         fvwm yad light feh \
         chromium \
         adwaita-icon-theme-legacy libfuse2
