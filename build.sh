@@ -254,13 +254,8 @@ insmod search_label
 
 search --no-floppy --label BOOT --set=root
 
-menuentry "RDOS (Web UI)" {
+menuentry "RDOS" {
     linux /vmlinuz root=LABEL=ROOT rw quiet loglevel=3 rdos.ui=web
-    initrd /initrd.img
-}
-
-menuentry "RDOS (Legacy UI)" {
-    linux /vmlinuz root=LABEL=ROOT rw quiet loglevel=3 rdos.ui=legacy
     initrd /initrd.img
 }
 GRUBCFG

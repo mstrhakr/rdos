@@ -400,27 +400,15 @@ else
     fi
 fi
 
-menuentry "RDOS (Slot A, Web UI)" --id slot_a_web {
+menuentry "RDOS (Slot A)" --id slot_a_web {
     search --no-floppy --label --set=root ESP
     linux  /vmlinuz-a root=LABEL=ROOT_A rw quiet loglevel=3 rdos.ui=web
     initrd /initrd-a.img
 }
 
-menuentry "RDOS (Slot A, Legacy UI)" --id slot_a_legacy {
-    search --no-floppy --label --set=root ESP
-    linux  /vmlinuz-a root=LABEL=ROOT_A rw quiet loglevel=3 rdos.ui=legacy
-    initrd /initrd-a.img
-}
-
-menuentry "RDOS (Slot B, Web UI)" --id slot_b_web {
+menuentry "RDOS (Slot B)" --id slot_b_web {
     search --no-floppy --label --set=root ESP
     linux  /vmlinuz-b root=LABEL=ROOT_B rw quiet loglevel=3 rdos.ui=web
-    initrd /initrd-b.img
-}
-
-menuentry "RDOS (Slot B, Legacy UI)" --id slot_b_legacy {
-    search --no-floppy --label --set=root ESP
-    linux  /vmlinuz-b root=LABEL=ROOT_B rw quiet loglevel=3 rdos.ui=legacy
     initrd /initrd-b.img
 }
 

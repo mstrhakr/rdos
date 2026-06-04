@@ -1,7 +1,6 @@
 #!/bin/bash
 set -u
 
-MODE_DEFAULT="web"
 BACKEND_URL="http://127.0.0.1:8080"
 BACKEND_LOG="${HOME}/.thinclient-go.log"
 BROWSER_LOG="${HOME}/.chromium.log"
@@ -23,56 +22,6 @@ find_chromium() {
         command -v chromium-browser
         return 0
     fi
-    return 1
-}
-
-read_mode_from_cmdline() {
-    local token
-    local cmdline
-
-    if [ ! -r /proc/cmdline ]; then
-        return 1
-    fi
-
-    cmdline="$(< /proc/cmdline)"
-    for token in $cmdline; do
-        case "$token" in
-            rdos.ui=web)
-                printf '%s\n' "web"
-                return 0
-                ;;
-            rdos.ui=legacy)
-                printf '%s\n' "legacy"
-                return 0
-                ;;
-        esac
-    done
-
-    return 1
-}
-
-read_mode_from_tcconfig() {
-    local key
-    local value
-    local cfg_path="${HOME}/tcconfig"
-
-    [ -r "$cfg_path" ] || return 1
-
-    while IFS='=' read -r key value || [ -n "$key" ]; do
-        [ -z "$key" ] && continue
-        case "$key" in
-            ui_mode)
-                value="${value#\"}"
-                value="${value%\"}"
-                value="${value,,}"
-                if [ "$value" = "web" ] || [ "$value" = "legacy" ]; then
-                    printf '%s\n' "$value"
-                    return 0
-                fi
-                ;;
-        esac
-    done < "$cfg_path"
-
     return 1
 }
 
@@ -224,21 +173,7 @@ run_web_mode() {
     return "$chromium_rc"
 }
 
-mode="$MODE_DEFAULT"
-if detected_mode="$(read_mode_from_cmdline 2>/dev/null)"; then
-    mode="$detected_mode"
-elif detected_mode="$(read_mode_from_tcconfig 2>/dev/null)"; then
-    mode="$detected_mode"
+if run_web_mode; then
+    exit 0
 fi
-
-log "Selected mode: $mode"
-
-if [ "$mode" = "web" ]; then
-    if run_web_mode; then
-        exit 0
-    fi
-    log "Web mode failed; not loading legacy UI from web boot path"
-    exit 1
-fi
-
-exec /usr/bin/thinclient
+exit 1

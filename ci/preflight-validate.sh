@@ -136,7 +136,6 @@ shell_files=(
   tcfiles/profile
   tcfiles/recovery
   tcfiles/set-hostname
-  tcfiles/thinclient
 )
 
 shopt -s nullglob

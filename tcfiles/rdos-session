@@ -1,62 +1,11 @@
 #!/bin/bash
 set -u
 
-MODE_DEFAULT="web"
 SESSION_LOG="${HOME}/.session-launch.log"
 fail_count=0
 
 log() {
     printf '[rdos-session] %s\n' "$*"
-}
-
-read_mode_from_cmdline() {
-    local token
-    local cmdline
-
-    if [ ! -r /proc/cmdline ]; then
-        return 1
-    fi
-
-    cmdline="$(< /proc/cmdline)"
-    for token in $cmdline; do
-        case "$token" in
-            rdos.ui=web)
-                printf '%s\n' "web"
-                return 0
-                ;;
-            rdos.ui=legacy)
-                printf '%s\n' "legacy"
-                return 0
-                ;;
-        esac
-    done
-
-    return 1
-}
-
-read_mode_from_tcconfig() {
-    local key
-    local value
-    local cfg_path="${HOME}/tcconfig"
-
-    [ -r "$cfg_path" ] || return 1
-
-    while IFS='=' read -r key value || [ -n "$key" ]; do
-        [ -z "$key" ] && continue
-        case "$key" in
-            ui_mode)
-                value="${value#\"}"
-                value="${value%\"}"
-                value="${value,,}"
-                if [ "$value" = "web" ] || [ "$value" = "legacy" ]; then
-                    printf '%s\n' "$value"
-                    return 0
-                fi
-                ;;
-        esac
-    done < "$cfg_path"
-
-    return 1
 }
 
 start_udiskie() {
@@ -71,37 +20,9 @@ start_udiskie() {
     udiskie >/dev/null 2>&1 &
 }
 
-start_overlay() {
-    if ! command -v /usr/bin/tc-overlay-daemon >/dev/null 2>&1; then
-        return 0
-    fi
-
-    if pgrep -u "$(id -u)" -x tc-overlay-daemon >/dev/null 2>&1; then
-        return 0
-    fi
-
-    /usr/bin/tc-overlay-daemon -tcconfig="${HOME}/tcconfig" -log="${HOME}/.tc-overlay.log" >/dev/null 2>&1 &
-}
-
 run_session() {
-    local mode="$MODE_DEFAULT"
-
-    if detected_mode="$(read_mode_from_cmdline 2>/dev/null)"; then
-        mode="$detected_mode"
-    elif detected_mode="$(read_mode_from_tcconfig 2>/dev/null)"; then
-        mode="$detected_mode"
-    fi
-
-    log "Selected mode: $mode"
     start_udiskie
-
-    if [ "$mode" = "web" ]; then
-        /usr/bin/tc-ui-launch >>"$SESSION_LOG" 2>&1
-        return $?
-    fi
-
-    start_overlay
-    /usr/bin/fvwm >>"$SESSION_LOG" 2>&1
+    /usr/bin/tc-ui-launch >>"$SESSION_LOG" 2>&1
     return $?
 }
 

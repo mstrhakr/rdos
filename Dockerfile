@@ -78,9 +78,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
-        xterm xinit x11-xserver-utils libxcb1 \
+        xterm x11-xserver-utils libxcb1 \
         xserver-xorg-core xserver-xorg-video-all xserver-xorg-input-all \
-        fvwm yad light feh \
+        yad \
         lightdm lightdm-gtk-greeter \
         chromium \
         adwaita-icon-theme-legacy libfuse2
@@ -146,17 +146,14 @@ RUN --mount=type=bind,source=.,target=/build-context,ro \
         echo 'Optional Moonlight.AppImage not found; skipping moonlight install.'; \
     fi
 
-COPY tcfiles/thinclient /usr/bin/thinclient
 COPY --from=thinclient_go_builder /out/thinclient-go /usr/bin/thinclient-go
 COPY --from=tc_overlay_daemon_builder /out/tc-overlay-daemon /usr/bin/tc-overlay-daemon
 COPY tcfiles/tc-ui-launch /usr/bin/tc-ui-launch
-COPY tcfiles/tc-settings /usr/bin/tc-settings
 COPY tcfiles/tc-import-usb /usr/bin/tc-import-usb
 COPY tcfiles/tc-configure-network /usr/bin/tc-configure-network
 COPY tcfiles/tc-configure-wifi /usr/bin/tc-configure-wifi
 COPY tcfiles/tc-configure-wireguard /usr/bin/tc-configure-wireguard
 COPY tcfiles/tc-scan-wifi /usr/bin/tc-scan-wifi
-COPY tcfiles/tc-wifi-wizard /usr/bin/tc-wifi-wizard
 COPY tcfiles/tc-apply-wifi-request /usr/bin/tc-apply-wifi-request
 COPY tcfiles/set-hostname /usr/bin/set-hostname
 COPY tcfiles/auto-maintenance.debian /usr/bin/auto-maintenance
@@ -167,7 +164,6 @@ COPY tcfiles/tc-ota-usb-detect /usr/bin/tc-ota-usb-detect
 COPY tcfiles/ota-signing-public.pem /etc/rdos/ota-signing-public.pem
 COPY tcfiles/tc-health-check /usr/bin/tc-health-check
 COPY tcfiles/tc-ota-rollback /usr/bin/tc-ota-rollback
-COPY tcfiles/tc-set-background /usr/bin/tc-set-background
 COPY tcfiles/099_tc /etc/sudoers.d/099_tc
 COPY tcfiles/usb-access.rules /etc/udev/rules.d/usb-access.rules
 RUN chown root:root /etc/sudoers.d/099_tc && chmod 440 /etc/sudoers.d/099_tc
@@ -179,16 +175,13 @@ RUN chown root:root /etc/rdos/ota-signing-public.pem && chmod 0644 /etc/rdos/ota
     fi && \
     echo "OTA signing key fingerprint verified: $actual"
 RUN chmod +x \
-    /usr/bin/thinclient \
     /usr/bin/thinclient-go \
     /usr/bin/tc-ui-launch \
-    /usr/bin/tc-settings \
     /usr/bin/tc-import-usb \
     /usr/bin/tc-configure-network \
     /usr/bin/tc-configure-wifi \
     /usr/bin/tc-configure-wireguard \
     /usr/bin/tc-scan-wifi \
-    /usr/bin/tc-wifi-wizard \
     /usr/bin/tc-apply-wifi-request \
     /usr/bin/set-hostname \
         /usr/bin/auto-maintenance \
@@ -197,13 +190,9 @@ RUN chmod +x \
         /usr/bin/tc-ota-import-usb \
         /usr/bin/tc-ota-usb-detect \
         /usr/bin/tc-health-check \
-        /usr/bin/tc-ota-rollback \
-        /usr/bin/tc-set-background
+        /usr/bin/tc-ota-rollback
 # Allow mtr to send raw ICMP packets without root (capability survives into the final image)
 RUN setcap cap_net_raw+ep /usr/bin/mtr-packet
-
-RUN install -d -m 755 /usr/share/rdos
-COPY tcfiles/wallpaper-default.png /usr/share/rdos/wallpaper-default.png
 
 RUN mkdir -p /etc/systemd/system/serial-getty@ttyS0.service.d
 COPY tcfiles/autologin-serial /etc/systemd/system/serial-getty@ttyS0.service.d/override.conf
@@ -258,10 +247,8 @@ COPY tcfiles/rdos-session /usr/bin/rdos-session
 
 RUN useradd -ms /bin/bash thinclient -G video,audio,netdev,render,cdrom,plugdev
 
-COPY tcfiles/.fvwm /home/thinclient/.fvwm
 COPY tcfiles/bashrc /home/thinclient/.bashrc
 COPY tcfiles/profile /home/thinclient/.profile
-COPY tcfiles/xinitrc /home/thinclient/.xinitrc
 COPY Version /tcversion
 
 # Block stock files from being tampered with to harden even more
