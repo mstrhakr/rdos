@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=RDOS
+Comment=RDOS thin client session
+Exec=/usr/bin/rdos-session
+Type=Application
+DesktopNames=RDOS
+X-LightDM-DesktopName=RDOS

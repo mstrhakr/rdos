@@ -77,10 +77,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+    DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
         xterm xinit x11-xserver-utils libxcb1 \
         xserver-xorg-core xserver-xorg-video-all xserver-xorg-input-all \
         fvwm yad light feh \
+        lightdm lightdm-gtk-greeter \
         chromium \
         adwaita-icon-theme-legacy libfuse2
 
@@ -204,19 +205,10 @@ RUN setcap cap_net_raw+ep /usr/bin/mtr-packet
 RUN install -d -m 755 /usr/share/rdos
 COPY tcfiles/wallpaper-default.png /usr/share/rdos/wallpaper-default.png
 
-RUN mkdir -p /etc/systemd/system/getty@tty1.service.d
-COPY tcfiles/autologin /etc/systemd/system/getty@tty1.service.d/override.conf
-RUN chmod 0644 /etc/systemd/system/getty@tty1.service.d/override.conf
-RUN systemctl enable getty@tty1.service
-
 RUN mkdir -p /etc/systemd/system/serial-getty@ttyS0.service.d
 COPY tcfiles/autologin-serial /etc/systemd/system/serial-getty@ttyS0.service.d/override.conf
 RUN chmod 0644 /etc/systemd/system/serial-getty@ttyS0.service.d/override.conf
 RUN systemctl enable serial-getty@ttyS0.service
-
-RUN mkdir -p /etc/systemd/system/console-getty.service.d
-COPY tcfiles/autologin-console /etc/systemd/system/console-getty.service.d/override.conf
-RUN chmod 0644 /etc/systemd/system/console-getty.service.d/override.conf
 
 COPY tcfiles/tc-copyconfig.service /etc/systemd/system/tc-copyconfig.service
 RUN chmod 0644 /etc/systemd/system/tc-copyconfig.service
@@ -253,8 +245,12 @@ COPY tcfiles/chromium-policies/managed/rdos-kiosk.json /etc/chromium/policies/ma
 COPY tcfiles/chromium-policies/managed/rdos-kiosk.json /etc/chromium-browser/policies/managed/rdos-kiosk.json
 COPY tcfiles/99-rdos-ota-usb.rules /etc/udev/rules.d/99-rdos-ota-usb.rules
 
+RUN install -d -m 755 /etc/lightdm/lightdm.conf.d /usr/share/xsessions
 COPY tcfiles/xorg.conf /etc/X11/xorg.conf.d/thinclient.conf
 COPY tcfiles/Xwrapper.config /etc/X11/Xwrapper.config
+COPY tcfiles/lightdm-rdos.conf /etc/lightdm/lightdm.conf.d/50-rdos.conf
+COPY tcfiles/rdos.desktop /usr/share/xsessions/rdos.desktop
+COPY tcfiles/rdos-session /usr/bin/rdos-session
 
 #This line is for pipewire, because pipewire has limited mic support its currently replaced with pulseaudio
 #Pulseaudio has the auto switch behavior by default
@@ -270,6 +266,10 @@ COPY Version /tcversion
 
 # Block stock files from being tampered with to harden even more
 RUN chown -R root:thinclient /home/thinclient/ && chmod 1775 /home/thinclient/
+RUN chmod 0644 /etc/lightdm/lightdm.conf.d/50-rdos.conf /usr/share/xsessions/rdos.desktop && \
+    chmod 0755 /usr/bin/rdos-session && \
+    systemctl enable lightdm.service && \
+    systemctl set-default graphical.target
 
 USER thinclient
 WORKDIR /home/thinclient
