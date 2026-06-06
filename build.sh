@@ -161,6 +161,7 @@ extract_image_rootfs() {
     local target_dir="$2"
     local cid=""
 
+    # shellcheck disable=SC2329
     cleanup_extract_image_rootfs() {
         local cleanup_cid="${cid:-}"
         set +e
@@ -187,6 +188,7 @@ build_source_raw_image() {
     work_dir="$(mktemp -d /var/tmp/rdos-src.XXXXXX)"
     loop_dev=""
 
+    # shellcheck disable=SC2329
     cleanup_source_raw() {
         set +e
         umount -l "$work_dir/boot" 2>/dev/null || true
